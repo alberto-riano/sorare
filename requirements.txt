@@ -1,7 +1,6 @@
 bcrypt==5.0.0
 certifi==2025.11.12
 charset-normalizer==3.4.4
-et_xmlfile==2.0.0
 idna==3.11
 numpy==2.4.0
 openpyxl==3.1.5
