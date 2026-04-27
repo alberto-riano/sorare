@@ -7,7 +7,14 @@ node_modules/
 # IDE / OS
 .DS_Store
 .idea/
+.vscode/
 javascript/.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
 
 # Outputs
 output/
