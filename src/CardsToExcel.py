@@ -4,7 +4,7 @@ from openpyxl import Workbook
 import re
 
 
-def read_config(config_path="../config.txt"):
+def read_config(config_path="./config.txt"):
     """Lee las variables del archivo config.txt"""
     config = {}
     with open(config_path, 'r', encoding='utf-8') as f:

@@ -3,7 +3,7 @@ import bcrypt
 import os
 import re
 
-config_path = '../config.txt'
+config_path = './config.txt'
 
 def read_config():
     """Lee las variables del archivo config.txt"""
