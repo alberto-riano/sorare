@@ -14,7 +14,7 @@ from sorare_utils import build_headers, fetch_exchange_rates, get_min_price_eur
 # CONFIGURACIÓN
 # ============================================================
 # Número de cartas a las que consultar el precio (primeras N filas)
-NUM_CARTAS_A_CONSULTAR = 10
+NUM_CARTAS_A_CONSULTAR = 710
 
 # Ruta al Excel de entrada (generado por CardsToExcel.py)
 EXCEL_INPUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'output', 'rare_cards.xlsx')

@@ -1,0 +1,33 @@
+# telegram_alert_settings.txt
+# Configuración del script src/TelegramPriceAlert.py
+# Formato: KEY=VALUE (una por línea). Las líneas que empiezan por # se ignoran.
+
+# --- Comportamiento de avisos ---
+# NOTIFY_MODE:
+#   all  => En cada ejecución manda TODAS las cartas cuyo precio < umbral.
+#   edge => Solo manda cuando el jugador pasa de >=umbral a <umbral.
+#   drop => Como edge, pero si ya está en alerta vuelve a avisar si el mínimo baja X€.
+NOTIFY_MODE=all
+
+# Solo se usa si NOTIFY_MODE=drop
+NOTIFY_DROP_EUR=1.0
+
+# Si true, cuando toca avisar manda TODAS las cartas < umbral; si false manda solo la más barata.
+SEND_ALL_OFFERS_BELOW_THRESHOLD=true
+
+# --- Mensajes ---
+# Mensaje “inicio de ejecución” con hora
+SEND_RUN_START_MESSAGE=true
+
+# Si true: fuerza preview/foto del jugador (link oculto) pero muestra solo link de compra
+INCLUDE_PLAYER_PREVIEW=true
+
+# --- Filtros ---
+RARITY=rare
+# Ej: 2025 para 2025-26. Vacío/None para cualquier temporada
+SEASON_YEAR=
+
+# --- Ficheros ---
+DESIRED_PLAYERS_FILE=desired_players.txt
+REFERENCE_EXCEL_FILE=output/rare_cards.xlsx
+STATE_FILE=output/telegram_alert_state.json

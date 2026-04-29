@@ -58,12 +58,47 @@ def graphql_request(query, variables=None, headers=None):
     payload = {'query': query}
     if variables:
         payload['variables'] = variables
-    resp = requests.post(SORARE_API_URL, json=payload, headers=headers)
+    resp = requests.post(SORARE_API_URL, json=payload, headers=headers, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     if 'errors' in data:
         raise RuntimeError(f"GraphQL errors: {data['errors']}")
     return data['data']
+
+
+def search_players_by_name(query_text, headers=None):
+    """Busca jugadores por nombre usando `searchPlayers`.
+
+    Devuelve lista de dicts: {"slug": str, "displayName": str}.
+    """
+    query = '''
+    query SearchPlayers($query: String!) {
+      searchPlayers(query: $query) {
+        hits {
+          __typename
+          ... on ComposeTeamBenchCommonPlayer {
+            player {
+              slug
+              displayName
+            }
+          }
+        }
+      }
+    }
+    '''
+
+    data = graphql_request(query, {'query': query_text}, headers=headers)
+    hits = (data.get('searchPlayers') or {}).get('hits') or []
+    results = []
+    for hit in hits:
+        player = hit.get('player') if isinstance(hit, dict) else None
+        if not player:
+            continue
+        slug = player.get('slug')
+        display_name = player.get('displayName')
+        if slug and display_name:
+            results.append({'slug': slug, 'displayName': display_name})
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -235,14 +270,14 @@ def fetch_exchange_rates():
         rates = r.json()['rates']
         usd_to_eur = 1 / rates['USD']
         gbp_to_eur = 1 / rates['GBP']
-    except Exception as e:
+    except (requests.RequestException, KeyError, ValueError, TypeError) as e:
         print(f"  Aviso: No se pudieron obtener tasas fiat, usando valores por defecto ({e})")
 
     try:
         r = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=eur', timeout=5)
         r.raise_for_status()
         eth_to_eur = r.json()['ethereum']['eur']
-    except Exception as e:
+    except (requests.RequestException, KeyError, ValueError, TypeError) as e:
         print(f"  Aviso: No se pudo obtener precio ETH, usando valor por defecto ({e})")
 
     return usd_to_eur, gbp_to_eur, eth_to_eur
@@ -337,6 +372,7 @@ def get_matching_offers(asset_id, headers=None, rates=None):
                     sort_price = float('inf')
                 matching.append({
                     'name': c['name'],
+                  'slug': c.get('slug'),
                     'serial': c['serialNumber'],
                     'season': c['seasonYear'],
                     'grade': c['grade'],
@@ -355,13 +391,13 @@ def get_min_price_eur(asset_id, headers=None, rates=None):
     para cartas de la misma rareza y jugador. Devuelve None si no hay ofertas.
     """
     try:
-        card, matching = get_matching_offers(asset_id, headers=headers, rates=rates)
+        _card, matching = get_matching_offers(asset_id, headers=headers, rates=rates)
         if not matching:
             return None
         cheapest_eur_cents = matching[0]['sort_price']
         if cheapest_eur_cents == float('inf'):
             return None
         return cheapest_eur_cents / 100
-    except Exception as e:
+    except (requests.RequestException, RuntimeError, KeyError, ValueError, TypeError) as e:
         print(f"  Error consultando precio para {asset_id[:20]}...: {e}")
         return None
