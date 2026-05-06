@@ -1,5 +1,5 @@
 # Secrets
-config.txt
+config/config.txt
 
 # Node
 node_modules/

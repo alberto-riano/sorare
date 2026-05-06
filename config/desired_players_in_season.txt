@@ -1,0 +1,6 @@
+# desired_players_in_season.txt
+# Formato: <nombre jugador> <umbral_eur> [nivel_min]
+# Esta lista se filtra a la temporada IN_SEASON_YEAR (ej: 2025 => 2025-26)
+courtois 100
+lamine yamal 700
+dani olmo 52

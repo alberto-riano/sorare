@@ -10,7 +10,7 @@ import sys
 import os
 
 SORARE_API_URL = "https://api.sorare.com/graphql"
-DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config.txt')
+DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'config.txt')
 
 
 # ---------------------------------------------------------------------------

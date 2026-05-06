@@ -5,26 +5,29 @@ Script SIMPLE - Solo muestra las cartas RARE que están EN LINEUP
 
 import requests
 import json
+import os
 
 SORARE_API_URL = "https://api.sorare.com/graphql"
 
 
-def read_config(config_path="../config.txt"):
+def read_config(config_path=None):
     """Lee las variables del archivo config.txt"""
-    config = {}
+    if config_path is None:
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'config.txt')
+    config_map = {}
     with open(config_path, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
             if line and '=' in line:
                 key, value = line.split('=', 1)
-                config[key.strip()] = value.strip()
-    return config
+                config_map[key.strip()] = value.strip()
+    return config_map
 
 
 # Leer configuración
-config = read_config()
-JWT_TOKEN = config.get('JWT_TOKEN')
-JWT_AUD = config.get('JWT_AUD', 'myapp')
+cfg = read_config()
+JWT_TOKEN = cfg.get('JWT_TOKEN')
+JWT_AUD = cfg.get('JWT_AUD', 'myapp')
 
 if not JWT_TOKEN:
     print("❌ Error: JWT_TOKEN no encontrado en config.txt")
@@ -43,7 +46,7 @@ print("🔍 Buscando cartas RARE en alineaciones...\n")
 
 # Función para obtener TODAS las cartas con paginación
 def get_all_rare_cards():
-    all_cards = []
+    all_cards_list = []
     has_next_page = True
     cursor = None
     page = 1
@@ -88,7 +91,8 @@ def get_all_rare_cards():
         response = requests.post(
             SORARE_API_URL,
             headers=headers,
-            json={"query": query}
+            json={"query": query},
+            timeout=30,
         )
 
         if response.status_code != 200:
@@ -99,7 +103,7 @@ def get_all_rare_cards():
         data = response.json()
 
         if "errors" in data:
-            print(f"\n❌ Error GraphQL:")
+            print("\n❌ Error GraphQL:")
             print(json.dumps(data['errors'], indent=2))
             exit(1)
 
@@ -107,7 +111,7 @@ def get_all_rare_cards():
         cards_data = user_data.get("cards", {})
 
         cards = cards_data.get("nodes", [])
-        all_cards.extend(cards)
+        all_cards_list.extend(cards)
 
         page_info = cards_data.get("pageInfo", {})
         has_next_page = page_info.get("hasNextPage", False)
@@ -120,9 +124,9 @@ def get_all_rare_cards():
             print("\n⚠️  Alcanzado límite de páginas")
             break
 
-    print(f"\n✅ Cargadas {len(all_cards)} cartas RARE en total")
+    print(f"\n✅ Cargadas {len(all_cards_list)} cartas RARE en total")
 
-    return all_cards, user_data.get("blockchainCardsInLineups", []), user_data.get("nickname")
+    return all_cards_list, user_data.get("blockchainCardsInLineups", []), user_data.get("nickname")
 
 
 # Obtener todas las cartas
@@ -172,7 +176,7 @@ for i, card in enumerate(cards_in_lineup, 1):
     print("-" * 100)
 
 print(f"\n{'=' * 100}")
-print(f"📋 RESUMEN POR POSICIÓN")
+print("📋 RESUMEN POR POSICIÓN")
 print(f"{'=' * 100}")
 
 # Contar por posición

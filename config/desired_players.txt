@@ -1,0 +1,14 @@
+# desired_players.txt
+# Formato: <nombre jugador> <umbral_eur> [nivel_min]
+# Ejemplos:
+#   eder militao 11
+#   eder militao 11 8
+#   slug:kylian-mbappe-lottin 360 7
+# Ejemplos:
+eder militao 13 8
+eric garcia 25
+kylian mbappe 340 7
+arda güler 110
+courtois 83
+dani olmo 24
+lamine yamal 400

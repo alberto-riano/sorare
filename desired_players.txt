@@ -1,6 +1,0 @@
-# desired_players.txt
-# Formato: <nombre jugador> <umbral_eur>
-# Ejemplos:
-eder militao 12
-eric garcia 30
-kylian mbappe 420

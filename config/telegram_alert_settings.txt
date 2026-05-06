@@ -19,6 +19,11 @@ SEND_ALL_OFFERS_BELOW_THRESHOLD=true
 # Mensaje “inicio de ejecución” con hora
 SEND_RUN_START_MESSAGE=true
 
+# Si true, agrupa TODO en un único mensaje de Telegram por ejecución.
+# Si false, envía 1 mensaje por jugador (recomendado para que la preview/foto sea por jugador).
+# Nota: si el texto se pasa del límite de Telegram, se partirá en varios mensajes.
+SEND_SINGLE_MESSAGE=false
+
 # Si true: fuerza preview/foto del jugador (link oculto) pero muestra solo link de compra
 INCLUDE_PLAYER_PREVIEW=true
 
@@ -27,7 +32,6 @@ RARITY=rare
 # Ej: 2025 para 2025-26. Vacío/None para cualquier temporada
 SEASON_YEAR=
 
-# --- Ficheros ---
-DESIRED_PLAYERS_FILE=desired_players.txt
-REFERENCE_EXCEL_FILE=output/rare_cards.xlsx
-STATE_FILE=output/telegram_alert_state.json
+# --- In Season ---
+# Nota: IN_SEASON_YEAR es el año inicial de temporada (2025 => 2025-26)
+IN_SEASON_YEAR=2025

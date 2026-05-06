@@ -3,7 +3,7 @@ import bcrypt
 import os
 import re
 
-config_path = './config.txt'
+config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'config.txt')
 
 def read_config():
     """Lee las variables del archivo config.txt"""
@@ -39,7 +39,7 @@ graphql_url = 'https://api.sorare.com/graphql'
 
 def get_salt(email):
     print(f"Obteniendo salt para {email}...")
-    resp = requests.get(f'https://api.sorare.com/api/v1/users/{email}')
+    resp = requests.get(f'https://api.sorare.com/api/v1/users/{email}', timeout=30)
     resp.raise_for_status()
     salt = resp.json()['salt'].encode()
     print("Salt recibido:", salt)
@@ -74,7 +74,7 @@ def sign_in(input_data):
     '''
     variables = {"input": input_data}
     headers = {'content-type': 'application/json'}
-    resp = requests.post(graphql_url, json={'query': query, 'variables': variables}, headers=headers)
+    resp = requests.post(graphql_url, json={'query': query, 'variables': variables}, headers=headers, timeout=30)
     resp.raise_for_status()
     return resp.json()['data']['signIn']
 
