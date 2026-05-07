@@ -7,7 +7,7 @@
 # Ejemplos:
 eder militao 13 8
 eric garcia 25
-kylian mbappe 340 7
+kylian mbappe 330 7
 arda güler 110
 courtois 83
 dani olmo 24
