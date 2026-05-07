@@ -1,0 +1,166 @@
+# jugadores_la_liga.txt
+# Jugadores relevantes de La Liga a monitorizar para chollos
+# Formato: slug del jugador (uno por línea)
+# Puedes añadir/quitar jugadores libremente
+# NOTA: los números tipo 19920421 son fechas de nacimiento que Sorare usa para desambiguar
+# NOTA: el script busca ofertas/ventas de TODAS las colecciones (equipos) del jugador
+#
+# --- FC Barcelona ---
+lamine-yamal-20070713
+raphinha-raphael-dias-belloli
+robert-lewandowski
+pedri-pedro-gonzalez-lopez
+gavi-pablo-martin-paez-gavira
+ronald-araujo-da-silva
+jules-kounde
+dani-olmo-carvajal
+frenkie-de-jong
+marc-andre-ter-stegen
+fermin-lopez-marin
+pau-cubarsi-mendez
+alejandro-balde-martinez
+inigo-martinez-berridi
+eric-garcia-martret
+andreas-christensen
+marc-casado-lopez
+hector-fort-prat
+wojciech-szczesny
+ansu-fati-vieira
+#
+# --- Real Madrid ---
+jude-bellingham
+vinicius-junior-vinicius-jose-paixao-de-oliveira-junior
+kylian-mbappe-lottin
+rodrygo-silva-de-goes
+eder-militao
+antonio-rudiger
+federico-valverde
+thibaut-courtois
+eduardo-camavinga
+aurelien-tchouameni
+dani-ceballos-fernandez
+lucas-vazquez-iglesias
+brahim-diaz-20990810
+arda-guler
+luka-modric
+dani-carvajal-ramos
+david-alaba
+nacho-fernandez-iglesias
+#
+# --- Atlético de Madrid ---
+antoine-griezmann
+julian-alvarez
+alexander-sorloth
+rodrigo-de-paul
+jan-oblak
+marcos-llorente-moreno
+pablo-barrios-rivas
+nahuel-molina-lucero
+jose-maria-gimenez-de-vargas
+conor-gallagher
+samuel-lino-santos
+axel-witsel
+koke-resurreccion-merodio
+angel-correa
+reinildo-mandava
+#
+# --- Real Sociedad ---
+martin-zubimendi
+mikel-oyarzabal
+takefusa-kubo
+mikel-merino-zazon
+brais-mendez-portela
+igor-zubeldia-elorza
+robin-le-normand
+alexander-isak-20000921
+#
+# --- Athletic Club ---
+nico-williams-arthuer
+oihan-sancet-lloro
+inaki-williams-arthuer
+unai-simon-mendibil
+dani-vivian-moreno
+alex-berenguer-remiro
+iker-muniain-goni
+#
+# --- Villarreal ---
+alex-baena-rodriguez
+gerard-moreno-balaguero
+yeremy-pino-ceballos
+pau-torres-20170126
+nicolas-pepe
+dani-parejo-munoz
+#
+# --- Real Betis ---
+isco-alarcon-suarez-19920421
+giovani-lo-celso
+ayoze-perez-gutierrez
+pablo-fornals-malla
+nabil-fekir
+william-carvalho
+marc-bartra-aregall
+guido-rodriguez
+ez-abde
+#
+# --- Girona ---
+viktor-tsygankov
+bryan-gil-salvatierra
+miguel-gutierrez-ortega
+abel-ruiz-ortega
+daley-blind
+artem-dovbyk
+#
+# --- Mallorca ---
+dani-rodriguez-18890221
+muriqi-vedat-muriqi
+antonio-raillo-arenas
+sergi-darder-moll
+#
+# --- Valencia ---
+hugo-duro-perales
+diego-lopez-147
+pepelu-pedro-luis-lopez-ruiz
+#
+# --- Getafe ---
+borja-mayoral-moya
+mason-greenwood
+#
+# --- Osasuna ---
+ante-budimir
+lucas-torro-marset
+aimar-oroz-zubiri
+#
+# --- Rayo Vallecano ---
+isi-palazon-19960328
+radamel-falcao-garcia-zarate
+alvaro-garcia-tenorio
+#
+# --- Celta ---
+iago-aspas-juncal
+oscar-mingueza-garcia
+hugo-alvarez-fernandez
+#
+# --- Sevilla ---
+loic-bade
+lukebakio-doku-20970524
+jesus-navas-gonzalez
+isaac-romero-ramos
+ivan-rakitic
+youssef-en-nesyri
+#
+# --- Espanyol ---
+javi-puado-diaz
+jofre-carreras-antoli
+#
+# --- Las Palmas ---
+alberto-moleiro-rios
+sandro-ramirez-castillo
+#
+# --- Alavés ---
+kike-garcia-martinez
+#
+# --- Leganés ---
+juan-cruz-gutierrez
+#
+# --- Valladolid ---
+raul-moro-prescoli

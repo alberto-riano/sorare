@@ -30,10 +30,14 @@ function readConfig(filename = CONFIG_PATH) {
 }
 
 // --- Parámetros de entrada ---
-const [, , AUCTION_ID, BID_AMOUNT_CENTS] = process.argv;
+const args = process.argv.slice(2);
+const USE_CREDIT = args.includes("--use-credit");
+const positionalArgs = args.filter((a) => !a.startsWith("--"));
+const [AUCTION_ID, BID_AMOUNT_CENTS] = positionalArgs;
+
 if (!AUCTION_ID || !BID_AMOUNT_CENTS) {
   console.error(
-    "Uso: node pujar_carta.js <auction_id> <puja_en_centimos_EUR>"
+    "Uso: node pujar_carta.js <auction_id> <puja_en_centimos_EUR> [--use-credit]"
   );
   console.error("");
   console.error("Ejemplo:");
@@ -41,6 +45,7 @@ if (!AUCTION_ID || !BID_AMOUNT_CENTS) {
     "  node pujar_carta.js EnglishAuction:81aec268-f12f-462c-b6bf-0a6f4197d2f9 800"
   );
   console.error("  (pujar 8.00€ en la subasta indicada)");
+  console.error("  --use-credit: usar créditos de conversión disponibles");
   process.exit(1);
 }
 
@@ -386,14 +391,20 @@ async function bidOnAuction(auctionId, bidAmountCents) {
 
   // 3. Preparar la puja
   console.log("📝 Preparando puja...");
+  if (USE_CREDIT) {
+    console.log("  💳 Usando créditos de conversión disponibles");
+  }
+  const settlementInfo = {
+    currency: CURRENCY,
+    paymentMethod: "WALLET",
+    exchangeRateId: exchangeRateId,
+    ...(USE_CREDIT && { useAvailableCredits: true }),
+  };
+
   const prepareBidInput = {
     auctionId: auctionId,
     amount: bidAmountCents.toString(),
-    settlementInfo: {
-      currency: CURRENCY,
-      paymentMethod: "WALLET",
-      exchangeRateId: exchangeRateId,
-    },
+    settlementInfo,
   };
 
   const prepareBidData = await client.request(PREPARE_BID_MUTATION, {
@@ -427,11 +438,7 @@ async function bidOnAuction(auctionId, bidAmountCents) {
     approvals,
     auctionId: auctionId,
     amount: bidAmountCents.toString(),
-    settlementInfo: {
-      currency: CURRENCY,
-      paymentMethod: "WALLET",
-      exchangeRateId: exchangeRateId,
-    },
+    settlementInfo,
     clientMutationId: crypto.randomBytes(8).toString("hex"),
   };
 

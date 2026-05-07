@@ -2,11 +2,12 @@
 # ============================================================
 # CONFIGURACIÓN 
 # ============================================================
-DEFAULT_IDENTIFIER = "https://sorare.com/football/market/shop/auctions?p=2&rarity=rare&lf=seasonal-spain&card=francisco-roman-alarcon-suarez-2025-rare-79"   # Asset ID (0x...) o URL de Sorare
-DEFAULT_EUROS = 13.6       # Cantidad en euros
-DEFAULT_HORA = "11:21:52"   # Hora España HH:MM o HH:MM:SS
-NOW = False                   # True = pujar YA, ignora la hora
-BG = True                    # True = ejecutar en segundo plano (puedes cerrar VS Code)
+DEFAULT_IDENTIFIER = "https://sorare.com/football/players/karl-edouard-blaise-etta-eyong/cards?s=Lowest%20Price&rarity=rare&sale=true&is=true&card=karl-edouard-blaise-etta-eyong-2025-rare-88"
+DEFAULT_EUROS = 6       # Cantidad en euros
+DEFAULT_HORA = "13:27:12"   # Hora España HH:MM o HH:MM:SS
+NOW = True                   # True = pujar YA, ignora la hora
+BG = False                    # True = ejecutar en segundo plano (puedes cerrar VS Code)
+USE_CREDIT = True             # True = usar créditos de conversión disponibles al pujar
 # ============================================================
 """
 Programa una puja en Sorare a una hora específica (hora España).
@@ -464,7 +465,9 @@ def monitor_auction(auction_id, headers, my_nickname, poll_interval=15):
 def execute_bid(auction_id, bid_cents):
     """Ejecuta la puja llamando al script de Node.js."""
     cmd = ['node', JS_SCRIPT, auction_id, str(bid_cents)]
-    log(f"Comando: node pujar_carta.js {auction_id} {bid_cents}")
+    if USE_CREDIT:
+        cmd.append('--use-credit')
+    log(f"Comando: node pujar_carta.js {auction_id} {bid_cents}{' --use-credit' if USE_CREDIT else ''}")
     print()
 
     result = subprocess.run(cmd, cwd=os.path.dirname(JS_SCRIPT), capture_output=False)
