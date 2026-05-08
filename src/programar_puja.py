@@ -2,11 +2,11 @@
 # ============================================================
 # CONFIGURACIÓN 
 # ============================================================
-DEFAULT_IDENTIFIER = "https://sorare.com/football/players/karl-edouard-blaise-etta-eyong/cards?s=Lowest%20Price&rarity=rare&sale=true&is=true&card=karl-edouard-blaise-etta-eyong-2025-rare-88"
-DEFAULT_EUROS = 6       # Cantidad en euros
-DEFAULT_HORA = "13:27:12"   # Hora España HH:MM o HH:MM:SS
-NOW = True                   # True = pujar YA, ignora la hora
-BG = False                    # True = ejecutar en segundo plano (puedes cerrar VS Code)
+DEFAULT_IDENTIFIER = "https://sorare.com/football/market/shop/auctions?rarity=rare&lf=seasonal-spain&card=andrei-florin-ratiu-2025-rare-91"
+DEFAULT_EUROS = 7.75       # Cantidad en euros
+DEFAULT_HORA = "11:14:59"   # Hora España HH:MM o HH:MM:SS
+NOW = False                   # True = pujar YA, ignora la hora
+BG = True                    # True = ejecutar en segundo plano (puedes cerrar VS Code)
 USE_CREDIT = True             # True = usar créditos de conversión disponibles al pujar
 # ============================================================
 """
