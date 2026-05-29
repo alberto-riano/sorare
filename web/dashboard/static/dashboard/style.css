@@ -106,6 +106,10 @@ nav a:hover {
   padding: 1.1rem 1.2rem;
 }
 
+body.sales-export-pending .sales-edit-panel {
+  display: none;
+}
+
 .hero h1 {
   margin: 0.2rem 0 0.5rem;
   font-size: clamp(1.45rem, 2.8vw, 2.25rem);
@@ -388,6 +392,17 @@ textarea {
   font-weight: 700;
 }
 
+.price-head-actions {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.btn-compact {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
+  line-height: 1.1;
+}
+
 .compact-table .data-table {
   min-width: 720px;
 }
@@ -401,19 +416,116 @@ textarea {
 }
 
 .confirm-card {
+  display: grid;
+  gap: 0.9rem;
   border: 1px dashed var(--line);
-  border-radius: 14px;
-  background: #fffef9;
-  padding: 0.8rem 0.9rem;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #fffef9, #f6fbfa);
+  padding: 1rem;
+}
+
+.confirm-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: flex-start;
+}
+
+.confirm-card-kicker {
+  margin: 0 0 0.15rem;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-family: "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .confirm-card h3 {
   margin-top: 0;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0;
+  font-size: 1.3rem;
 }
 
-.confirm-card p {
-  margin: 0.2rem 0;
+.confirm-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
+.confirm-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.confirm-chip-good {
+  border-color: #86efac;
+  color: var(--good);
+  background: #f0fdf4;
+}
+
+.confirm-stat-grid,
+.confirm-price-grid,
+.confirm-rays-row {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.confirm-stat-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.confirm-stat,
+.confirm-price-box,
+.confirm-rays-card {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.75rem 0.8rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid #ece5d5;
+}
+
+.confirm-stat span,
+.confirm-price-box span,
+.confirm-rays-card span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.confirm-stat strong,
+.confirm-price-box strong,
+.confirm-rays-card strong {
+  font-size: 1rem;
+}
+
+.confirm-rays-row {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.confirm-rays-card-accent {
+  background: linear-gradient(135deg, #ecfeff, #f0fdfa);
+  border-color: #99f6e4;
+}
+
+.confirm-price-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.confirm-price-box-sale {
+  background: linear-gradient(135deg, #0f766e, #115e59);
+  border-color: transparent;
+}
+
+.confirm-price-box-sale span,
+.confirm-price-box-sale strong {
+  color: #fff;
 }
 
 .processing-indicator {
@@ -504,5 +616,13 @@ pre {
   .table-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .confirm-card-head {
+    flex-direction: column;
+  }
+
+  .confirm-chip-row {
+    justify-content: flex-start;
   }
 }

@@ -131,11 +131,13 @@ def load_sales_rows(excel_path: Path) -> list[dict[str, Any]]:
             "jugador": str(player_name),
             "asset_id": str(asset_id),
             "precio_venta": _to_float(ws.cell(row=row, column=columns.get("Precio venta (€)", 2)).value),
-            "min_offer_90": str(_read_cell(ws, row, columns, "Oferta mínima 90%") or "").strip().lower() in {"si", "sí", "yes", "true"},
             "equipo": _read_cell(ws, row, columns, "Equipo"),
+            "posicion": _read_cell(ws, row, columns, "Posición"),
+            "nivel": _read_cell(ws, row, columns, "Nivel"),
             "temporada": _read_cell(ws, row, columns, "Temporada"),
             "liga": _read_cell(ws, row, columns, "Liga"),
             "coleccion": _read_cell(ws, row, columns, "Colección"),
+            "rayos_coleccion": _to_float(_read_cell(ws, row, columns, "Rayos colección")),
             "rayos_carta": _to_float(_read_cell(ws, row, columns, "Rayos carta")) or 0,
             "rayos_tras_venta": _to_float(_read_cell(ws, row, columns, "Rayos tras venta")),
             "precio_medio": _to_float(_read_cell(ws, row, columns, "Precio Medio Ventas (€)")),
@@ -163,12 +165,8 @@ def save_prices(excel_path: Path, request_data: dict[str, Any]) -> int:
     ws = wb.active
     columns = _header_map(ws)
     price_col = columns.get("Precio venta (€)")
-    min_offer_col = columns.get("Oferta mínima 90%")
     if not price_col:
         return 0
-    if not min_offer_col:
-        min_offer_col = ws.max_column + 1
-        ws.cell(row=1, column=min_offer_col, value="Oferta mínima 90%")
 
     updates = 0
     for key, raw in request_data.items():
@@ -192,15 +190,31 @@ def save_prices(excel_path: Path, request_data: dict[str, Any]) -> int:
         cell.value = round(value, 2)
         updates += 1
 
-    marked_rows = {
-        int(v) for v in request_data.getlist("min_offer_rows") if str(v).isdigit()
-    } if hasattr(request_data, "getlist") else set()
-
-    for row in range(2, ws.max_row + 1):
-        ws.cell(row=row, column=min_offer_col, value="Sí" if row in marked_rows else "No")
-
     wb.save(excel_path)
     return updates
+
+
+def reset_prices(excel_path: Path) -> int:
+    if not excel_path.exists():
+        return 0
+
+    wb = load_workbook(excel_path)
+    ws = wb.active
+    columns = _header_map(ws)
+    price_col = columns.get("Precio venta (€)")
+    if not price_col:
+        return 0
+
+    cleared = 0
+    for row in range(2, ws.max_row + 1):
+        cell = ws.cell(row=row, column=price_col)
+        if cell.value in (None, ""):
+            continue
+        cell.value = ""
+        cleared += 1
+
+    wb.save(excel_path)
+    return cleared
 
 def rows_ready_to_sell(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [row for row in rows if row.get("precio_venta") is not None]
@@ -209,6 +223,8 @@ def rows_ready_to_sell(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def execute_sales(paths: SorarePaths, rows: list[dict[str, Any]], selected_rows: list[int], days: int) -> SaleExecutionResult:
     js_script = paths.repo_root / "javascript" / "vender_carta.js"
     selected = {int(v) for v in selected_rows}
+    _ = days
+    sale_days = 2
 
     ok = 0
     fail = 0
@@ -226,8 +242,7 @@ def execute_sales(paths: SorarePaths, rows: list[dict[str, Any]], selected_rows:
             continue
 
         price_cents = int(round(float(price) * 100))
-        min_receive_cents = int(round(price_cents * 0.9)) if row.get("min_offer_90") else 0
-        cmd = ["node", str(js_script), row["asset_id"], str(price_cents), str(days), str(min_receive_cents)]
+        cmd = ["node", str(js_script), row["asset_id"], str(price_cents), str(sale_days), "0"]
         result = _run_command(cmd, paths.repo_root, timeout=60)
         if result.exit_code == 0:
             ok += 1

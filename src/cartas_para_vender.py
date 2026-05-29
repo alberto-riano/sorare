@@ -206,12 +206,12 @@ def write_excel(cards_data, output_path, show_vault=False):
     ws.title = "Cartas para vender"
 
     # Cabeceras
-    # Sin --vault: A=Jugador, B=Precio venta, C=Oferta mínima 90%, D=Precio Mín Classic, E=Precio Mín In Season,
-    #              F=Equipo, G=Nivel, H=Temporada, I=Posición, J=Liga, K=In Season,
-    #              L=Colección, M=Rayos colección, N=Rayos carta, O=Rayos tras venta,
-    #              P=Precio Medio Ventas, Q=assetId
-    # Con --vault: igual pero P=Precio Medio Ventas, Q=Vault, R=assetId
-    headers_row = ['Jugador', 'Precio venta (€)', 'Oferta mínima 90%', 'Precio Mín Classic (€)', 'Precio Mín In Season (€)',
+    # Sin --vault: A=Jugador, B=Precio venta, C=Precio Mín Classic, D=Precio Mín In Season,
+    #              E=Equipo, F=Nivel, G=Temporada, H=Posición, I=Liga, J=In Season,
+    #              K=Colección, L=Rayos colección, M=Rayos carta, N=Rayos tras venta,
+    #              O=Precio Medio Ventas, P=assetId
+    # Con --vault: igual pero P=Vault, Q=assetId
+    headers_row = ['Jugador', 'Precio venta (€)', 'Precio Mín Classic (€)', 'Precio Mín In Season (€)',
                    'Equipo', 'Nivel', 'Temporada', 'Posición', 'Liga', 'In Season',
                    'Colección', 'Rayos colección', 'Rayos carta', 'Rayos tras venta',
                    'Precio Medio Ventas (€)']
@@ -232,35 +232,32 @@ def write_excel(cards_data, output_path, show_vault=False):
         ws.cell(row=i, column=1, value=card['name'])
         # col 2: Precio venta (vacía, el usuario la rellena)
         ws.cell(row=i, column=2, value='')
-        # col 3: Oferta mínima (checkbox lógico en web)
-        ws.cell(row=i, column=3, value='No')
-
-        classic_cell = ws.cell(row=i, column=4)
+        classic_cell = ws.cell(row=i, column=3)
         if card['min_price_classic'] is not None:
             classic_cell.value = card['min_price_classic']
             classic_cell.number_format = '#,##0.00 €'
         else:
             classic_cell.value = "Sin ofertas"
 
-        inseason_cell = ws.cell(row=i, column=5)
+        inseason_cell = ws.cell(row=i, column=4)
         if card['min_price_inseason'] is not None:
             inseason_cell.value = card['min_price_inseason']
             inseason_cell.number_format = '#,##0.00 €'
         else:
             inseason_cell.value = "Sin ofertas"
 
-        ws.cell(row=i, column=6, value=card['team'])
-        ws.cell(row=i, column=7, value=card['grade'])
-        ws.cell(row=i, column=8, value=card['season'])
-        ws.cell(row=i, column=9, value=card['position'])
-        ws.cell(row=i, column=10, value=card['league'])
-        ws.cell(row=i, column=11, value='Sí' if card.get('in_season') else 'No')
-        ws.cell(row=i, column=12, value=card['collection_name'])
-        ws.cell(row=i, column=13, value=card['collection_rayos'])
-        ws.cell(row=i, column=14, value=card['card_rayos'])
-        ws.cell(row=i, column=15, value=card['rayos_col_after'])
+        ws.cell(row=i, column=5, value=card['team'])
+        ws.cell(row=i, column=6, value=card['grade'])
+        ws.cell(row=i, column=7, value=card['season'])
+        ws.cell(row=i, column=8, value=card['position'])
+        ws.cell(row=i, column=9, value=card['league'])
+        ws.cell(row=i, column=10, value='Sí' if card.get('in_season') else 'No')
+        ws.cell(row=i, column=11, value=card['collection_name'])
+        ws.cell(row=i, column=12, value=card['collection_rayos'])
+        ws.cell(row=i, column=13, value=card['card_rayos'])
+        ws.cell(row=i, column=14, value=card['rayos_col_after'])
 
-        avg_cell = ws.cell(row=i, column=16)
+        avg_cell = ws.cell(row=i, column=15)
         if card['avg_price'] is not None:
             avg_cell.value = card['avg_price']
             avg_cell.number_format = '#,##0.00 €'
@@ -273,7 +270,7 @@ def write_excel(cards_data, output_path, show_vault=False):
                 start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
 
         # Columna "Vault" (sólo si show_vault)
-        col_offset = 17
+        col_offset = 16
         if show_vault:
             vault_cell = ws.cell(row=i, column=col_offset, value='Sí' if card['in_vault'] else '')
             if card['in_vault']:
@@ -284,9 +281,9 @@ def write_excel(cards_data, output_path, show_vault=False):
 
     # Ajustar anchos
     if show_vault:
-        widths = [25, 16, 16, 20, 20, 22, 8, 12, 14, 20, 10, 30, 16, 12, 16, 22, 8, 20]
+        widths = [25, 16, 20, 20, 22, 8, 12, 14, 20, 10, 30, 16, 12, 16, 22, 8, 20]
     else:
-        widths = [25, 16, 16, 20, 20, 22, 8, 12, 14, 20, 10, 30, 16, 12, 16, 22, 20]
+        widths = [25, 16, 20, 20, 22, 8, 12, 14, 20, 10, 30, 16, 12, 16, 22, 20]
     for col, w in enumerate(widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = w
 

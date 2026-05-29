@@ -70,7 +70,7 @@
 {% endif %}
 
 {% if rows %}
-<form method="post" class="panel reveal" style="animation-delay: 160ms;">
+<form method="post" class="panel reveal sales-edit-panel" id="salesEditPanel" style="animation-delay: 160ms;">
   {% csrf_token %}
   <input type="hidden" name="rarity" value="{{ selected_rarity }}">
   <div class="table-head">
@@ -85,14 +85,17 @@
           <th>Equipo</th>
           <th>Temporada</th>
           <th>Liga</th>
-          <th>In Season</th>
           <th>Rayos carta</th>
           <th>Rayos tras venta</th>
           <th>Min classic</th>
           <th>Min in-season</th>
           <th>Media ventas</th>
-          <th>Precio venta</th>
-          <th>Oferta mínima 90%</th>
+          <th>
+            <div class="price-head-actions">
+              <button class="btn btn-secondary btn-compact" type="submit" name="action" value="reset_prices">Reset precios</button>
+              <span>Precio venta</span>
+            </div>
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -102,7 +105,6 @@
             <td>{{ row.equipo|default:'-' }}</td>
             <td>{{ row.temporada|default:'-' }}</td>
             <td>{{ row.liga|default:'-' }}</td>
-            <td>{% if row.in_season %}Sí{% else %}No{% endif %}</td>
             <td>{{ row.rayos_carta }}</td>
             <td>{{ row.rayos_tras_venta|default_if_none:'-' }}</td>
             <td>{% if row.precio_min_classic %}{{ row.precio_min_classic|floatformat:2 }} €{% else %}-{% endif %}</td>
@@ -111,9 +113,6 @@
             <td>
               <input type="text" name="price_row_{{ row.row }}" value="{% if row.precio_venta %}{{ row.precio_venta|floatformat:2 }}{% endif %}" placeholder="ej 12.50">
             </td>
-            <td>
-              <input type="checkbox" name="min_offer_rows" value="{{ row.row }}" {% if row.min_offer_90 %}checked{% endif %}>
-            </td>
           </tr>
         {% endfor %}
       </tbody>
@@ -121,10 +120,6 @@
   </div>
 
   <div class="btn-row" style="margin-top: 0.75rem;">
-    <label style="max-width:220px;">
-      <span>Días en venta</span>
-      {{ sales_form.days }}
-    </label>
     <button class="btn" type="submit" name="action" value="save_prices">Guardar precios en Excel</button>
     <button class="btn btn-accent" type="submit" name="action" value="start_confirm_inline">Procesar ventas</button>
   </div>
@@ -137,16 +132,70 @@
   <input type="hidden" name="rarity" value="{{ selected_rarity }}">
   <h2>Confirmación manual {{ confirmation_progress }}</h2>
   <article class="confirm-card">
-    <h3>{{ confirmation_item.jugador }}</h3>
-    <p><strong>Equipo/Temporada:</strong> {{ confirmation_item.equipo|default:'-' }} · {{ confirmation_item.temporada|default:'-' }}</p>
-    <p><strong>Liga:</strong> {{ confirmation_item.liga|default:'-' }}</p>
-    <p><strong>Colección:</strong> {{ confirmation_item.coleccion|default:'-' }}</p>
-    <p><strong>Rayos carta:</strong> {{ confirmation_item.rayos_carta }} | <strong>Rayos tras venta:</strong> {{ confirmation_item.rayos_tras_venta|default_if_none:'-' }}</p>
-    <p><strong>Precio medio ventas:</strong> {% if confirmation_item.precio_medio %}{{ confirmation_item.precio_medio|floatformat:2 }} €{% else %}-{% endif %}</p>
-    <p><strong>Min classic:</strong> {% if confirmation_item.precio_min_classic %}{{ confirmation_item.precio_min_classic|floatformat:2 }} €{% else %}-{% endif %}</p>
-    <p><strong>Min in-season:</strong> {% if confirmation_item.precio_min_inseason %}{{ confirmation_item.precio_min_inseason|floatformat:2 }} €{% else %}-{% endif %}</p>
-    <p><strong>Precio venta:</strong> {% if confirmation_item.precio_venta %}{{ confirmation_item.precio_venta|floatformat:2 }} €{% else %}-{% endif %}</p>
-    <p><strong>Oferta mínima 90%:</strong> {% if confirmation_item.min_offer_90 %}Sí{% else %}No{% endif %}</p>
+    <div class="confirm-card-head">
+      <div>
+        <p class="confirm-card-kicker">Lista para vender</p>
+        <h3>{{ confirmation_item.jugador }}</h3>
+      </div>
+      <div class="confirm-chip-row">
+        {% if confirmation_item.in_season %}<span class="confirm-chip confirm-chip-good">In season</span>{% endif %}
+        {% if confirmation_item.temporada %}<span class="confirm-chip">{{ confirmation_item.temporada }}</span>{% endif %}
+        {% if confirmation_item.posicion %}<span class="confirm-chip">{{ confirmation_item.posicion }}</span>{% endif %}
+      </div>
+    </div>
+
+    <div class="confirm-stat-grid">
+      <div class="confirm-stat">
+        <span>Equipo</span>
+        <strong>{{ confirmation_item.equipo|default:'-' }}</strong>
+      </div>
+      <div class="confirm-stat">
+        <span>Liga</span>
+        <strong>{{ confirmation_item.liga|default:'-' }}</strong>
+      </div>
+      <div class="confirm-stat">
+        <span>Nivel</span>
+        <strong>{{ confirmation_item.nivel|default:'-' }}</strong>
+      </div>
+      <div class="confirm-stat">
+        <span>Colección</span>
+        <strong>{{ confirmation_item.coleccion|default:'-' }}</strong>
+      </div>
+    </div>
+
+    <div class="confirm-rays-row">
+      <div class="confirm-rays-card">
+        <span>Rayos colección</span>
+        <strong>{{ confirmation_item.rayos_coleccion|default_if_none:'-' }}</strong>
+      </div>
+      <div class="confirm-rays-card">
+        <span>Rayos carta</span>
+        <strong>{{ confirmation_item.rayos_carta }}</strong>
+      </div>
+      <div class="confirm-rays-card confirm-rays-card-accent">
+        <span>Rayos tras venta</span>
+        <strong>{{ confirmation_item.rayos_tras_venta|default_if_none:'-' }}</strong>
+      </div>
+    </div>
+
+    <div class="confirm-price-grid">
+      <div class="confirm-price-box">
+        <span>Min classic</span>
+        <strong>{% if confirmation_item.precio_min_classic %}{{ confirmation_item.precio_min_classic|floatformat:2 }} €{% else %}-{% endif %}</strong>
+      </div>
+      <div class="confirm-price-box">
+        <span>Min in-season</span>
+        <strong>{% if confirmation_item.precio_min_inseason %}{{ confirmation_item.precio_min_inseason|floatformat:2 }} €{% else %}-{% endif %}</strong>
+      </div>
+      <div class="confirm-price-box">
+        <span>Media ventas</span>
+        <strong>{% if confirmation_item.precio_medio %}{{ confirmation_item.precio_medio|floatformat:2 }} €{% else %}-{% endif %}</strong>
+      </div>
+      <div class="confirm-price-box confirm-price-box-sale">
+        <span>Precio venta</span>
+        <strong>{% if confirmation_item.precio_venta %}{{ confirmation_item.precio_venta|floatformat:2 }} €{% else %}-{% endif %}</strong>
+      </div>
+    </div>
   </article>
 
   <div class="btn-row">
@@ -197,10 +246,15 @@
   (function () {
     var exportBtn = document.querySelector('.js-export-trigger');
     var indicator = document.getElementById('processingIndicator');
+    var salesEditPanel = document.getElementById('salesEditPanel');
     if (exportBtn && indicator) {
       exportBtn.addEventListener('click', function () {
         indicator.classList.add('is-visible');
         indicator.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('sales-export-pending');
+        if (salesEditPanel) {
+          salesEditPanel.setAttribute('aria-hidden', 'true');
+        }
       });
     }
 

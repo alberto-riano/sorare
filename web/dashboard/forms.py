@@ -59,8 +59,6 @@ class ExportCardsForm(forms.Form):
         ],
         initial="super_rare",
     )
-    max_cards = forms.IntegerField(min_value=1, max_value=5000, initial=700)
+    max_cards = forms.IntegerField(min_value=1, max_value=5000, initial=10)
 
 
-class SalesProcessForm(forms.Form):
-    days = forms.IntegerField(min_value=1, max_value=30, initial=7)

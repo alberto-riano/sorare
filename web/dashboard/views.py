@@ -12,17 +12,19 @@ from web_services.sales_excel import (
     excel_path_for_rarity,
     execute_sales,
     load_sales_rows,
+    reset_prices,
     rows_ready_to_sell,
     run_export_cards,
     save_prices,
 )
 
-from .forms import BidScheduleForm, ExportCardsForm, SalesProcessForm, TelegramSettingsForm
+from .forms import BidScheduleForm, ExportCardsForm, TelegramSettingsForm
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PATHS = SorarePaths(repo_root=REPO_ROOT)
 SALES_SELECTED_RARITY_SESSION_KEY = "sales_selected_rarity"
 SALES_CONFIRM_STATE_SESSION_KEY = "sales_confirm_state"
+SALES_DURATION_DAYS = 2
 
 
 def _to_bool_text(value: bool) -> str:
@@ -203,15 +205,14 @@ def _advance_confirmation_step(request, rows: list[dict], action: str) -> None:
         return
 
     queue = [int(v) for v in state.get("queue", [])]
-    index = int(state.get("index", 0))
-    days = int(state.get("days", 7))
+    queue_index = int(state.get("index", 0))
     results = list(state.get("results", []))
 
-    if index >= len(queue):
+    if queue_index >= len(queue):
         messages.info(request, "La confirmación ya estaba terminada.")
         return
 
-    row_id = queue[index]
+    row_id = queue[queue_index]
     by_row = {int(r["row"]): r for r in rows}
     item = by_row.get(row_id)
     if not item:
@@ -219,18 +220,21 @@ def _advance_confirmation_step(request, rows: list[dict], action: str) -> None:
     elif action == "confirm_step_skip":
         results.append({"jugador": item["jugador"], "status": "skip", "message": "Saltada por usuario"})
     else:
-        execution = execute_sales(PATHS, rows=rows, selected_rows=[row_id], days=days)
+        execution = execute_sales(PATHS, rows=rows, selected_rows=[row_id], days=SALES_DURATION_DAYS)
         if execution.items:
             results.extend(execution.items)
         else:
             results.append({"jugador": item["jugador"], "status": "fail", "message": "Sin resultado de ejecución"})
 
-    state["index"] = index + 1
+    state["index"] = queue_index + 1
     state["results"] = results
     request.session[SALES_CONFIRM_STATE_SESSION_KEY] = state
 
 
 def sales_workbench(request):
+    if request.method != "POST":
+        _clear_confirm_state(request)
+
     selected_rarity = _normalize_sales_rarity(
         request.POST.get("rarity")
         or request.GET.get("rarity")
@@ -238,8 +242,7 @@ def sales_workbench(request):
     )
     request.session[SALES_SELECTED_RARITY_SESSION_KEY] = selected_rarity
 
-    export_form = ExportCardsForm(initial={"rarity": selected_rarity, "max_cards": 700})
-    sales_form = SalesProcessForm(request.POST or None)
+    export_form = ExportCardsForm(initial={"rarity": selected_rarity, "max_cards": 10})
     export_result = None
     execution_result = None
 
@@ -281,13 +284,22 @@ def sales_workbench(request):
             if not current_excel:
                 messages.error(request, "Primero carga o genera un Excel para la rareza seleccionada.")
             else:
+                _clear_confirm_state(request)
                 updates = save_prices(current_excel, request.POST)
                 messages.success(request, f"Precios guardados en Excel ({updates} filas actualizadas).")
+
+        elif action == "reset_prices":
+            if not current_excel:
+                messages.error(request, "Primero carga o genera un Excel para la rareza seleccionada.")
+            else:
+                _clear_confirm_state(request)
+                cleared = reset_prices(current_excel)
+                messages.success(request, f"Precios reseteados ({cleared} filas limpiadas).")
 
         elif action in {"start_confirm", "start_confirm_inline"}:
             if not current_excel:
                 messages.error(request, "Primero carga o genera un Excel para la rareza seleccionada.")
-            elif sales_form.is_valid():
+            else:
                 save_prices(current_excel, request.POST)
                 rows = load_sales_rows(current_excel)
                 ready_rows = rows_ready_to_sell(rows)
@@ -302,7 +314,6 @@ def sales_workbench(request):
                         "rarity": selected_rarity,
                         "queue": selected_rows,
                         "index": 0,
-                        "days": int(sales_form.cleaned_data["days"]),
                         "results": [],
                     }
                     messages.success(request, "Confirmación paso a paso iniciada.")
@@ -329,12 +340,12 @@ def sales_workbench(request):
 
     if confirm_state and confirm_state.get("rarity") == selected_rarity:
         queue = [int(v) for v in confirm_state.get("queue", [])]
-        index = int(confirm_state.get("index", 0))
+        queue_index = int(confirm_state.get("index", 0))
         confirmation_results = list(confirm_state.get("results", []))
-        if index < len(queue):
+        if queue_index < len(queue):
             row_map = {int(r["row"]): r for r in rows}
-            confirmation_item = row_map.get(queue[index])
-            confirmation_progress = f"{index + 1}/{len(queue)}"
+            confirmation_item = row_map.get(queue[queue_index])
+            confirmation_progress = f"{queue_index + 1}/{len(queue)}"
         else:
             confirmation_done = True
 
@@ -353,7 +364,6 @@ def sales_workbench(request):
         "dashboard/sales.html",
         {
             "export_form": export_form,
-            "sales_form": sales_form,
             "export_result": export_result,
             "execution_result": execution_result,
             "rows": rows,

@@ -37,10 +37,12 @@ if (!ASSET_ID || !PRICE_CENTS) {
   console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias_en_venta] [min_receive_centimos]");
   process.exit(1);
 }
-const DURATION_DAYS = parseInt(DAYS, 10) || 7;  // por defecto 7 días
+const DURATION_DAYS = 2;
 const MIN_RECEIVE_AMOUNT_CENTS = Number.isFinite(parseInt(MIN_RECEIVE_CENTS, 10))
   ? parseInt(MIN_RECEIVE_CENTS, 10)
   : 0;
+const RELIST_RETRY_COUNT = 3;
+const RELIST_RETRY_DELAY_MS = 1500;
 
 // --- Leer configuración ---
 const { JWT_TOKEN, PRIVATE_KEY, JWT_AUD, SOLANA_PRIVATE_KEY } = readConfig();
@@ -147,25 +149,16 @@ const CARD_LIVE_OFFER_QUERY = gql`
         slug
         liveSingleSaleOffer {
           id
+          blockchainId
         }
       }
     }
   }
 `;
 
-const CANCEL_SINGLE_SALE_OFFER_MUTATION = gql`
-  mutation CancelSingleSaleOffer($input: cancelSingleSaleOfferInput!) {
-    cancelSingleSaleOffer(input: $input) {
-      errors {
-        message
-      }
-    }
-  }
-`;
-
-const CANCEL_TOKEN_OFFER_MUTATION = gql`
-  mutation CancelTokenOffer($input: cancelTokenOfferInput!) {
-    cancelTokenOffer(input: $input) {
+const CANCEL_OFFER_MUTATION = gql`
+  mutation CancelOffer($input: cancelOfferInput!) {
+    cancelOffer(input: $input) {
       errors {
         message
       }
@@ -340,77 +333,115 @@ function isActiveOfferError(errors = []) {
   );
 }
 
-async function getExistingLiveOfferId(assetId) {
+function isMinimumReceiveUnsupportedMessage(message) {
+  return (
+    message.includes("minReceiveAmount") ||
+    message.includes("minimumReceiveAmount") ||
+    message.includes("Unknown argument") ||
+    (message.includes("Field") && message.includes("is not defined")) ||
+    message.includes("was provided invalid value")
+  );
+}
+
+function buildUnsupportedMinimumReceiveError() {
+  return new Error(
+    "Sorare API no permite fijar la oferta minima desde este flujo de venta. Si marcas el 90%, la carta no se listara por API."
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatGraphQLError(error) {
+  const message = String(error?.message || error || "");
+  const firstLine = message.split("\n")[0].trim();
+  return firstLine || "Error GraphQL";
+}
+
+async function getExistingLiveOffer(assetId) {
   try {
     const data = await client.request(CARD_LIVE_OFFER_QUERY, { assetId });
-    return data?.tokens?.anyCard?.liveSingleSaleOffer?.id || null;
+    const offer = data?.tokens?.anyCard?.liveSingleSaleOffer;
+    if (!offer?.id || !offer?.blockchainId) {
+      return null;
+    }
+    return {
+      id: offer.id,
+      blockchainId: offer.blockchainId,
+    };
   } catch {
     return null;
   }
 }
 
-async function tryCancelOffer(offerId) {
-  const attempts = [
-    {
-      mutation: CANCEL_SINGLE_SALE_OFFER_MUTATION,
-      payload: { input: { offerId, clientMutationId: crypto.randomBytes(8).toString("hex") } },
-      pick: (data) => data?.cancelSingleSaleOffer,
-    },
-    {
-      mutation: CANCEL_SINGLE_SALE_OFFER_MUTATION,
-      payload: { input: { id: offerId, clientMutationId: crypto.randomBytes(8).toString("hex") } },
-      pick: (data) => data?.cancelSingleSaleOffer,
-    },
-    {
-      mutation: CANCEL_TOKEN_OFFER_MUTATION,
-      payload: { input: { tokenOfferId: offerId, clientMutationId: crypto.randomBytes(8).toString("hex") } },
-      pick: (data) => data?.cancelTokenOffer,
-    },
-    {
-      mutation: CANCEL_TOKEN_OFFER_MUTATION,
-      payload: { input: { offerId, clientMutationId: crypto.randomBytes(8).toString("hex") } },
-      pick: (data) => data?.cancelTokenOffer,
-    },
-  ];
-
-  for (const attempt of attempts) {
-    try {
-      const data = await client.request(attempt.mutation, attempt.payload);
-      const result = attempt.pick(data);
-      const errors = result?.errors || [];
-      if (!errors.length) {
-        return true;
-      }
-    } catch {
-      // Seguimos probando variantes de mutación/campos de input.
+async function tryCancelOffer(liveOffer) {
+  try {
+    const data = await client.request(CANCEL_OFFER_MUTATION, {
+      input: {
+        blockchainId: liveOffer.blockchainId,
+        clientMutationId: crypto.randomBytes(8).toString("hex"),
+      },
+    });
+    const errors = data?.cancelOffer?.errors || [];
+    if (!errors.length) {
+      return { cancelled: true, errors: [] };
     }
+    return {
+      cancelled: false,
+      errors: errors.map((error) => error.message),
+    };
+  } catch (err) {
+    return {
+      cancelled: false,
+      errors: [formatGraphQLError(err)],
+    };
   }
+}
 
+async function waitUntilOfferIsGone(assetId, expectedOfferId) {
+  for (let attempt = 0; attempt < RELIST_RETRY_COUNT; attempt += 1) {
+    const liveOffer = await getExistingLiveOffer(assetId);
+    if (!liveOffer) {
+      return true;
+    }
+    if (expectedOfferId && liveOffer.id !== expectedOfferId) {
+      return false;
+    }
+    await sleep(RELIST_RETRY_DELAY_MS);
+  }
   return false;
 }
 
 // --- Lógica principal unificada ---
 async function createOfferWithFallback(createOfferInput) {
-  try {
-    return await client.request(CREATE_OFFER_MUTATION, { input: createOfferInput });
-  } catch (err) {
-    const message = String(err?.message || "");
-    const minFieldUnsupported =
-      message.includes("minReceiveAmount") ||
-      message.includes("minimumReceiveAmount") ||
-      message.includes("Unknown argument") ||
-      (message.includes("Field") && message.includes("is not defined"));
+  const attempts = [createOfferInput];
 
-    if (createOfferInput.minReceiveAmount && minFieldUnsupported) {
-      const fallbackInput = { ...createOfferInput };
-      delete fallbackInput.minReceiveAmount;
-      return client.request(CREATE_OFFER_MUTATION, { input: fallbackInput });
-    }
-    throw err;
+  if (createOfferInput.minReceiveAmount) {
+    const alternateInput = { ...createOfferInput, minimumReceiveAmount: createOfferInput.minReceiveAmount };
+    delete alternateInput.minReceiveAmount;
+    attempts.push(alternateInput);
   }
+
+  let lastUnsupportedError = null;
+
+  for (const input of attempts) {
+    try {
+      return await client.request(CREATE_OFFER_MUTATION, { input });
+    } catch (err) {
+      const message = String(err?.message || "");
+      if (createOfferInput.minReceiveAmount && isMinimumReceiveUnsupportedMessage(message)) {
+        lastUnsupportedError = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw buildUnsupportedMinimumReceiveError();
 }
 
-async function sellCard(assetId, priceCents, durationDays, minReceiveCents, allowRelistRetry = true) {
+async function sellCard(assetId, priceCents, durationDays, minReceiveCents, relistRetriesLeft = RELIST_RETRY_COUNT) {
   const prepareOfferInput = {
     sendAssetIds: [assetId],
     receiveAssetIds: [],
@@ -465,22 +496,29 @@ async function sellCard(assetId, priceCents, durationDays, minReceiveCents, allo
     createData.createSingleSaleOffer;
 
   if (createErrors && createErrors.length > 0) {
-    if (allowRelistRetry && isActiveOfferError(createErrors)) {
-      const existingOfferId = await getExistingLiveOfferId(assetId);
-      if (!existingOfferId) {
-        console.error("Existe una oferta activa, pero no se pudo obtener su id para cancelarla.");
+    if (relistRetriesLeft > 0 && isActiveOfferError(createErrors)) {
+      const existingOffer = await getExistingLiveOffer(assetId);
+      if (!existingOffer) {
+        console.error("Existe una oferta activa, pero no se pudo obtener su blockchainId para cancelarla.");
         createErrors.forEach((e) => console.error(e.message));
         process.exit(2);
       }
 
-      const cancelled = await tryCancelOffer(existingOfferId);
-      if (!cancelled) {
+      const cancelResult = await tryCancelOffer(existingOffer);
+      if (!cancelResult.cancelled) {
         console.error("No se pudo cancelar la oferta activa existente para relistar.");
+        cancelResult.errors.forEach((error) => console.error(error));
         createErrors.forEach((e) => console.error(e.message));
         process.exit(2);
       }
 
-      return sellCard(assetId, priceCents, durationDays, minReceiveCents, false);
+      const offerCleared = await waitUntilOfferIsGone(assetId, existingOffer.id);
+      if (!offerCleared) {
+        console.error("La oferta activa sigue apareciendo tras la cancelación; Sorare no confirmó el relistado a tiempo.");
+        process.exit(2);
+      }
+
+      return sellCard(assetId, priceCents, durationDays, minReceiveCents, relistRetriesLeft - 1);
     }
 
     console.error("Errores creando la oferta:");
@@ -494,6 +532,10 @@ async function sellCard(assetId, priceCents, durationDays, minReceiveCents, allo
 
 // --- Invocación principal ---
 sellCard(ASSET_ID, PRICE_CENTS, DURATION_DAYS, MIN_RECEIVE_AMOUNT_CENTS).catch((err) => {
-  console.error(err);
+  if (err instanceof Error) {
+    console.error(err.message);
+  } else {
+    console.error(String(err));
+  }
   process.exit(1);
 });
