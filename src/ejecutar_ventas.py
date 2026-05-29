@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Lee output/cartas_para_vender_rojas.xlsx (o _amarillas.xlsx con --amarillas),
+Lee output/cartas_para_vender_rojas.xlsx (o _amarillas/_azules),
 coge las cartas que tienen un precio en la columna "Precio venta (€)" y ejecuta
 la venta de cada una usando javascript/vender_carta.js.
 
 Uso:
   python ejecutar_ventas.py              # rare (rojas)
   python ejecutar_ventas.py --amarillas  # limited (amarillas)
+    python ejecutar_ventas.py --azules     # super_rare (azules)
 """
 import os
 import sys
@@ -16,7 +17,7 @@ import openpyxl
 
 BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 JS_SCRIPT = os.path.join(BASE_DIR, 'javascript', 'vender_carta.js')
-RAREZA = 'rojas'  # 'rojas' para rare, 'amarillas' para limited
+RAREZA = 'rojas'  # 'rojas' para rare, 'amarillas' para limited, 'azules' para super_rare
 
 COL_MAP = {}  # se rellena dinámicamente desde la cabecera del Excel
 
@@ -44,12 +45,16 @@ def main():
                         help='Usar Excel de cartas limited (amarillas) en vez de rare (rojas)')
     parser.add_argument('--rojas', action='store_true',
                         help='Usar Excel de cartas rare (rojas)')
+    parser.add_argument('--azules', action='store_true',
+                        help='Usar Excel de cartas super_rare (azules)')
     parser.add_argument('--dias', type=int, default=7,
                         help='Días que estará la carta a la venta (por defecto: 7)')
     args = parser.parse_args()
 
     # CLI flags sobreescriben la constante RAREZA
-    if args.amarillas:
+    if args.azules:
+        tipo = 'azules'
+    elif args.amarillas:
         tipo = 'amarillas'
     elif args.rojas:
         tipo = 'rojas'

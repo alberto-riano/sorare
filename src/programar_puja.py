@@ -464,15 +464,15 @@ def monitor_auction(auction_id, headers, my_nickname, poll_interval=15):
         time.sleep(poll_interval)
 
 
-def execute_bid(auction_id, bid_cents):
+def execute_bid(auction_id, bid_cents, use_credit=True):
     """Ejecuta la puja llamando al script de Node.js."""
     cmd = ['node', JS_SCRIPT, auction_id, str(bid_cents)]
-    if USE_CREDIT:
+    if use_credit:
         cmd.append('--use-credit')
-    log(f"Comando: node pujar_carta.js {auction_id} {bid_cents}{' --use-credit' if USE_CREDIT else ''}")
+    log(f"Comando: node pujar_carta.js {auction_id} {bid_cents}{' --use-credit' if use_credit else ''}")
     print()
 
-    result = subprocess.run(cmd, cwd=os.path.dirname(JS_SCRIPT), capture_output=False)
+    result = subprocess.run(cmd, cwd=os.path.dirname(JS_SCRIPT), capture_output=False, check=False)
     return result.returncode
 
 
@@ -552,6 +552,8 @@ Ejemplos:
     parser.add_argument('--now', action='store_true', help='Pujar inmediatamente (ignora hora)')
     parser.add_argument('--sniper', action='store_true',
                         help='Pujar exactamente 1 minuto antes de que termine la subasta')
+    parser.add_argument('--use-credit', action='store_true', help='Forzar uso de creditos de conversion al pujar')
+    parser.add_argument('--no-credit', action='store_true', help='Desactivar uso de creditos de conversion al pujar')
 
     args = parser.parse_args()
 
@@ -567,6 +569,11 @@ Ejemplos:
     # SNIPER: desde argumento --sniper o variable global (tiene prioridad sobre NOW)
     do_sniper = args.sniper or SNIPER
     do_now = (args.now or NOW) and not do_sniper
+    use_credit = USE_CREDIT
+    if args.use_credit:
+        use_credit = True
+    if args.no_credit:
+        use_credit = False
 
     # Validar
     if not identifier:
@@ -656,7 +663,7 @@ Ejemplos:
         print()
 
     # Ejecutar puja
-    exit_code = execute_bid(auction_id, bid_cents)
+    exit_code = execute_bid(auction_id, bid_cents, use_credit=use_credit)
 
     if exit_code == 0:
         log(f"✅ Puja ejecutada a las {now_spain().strftime('%H:%M:%S')}")

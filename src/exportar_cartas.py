@@ -1,40 +1,25 @@
-import requests
+#!/usr/bin/env python3
+"""Exporta cartas a Excel filtrando por rareza.
+
+Ejemplos:
+  python3 src/exportar_cartas.py
+  python3 src/exportar_cartas.py --rarity limited
+  python3 src/exportar_cartas.py --azules
+"""
+
+import argparse
 import os
 from openpyxl import Workbook
 
+from sorare_utils import build_headers, graphql_request
 
-def read_config(config_path=None):
-    """Lee las variables del archivo config.txt"""
-    if config_path is None:
-        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'config.txt')
-    config_map = {}
-    with open(config_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if line and '=' in line:
-                key, value = line.split('=', 1)
-                config_map[key.strip()] = value.strip()
-    return config_map
-
-
-# Leer configuración
-cfg = read_config()
-JWT_TOKEN = cfg.get('JWT_TOKEN')
-JWT_AUD = cfg.get('JWT_AUD', 'myapp')
-
-if not JWT_TOKEN:
-    print("Error: JWT_TOKEN no encontrado en config.txt")
-    exit(1)
-
-print("JWT_TOKEN cargado correctamente")
-
-headers = {
-    'content-type': 'application/json',
-    'Authorization': f'Bearer {JWT_TOKEN}',
-    'JWT-AUD': JWT_AUD,
+RARITY_ALIASES = {
+  "azules": "super_rare",
+    "amarillas": "limited",
+    "rojas": "rare",
 }
 
-query = '''
+CARDS_QUERY = '''
 query GetCards($first: Int!, $after: String) {
   currentUser {
     cards(first: $first, after: $after) {
@@ -54,56 +39,70 @@ query GetCards($first: Int!, $after: String) {
 }
 '''
 
-def fetch_all_rare_cards():
-    rare_cards_list = []
+
+def normalize_rarity(raw_rarity: str) -> str:
+    key = (raw_rarity or "").strip().lower()
+    return RARITY_ALIASES.get(key, key)
+
+
+def fetch_all_cards_by_rarity(*, rarity: str, headers: dict) -> list[dict]:
+    cards: list[dict] = []
     cursor = None
+
     while True:
-        variables = {
-            'first': 50,
-            'after': cursor,
-        }
-        response = requests.post(
-            'https://api.sorare.com/graphql',
-            json={'query': query, 'variables': variables},
-            headers=headers,
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()['data']['currentUser']['cards']
+        data = graphql_request(CARDS_QUERY, {"first": 50, "after": cursor}, headers=headers)
+        connection = data["currentUser"]["cards"]
 
-        for node in data['nodes']:
-            if node['rarityTyped'] == 'rare':
-                rare_cards_list.append(node)
+        for node in connection["nodes"]:
+            if (node.get("rarityTyped") or "").lower() == rarity:
+                cards.append(node)
 
-        if not data['pageInfo']['hasNextPage']:
+        if not connection["pageInfo"]["hasNextPage"]:
             break
-        cursor = data['pageInfo']['endCursor']
+        cursor = connection["pageInfo"]["endCursor"]
 
-    return rare_cards_list
+    return cards
 
-if __name__ == '__main__':
-    all_rare_cards = fetch_all_rare_cards()
-    print(f'Tienes {len(all_rare_cards)} cartas raras:')
-    for c in all_rare_cards:
-        print(f"- {c['name']} ({c['seasonYear']}), assetId: {c['assetId']}")
 
-    # Crear carpeta output si no existe
+def output_file_for_rarity(rarity: str) -> str:
+    return os.path.join("..", "output", f"{rarity}_cards.xlsx")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Exporta cartas de Sorare por rareza a Excel")
+    parser.add_argument(
+        "--rarity",
+        default="rare",
+        choices=["limited", "rare", "super_rare", "unique", "azules", "amarillas", "rojas"],
+      help="Rareza a exportar. Usa 'super_rare' o alias 'azules' para rareza azul.",
+    )
+    parser.add_argument("--azules", action="store_true", help="Atajo para exportar rareza azul (super_rare)")
+
+    args = parser.parse_args()
+
+    rarity = "super_rare" if args.azules else normalize_rarity(args.rarity)
+    headers = build_headers()
+
+    all_cards = fetch_all_cards_by_rarity(rarity=rarity, headers=headers)
+    print(f"Tienes {len(all_cards)} cartas de rareza '{rarity}':")
+    for card in all_cards:
+        print(f"- {card['name']} ({card['seasonYear']}), assetId: {card['assetId']}")
+
     os.makedirs("../output", exist_ok=True)
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Rare Cards"
+    ws.title = f"{rarity.title()} Cards"
+    ws.append(["name", "seasonYear", "assetId"])
 
-    # Cabeceras
-    ws.append(['name', 'seasonYear', 'assetId'])
+    for card in all_cards:
+        ws.append([card["name"], card["seasonYear"], card["assetId"]])
 
-    # Filas
-    for c in all_rare_cards:
-        ws.append([
-            c['name'],
-            c['seasonYear'],
-            c['assetId']
-        ])
+    output_file = output_file_for_rarity(rarity)
+    wb.save(output_file)
+    print(f"Excel generado: {output_file}")
+    return 0
 
-    wb.save("../output/rare_cards.xlsx")
-    print("Excel generado: ../output/rare_cards.xlsx")
+
+if __name__ == '__main__':
+    raise SystemExit(main())

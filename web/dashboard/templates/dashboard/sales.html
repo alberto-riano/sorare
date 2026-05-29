@@ -1,0 +1,220 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Ventas | Sorare{% endblock %}
+
+{% block content %}
+<section class="panel reveal">
+  <p class="kicker">Modulo activo</p>
+  <h1>Exportar, editar y procesar ventas</h1>
+  <p>Exporta el Excel por rareza, ajusta precios directamente en la web y confirma qué cartas vender antes de ejecutar.</p>
+</section>
+
+<form method="post" class="panel form-panel reveal" style="animation-delay: 100ms;">
+  {% csrf_token %}
+  <div class="field-grid">
+    <label class="span-2">
+      <span>Rareza</span>
+      <div class="rarity-chips">
+        <label class="rarity-chip rarity-limited">
+          <input type="radio" name="rarity" value="limited" {% if selected_rarity == 'limited' %}checked{% endif %}>
+          <span>Amarillas · limited</span>
+        </label>
+        <label class="rarity-chip rarity-rare">
+          <input type="radio" name="rarity" value="rare" {% if selected_rarity == 'rare' %}checked{% endif %}>
+          <span>Rojas · rare</span>
+        </label>
+        <label class="rarity-chip rarity-super">
+          <input type="radio" name="rarity" value="super_rare" {% if selected_rarity == 'super_rare' %}checked{% endif %}>
+          <span>Azules · super_rare</span>
+        </label>
+      </div>
+    </label>
+    <label>
+      <span>Máximo de cartas (más nuevas primero)</span>
+      {{ export_form.max_cards }}
+    </label>
+  </div>
+  <div class="btn-row">
+    <button class="btn" type="submit" name="action" value="load_existing">Cargar Excel existente</button>
+    <button class="btn btn-accent js-export-trigger" type="submit" name="action" value="export">Generar nuevo Excel</button>
+    {% if excel_exists %}
+      <a class="btn btn-secondary" href="{% url 'sales_download_excel' %}">Descargar Excel actual</a>
+    {% endif %}
+  </div>
+</form>
+
+<div class="processing-indicator" id="processingIndicator" aria-hidden="true">
+  <div class="processing-dot"></div>
+  <div>
+    <strong>Generando Excel...</strong>
+    <p>Extrayendo datos de Sorare. Esto puede tardar unos minutos según el número de cartas.</p>
+  </div>
+</div>
+
+{% if export_result %}
+<section class="panel reveal" style="animation-delay: 130ms;">
+  <h2>Resultado exportación</h2>
+  <p><strong>Exit code:</strong> {{ export_result.exit_code }}</p>
+  <p><strong>Command:</strong> {{ export_result.command }}</p>
+  <div class="log-grid">
+    <article>
+      <h3>stdout</h3>
+      <pre>{{ export_result.stdout|default:'(empty)' }}</pre>
+    </article>
+    <article>
+      <h3>stderr</h3>
+      <pre>{{ export_result.stderr|default:'(empty)' }}</pre>
+    </article>
+  </div>
+</section>
+{% endif %}
+
+{% if rows %}
+<form method="post" class="panel reveal" style="animation-delay: 160ms;">
+  {% csrf_token %}
+  <input type="hidden" name="rarity" value="{{ selected_rarity }}">
+  <div class="table-head">
+    <h2>Tabla editable ({{ rows|length }} cartas)</h2>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Jugador</th>
+          <th>Equipo</th>
+          <th>Temporada</th>
+          <th>Liga</th>
+          <th>In Season</th>
+          <th>Rayos carta</th>
+          <th>Rayos tras venta</th>
+          <th>Min classic</th>
+          <th>Min in-season</th>
+          <th>Media ventas</th>
+          <th>Precio venta</th>
+          <th>Oferta mínima 90%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr class="{% if row.in_season %}in-season-row{% endif %}">
+            <td>{{ row.jugador }}</td>
+            <td>{{ row.equipo|default:'-' }}</td>
+            <td>{{ row.temporada|default:'-' }}</td>
+            <td>{{ row.liga|default:'-' }}</td>
+            <td>{% if row.in_season %}Sí{% else %}No{% endif %}</td>
+            <td>{{ row.rayos_carta }}</td>
+            <td>{{ row.rayos_tras_venta|default_if_none:'-' }}</td>
+            <td>{% if row.precio_min_classic %}{{ row.precio_min_classic|floatformat:2 }} €{% else %}-{% endif %}</td>
+            <td>{% if row.precio_min_inseason %}{{ row.precio_min_inseason|floatformat:2 }} €{% else %}-{% endif %}</td>
+            <td>{% if row.precio_medio %}{{ row.precio_medio|floatformat:2 }} €{% else %}-{% endif %}</td>
+            <td>
+              <input type="text" name="price_row_{{ row.row }}" value="{% if row.precio_venta %}{{ row.precio_venta|floatformat:2 }}{% endif %}" placeholder="ej 12.50">
+            </td>
+            <td>
+              <input type="checkbox" name="min_offer_rows" value="{{ row.row }}" {% if row.min_offer_90 %}checked{% endif %}>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="btn-row" style="margin-top: 0.75rem;">
+    <label style="max-width:220px;">
+      <span>Días en venta</span>
+      {{ sales_form.days }}
+    </label>
+    <button class="btn" type="submit" name="action" value="save_prices">Guardar precios en Excel</button>
+    <button class="btn btn-accent" type="submit" name="action" value="start_confirm_inline">Procesar ventas</button>
+  </div>
+</form>
+{% endif %}
+
+{% if confirmation_item %}
+<form method="post" class="panel reveal" style="animation-delay: 205ms;">
+  {% csrf_token %}
+  <input type="hidden" name="rarity" value="{{ selected_rarity }}">
+  <h2>Confirmación manual {{ confirmation_progress }}</h2>
+  <article class="confirm-card">
+    <h3>{{ confirmation_item.jugador }}</h3>
+    <p><strong>Equipo/Temporada:</strong> {{ confirmation_item.equipo|default:'-' }} · {{ confirmation_item.temporada|default:'-' }}</p>
+    <p><strong>Liga:</strong> {{ confirmation_item.liga|default:'-' }}</p>
+    <p><strong>Colección:</strong> {{ confirmation_item.coleccion|default:'-' }}</p>
+    <p><strong>Rayos carta:</strong> {{ confirmation_item.rayos_carta }} | <strong>Rayos tras venta:</strong> {{ confirmation_item.rayos_tras_venta|default_if_none:'-' }}</p>
+    <p><strong>Precio medio ventas:</strong> {% if confirmation_item.precio_medio %}{{ confirmation_item.precio_medio|floatformat:2 }} €{% else %}-{% endif %}</p>
+    <p><strong>Min classic:</strong> {% if confirmation_item.precio_min_classic %}{{ confirmation_item.precio_min_classic|floatformat:2 }} €{% else %}-{% endif %}</p>
+    <p><strong>Min in-season:</strong> {% if confirmation_item.precio_min_inseason %}{{ confirmation_item.precio_min_inseason|floatformat:2 }} €{% else %}-{% endif %}</p>
+    <p><strong>Precio venta:</strong> {% if confirmation_item.precio_venta %}{{ confirmation_item.precio_venta|floatformat:2 }} €{% else %}-{% endif %}</p>
+    <p><strong>Oferta mínima 90%:</strong> {% if confirmation_item.min_offer_90 %}Sí{% else %}No{% endif %}</p>
+  </article>
+
+  <div class="btn-row">
+    <button class="btn btn-accent" type="submit" name="action" value="confirm_step_sell">Confirmar y vender</button>
+    <button class="btn" type="submit" name="action" value="confirm_step_skip">Saltar esta carta</button>
+    <button class="btn btn-secondary" type="submit" name="action" value="confirm_step_cancel">Cancelar confirmación</button>
+  </div>
+</form>
+{% elif confirmation_done %}
+<form method="post" class="panel reveal" style="animation-delay: 205ms;">
+  {% csrf_token %}
+  <input type="hidden" name="rarity" value="{{ selected_rarity }}">
+  <h2>Confirmación paso a paso completada</h2>
+  <div class="btn-row">
+    <button class="btn btn-secondary" type="submit" name="action" value="confirm_step_finish">Cerrar resumen</button>
+  </div>
+</form>
+{% endif %}
+
+{% if execution_result %}
+<section class="panel reveal" style="animation-delay: 220ms;">
+  <h2>Resultado de ventas</h2>
+  <p><strong>OK:</strong> {{ execution_result.ok }} | <strong>Errores:</strong> {{ execution_result.fail }} | <strong>Saltadas:</strong> {{ execution_result.skip }}</p>
+  <div class="table-wrap compact-table">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Jugador</th>
+          <th>Estado</th>
+          <th>Detalle</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in execution_result.items %}
+          <tr>
+            <td>{{ item.jugador }}</td>
+            <td>{{ item.status }}</td>
+            <td><pre>{{ item.message }}</pre></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<script>
+  (function () {
+    var exportBtn = document.querySelector('.js-export-trigger');
+    var indicator = document.getElementById('processingIndicator');
+    if (exportBtn && indicator) {
+      exportBtn.addEventListener('click', function () {
+        indicator.classList.add('is-visible');
+        indicator.setAttribute('aria-hidden', 'false');
+      });
+    }
+
+    var forms = document.querySelectorAll('form');
+    forms.forEach(function (form) {
+      form.addEventListener('submit', function () {
+        sessionStorage.setItem('sales.scrollY', String(window.scrollY || 0));
+      });
+    });
+
+    var savedY = sessionStorage.getItem('sales.scrollY');
+    if (savedY !== null) {
+      window.scrollTo(0, Number(savedY));
+    }
+  })();
+</script>
+{% endblock %}

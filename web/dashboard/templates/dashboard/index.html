@@ -1,0 +1,28 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Menu principal | Sorare{% endblock %}
+
+{% block content %}
+<section class="hero panel reveal">
+  <p class="kicker">Control panel</p>
+  <h1>Tu stack de Sorare, ahora con capa web.</h1>
+  <p class="hero-text">Mantienes tus scripts CLI tal cual, pero tambien puedes operar desde esta interfaz visual por modulos.</p>
+</section>
+
+<section class="card-grid">
+  {% for card in cards %}
+    <article class="panel module-card reveal" style="animation-delay: {{ forloop.counter0 }}00ms;">
+      <div class="module-head">
+        <h2>{{ card.title }}</h2>
+        <span class="badge">{{ card.status }}</span>
+      </div>
+      <p>{{ card.description }}</p>
+      {% if card.url %}
+        <a class="btn" href="{% url card.url %}">Abrir modulo</a>
+      {% else %}
+        <span class="btn btn-disabled">Pendiente</span>
+      {% endif %}
+    </article>
+  {% endfor %}
+</section>
+{% endblock %}

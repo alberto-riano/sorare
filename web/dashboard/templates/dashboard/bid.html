@@ -1,0 +1,62 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Programar Puja | Sorare{% endblock %}
+
+{% block content %}
+<section class="panel reveal">
+  <p class="kicker">Modulo activo</p>
+  <h1>Programar Puja</h1>
+  <p>Configura identifier, importe y modo de ejecucion para disparar tu script de pujas desde la web.</p>
+</section>
+
+<form method="post" class="panel form-panel reveal" style="animation-delay: 120ms;">
+  {% csrf_token %}
+  <div class="field-grid">
+    <label class="span-2">
+      <span>Identifier (auction id, asset id o URL)</span>
+      {{ form.identifier }}
+    </label>
+    <label>
+      <span>Euros</span>
+      {{ form.euros }}
+    </label>
+    <label>
+      <span>Hora (HH:MM o HH:MM:SS)</span>
+      {{ form.hora }}
+    </label>
+  </div>
+
+  <div class="toggle-grid">
+    <label class="toggle">{{ form.now }} <span>Now</span></label>
+    <label class="toggle">{{ form.sniper }} <span>Sniper (1 min antes)</span></label>
+    <label class="toggle">{{ form.background }} <span>Background</span></label>
+    <label class="toggle">{{ form.use_credit }} <span>Use conversion credit</span></label>
+  </div>
+
+  {% if form.non_field_errors %}
+    <div class="errors">{{ form.non_field_errors }}</div>
+  {% endif %}
+
+  <div class="btn-row">
+    <button class="btn btn-accent" type="submit">Ejecutar puja</button>
+  </div>
+</form>
+
+{% if script_result %}
+<section class="panel reveal" style="animation-delay: 180ms;">
+  <h2>Resultado ejecucion</h2>
+  <p><strong>Exit code:</strong> {{ script_result.exit_code }}</p>
+  <p><strong>Command:</strong> {{ script_result.command }}</p>
+  <div class="log-grid">
+    <article>
+      <h3>stdout</h3>
+      <pre>{{ script_result.stdout|default:'(empty)' }}</pre>
+    </article>
+    <article>
+      <h3>stderr</h3>
+      <pre>{{ script_result.stderr|default:'(empty)' }}</pre>
+    </article>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,83 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Alertas Telegram | Sorare{% endblock %}
+
+{% block content %}
+<section class="panel reveal">
+  <p class="kicker">Modulo activo</p>
+  <h1>Alertas Telegram</h1>
+  <p>Configura umbrales, rareza y jugadores desde formulario. Al guardar, se actualizan los archivos de config usados por tus scripts actuales.</p>
+</section>
+
+<form method="post" class="panel form-panel reveal" style="animation-delay: 120ms;">
+  {% csrf_token %}
+  <div class="field-grid">
+    <label>
+      <span>Notify mode</span>
+      {{ form.notify_mode }}
+    </label>
+    <label>
+      <span>Drop EUR</span>
+      {{ form.notify_drop_eur }}
+    </label>
+    <label>
+      <span>Rarity</span>
+      {{ form.rarity }}
+    </label>
+    <label>
+      <span>Season year</span>
+      {{ form.season_year }}
+    </label>
+    <label>
+      <span>In season year</span>
+      {{ form.in_season_year }}
+    </label>
+  </div>
+
+  <div class="toggle-grid">
+    <label class="toggle">{{ form.send_all_offers_below_threshold }} <span>Send all offers below threshold</span></label>
+    <label class="toggle">{{ form.send_run_start_message }} <span>Send run start message</span></label>
+    <label class="toggle">{{ form.send_single_message }} <span>Send single merged message</span></label>
+    <label class="toggle">{{ form.include_player_preview }} <span>Include player preview</span></label>
+  </div>
+
+  <div class="field-grid single-column">
+    <label>
+      <span>Classic players (one per line)</span>
+      {{ form.classic_players }}
+    </label>
+    <label>
+      <span>In season players (one per line)</span>
+      {{ form.in_season_players }}
+    </label>
+  </div>
+
+  {% if form.non_field_errors %}
+    <div class="errors">{{ form.non_field_errors }}</div>
+  {% endif %}
+
+  <div class="btn-row">
+    <button class="btn" type="submit" name="action" value="save_only">Guardar</button>
+    <button class="btn btn-secondary" type="submit" name="action" value="dry_run">Guardar + Dry run</button>
+    <button class="btn btn-accent" type="submit" name="action" value="save_and_run">Guardar + Ejecutar real</button>
+  </div>
+</form>
+
+{% if script_result %}
+<section class="panel reveal" style="animation-delay: 180ms;">
+  <h2>Resultado ejecucion</h2>
+  <p><strong>Exit code:</strong> {{ script_result.exit_code }}</p>
+  <p><strong>Command:</strong> {{ script_result.command }}</p>
+  <div class="log-grid">
+    <article>
+      <h3>stdout</h3>
+      <pre>{{ script_result.stdout|default:'(empty)' }}</pre>
+    </article>
+    <article>
+      <h3>stderr</h3>
+      <pre>{{ script_result.stderr|default:'(empty)' }}</pre>
+    </article>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

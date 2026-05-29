@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Genera un Excel con todas las cartas RARE o LIMITED que NO están en lineup,
+Genera un Excel con todas las cartas RARE, LIMITED o SUPER RARE que NO están en lineup,
 incluyendo precio medio de últimas ventas y precio mínimo actual en mercado.
 
 Uso:
   python cartas_para_vender.py              # rare (rojas)
   python cartas_para_vender.py --amarillas  # limited (amarillas)
+    python cartas_para_vender.py --azules     # super_rare (azules)
 """
 import os
 import sys
@@ -26,7 +27,7 @@ from sorare_utils import (
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'output')
 DELAY = 0.2  # segundos entre llamadas a la API
 MAX_CARTAS = 700  # Cuántas cartas consultar (pon un número grande para todas)
-RAREZA = 'rojas'  # 'rojas' para rare, 'amarillas' para limited
+RAREZA = 'rojas'  # 'rojas' para rare, 'amarillas' para limited, 'azules' para super_rare
 
 
 def fetch_cards_and_lineups(headers, rarity='rare'):
@@ -205,13 +206,13 @@ def write_excel(cards_data, output_path, show_vault=False):
     ws.title = "Cartas para vender"
 
     # Cabeceras
-    # Sin --vault: A=Jugador, B=Precio venta, C=Precio Mín Classic, D=Precio Mín In Season,
-    #              E=Equipo, F=Nivel, G=Temporada, H=Posición, I=Liga,
-    #              J=Colección, K=Rayos colección, L=Rayos carta, M=Rayos tras venta,
-    #              N=Precio Medio Ventas, O=assetId
-    # Con --vault: igual pero N=Precio Medio Ventas, O=Vault, P=assetId
-    headers_row = ['Jugador', 'Precio venta (€)', 'Precio Mín Classic (€)', 'Precio Mín In Season (€)',
-                   'Equipo', 'Nivel', 'Temporada', 'Posición', 'Liga',
+    # Sin --vault: A=Jugador, B=Precio venta, C=Oferta mínima 90%, D=Precio Mín Classic, E=Precio Mín In Season,
+    #              F=Equipo, G=Nivel, H=Temporada, I=Posición, J=Liga, K=In Season,
+    #              L=Colección, M=Rayos colección, N=Rayos carta, O=Rayos tras venta,
+    #              P=Precio Medio Ventas, Q=assetId
+    # Con --vault: igual pero P=Precio Medio Ventas, Q=Vault, R=assetId
+    headers_row = ['Jugador', 'Precio venta (€)', 'Oferta mínima 90%', 'Precio Mín Classic (€)', 'Precio Mín In Season (€)',
+                   'Equipo', 'Nivel', 'Temporada', 'Posición', 'Liga', 'In Season',
                    'Colección', 'Rayos colección', 'Rayos carta', 'Rayos tras venta',
                    'Precio Medio Ventas (€)']
     if show_vault:
@@ -231,32 +232,35 @@ def write_excel(cards_data, output_path, show_vault=False):
         ws.cell(row=i, column=1, value=card['name'])
         # col 2: Precio venta (vacía, el usuario la rellena)
         ws.cell(row=i, column=2, value='')
+        # col 3: Oferta mínima (checkbox lógico en web)
+        ws.cell(row=i, column=3, value='No')
 
-        classic_cell = ws.cell(row=i, column=3)
+        classic_cell = ws.cell(row=i, column=4)
         if card['min_price_classic'] is not None:
             classic_cell.value = card['min_price_classic']
             classic_cell.number_format = '#,##0.00 €'
         else:
             classic_cell.value = "Sin ofertas"
 
-        inseason_cell = ws.cell(row=i, column=4)
+        inseason_cell = ws.cell(row=i, column=5)
         if card['min_price_inseason'] is not None:
             inseason_cell.value = card['min_price_inseason']
             inseason_cell.number_format = '#,##0.00 €'
         else:
             inseason_cell.value = "Sin ofertas"
 
-        ws.cell(row=i, column=5, value=card['team'])
-        ws.cell(row=i, column=6, value=card['grade'])
-        ws.cell(row=i, column=7, value=card['season'])
-        ws.cell(row=i, column=8, value=card['position'])
-        ws.cell(row=i, column=9, value=card['league'])
-        ws.cell(row=i, column=10, value=card['collection_name'])
-        ws.cell(row=i, column=11, value=card['collection_rayos'])
-        ws.cell(row=i, column=12, value=card['card_rayos'])
-        ws.cell(row=i, column=13, value=card['rayos_col_after'])
+        ws.cell(row=i, column=6, value=card['team'])
+        ws.cell(row=i, column=7, value=card['grade'])
+        ws.cell(row=i, column=8, value=card['season'])
+        ws.cell(row=i, column=9, value=card['position'])
+        ws.cell(row=i, column=10, value=card['league'])
+        ws.cell(row=i, column=11, value='Sí' if card.get('in_season') else 'No')
+        ws.cell(row=i, column=12, value=card['collection_name'])
+        ws.cell(row=i, column=13, value=card['collection_rayos'])
+        ws.cell(row=i, column=14, value=card['card_rayos'])
+        ws.cell(row=i, column=15, value=card['rayos_col_after'])
 
-        avg_cell = ws.cell(row=i, column=14)
+        avg_cell = ws.cell(row=i, column=16)
         if card['avg_price'] is not None:
             avg_cell.value = card['avg_price']
             avg_cell.number_format = '#,##0.00 €'
@@ -269,7 +273,7 @@ def write_excel(cards_data, output_path, show_vault=False):
                 start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
 
         # Columna "Vault" (sólo si show_vault)
-        col_offset = 15
+        col_offset = 17
         if show_vault:
             vault_cell = ws.cell(row=i, column=col_offset, value='Sí' if card['in_vault'] else '')
             if card['in_vault']:
@@ -280,9 +284,9 @@ def write_excel(cards_data, output_path, show_vault=False):
 
     # Ajustar anchos
     if show_vault:
-        widths = [25, 16, 20, 20, 22, 8, 12, 14, 20, 30, 16, 12, 16, 22, 8, 20]
+        widths = [25, 16, 16, 20, 20, 22, 8, 12, 14, 20, 10, 30, 16, 12, 16, 22, 8, 20]
     else:
-        widths = [25, 16, 20, 20, 22, 8, 12, 14, 20, 30, 16, 12, 16, 22, 20]
+        widths = [25, 16, 16, 20, 20, 22, 8, 12, 14, 20, 10, 30, 16, 12, 16, 22, 20]
     for col, w in enumerate(widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = w
 
@@ -300,19 +304,31 @@ def main():
                         help='Generar Excel de cartas limited (amarillas) en vez de rare (rojas)')
     parser.add_argument('--rojas', action='store_true',
                         help='Generar Excel de cartas rare (rojas)')
+    parser.add_argument('--azules', action='store_true',
+                        help='Generar Excel de cartas super_rare (azules)')
     parser.add_argument('--vault', action='store_true',
                         help='Incluir también las cartas que están en vault (por defecto se excluyen)')
+    parser.add_argument('--max-cartas', type=int, default=MAX_CARTAS,
+                        help='Número máximo de cartas a exportar, ordenadas de más nuevas a más viejas')
+    parser.add_argument('--no-open', action='store_true',
+                        help='No abrir el Excel automáticamente al terminar')
     args = parser.parse_args()
 
     # CLI flags sobreescriben la constante RAREZA
-    if args.amarillas:
+    if args.azules:
+        tipo = 'azules'
+    elif args.amarillas:
         tipo = 'amarillas'
     elif args.rojas:
         tipo = 'rojas'
     else:
         tipo = RAREZA
 
-    if tipo == 'amarillas':
+    if tipo == 'azules':
+        rarity = 'super_rare'
+        suffix = '_azules'
+        label = 'super_rare (azules)'
+    elif tipo == 'amarillas':
         rarity = 'limited'
         suffix = '_amarillas'
         label = 'limited (amarillas)'
@@ -353,9 +369,10 @@ def main():
     # Mantener orden del API (más recientes primero, igual que la interfaz de Sorare)
 
     # Limitar cantidad
-    if MAX_CARTAS < len(available):
-        print(f"   Limitado a {MAX_CARTAS} cartas (de {len(available)})")
-        available = available[:MAX_CARTAS]
+    max_cards = int(args.max_cartas)
+    if max_cards < len(available):
+        print(f"   Limitado a {max_cards} cartas (de {len(available)})")
+        available = available[:max_cards]
 
     # Consultar precios (con cache para no repetir llamadas)
     cards_data = []
@@ -451,9 +468,10 @@ def main():
 
     write_excel(cards_data, output_path, show_vault=show_vault)
 
-    # Abrir el Excel en macOS
-    import subprocess
-    subprocess.Popen(['open', output_path])
+    # Abrir el Excel en macOS (opcional)
+    if not args.no_open:
+        import subprocess
+        subprocess.Popen(['open', output_path])
 
 
 if __name__ == '__main__':
