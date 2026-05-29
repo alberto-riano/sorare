@@ -6,6 +6,7 @@ EXCEL_PATH = "../input/lineups.xlsx"
 ACTUALIZAR_CARTAS = False     # True = descargar cartas de nuevo desde Sorare
 MOSTRAR_DETALLE = True       # True = mostrar listado de jugadores por posición
 MAX_PUNTOS = 260              # Máximo de puntos por alineación (límite duro)
+NUM_LINEUPS = 4               # Número de alineaciones a generar
 MIN_PUNTOS = 240              # Mínimo deseable (penaliza si baja de aquí)
 PESO_CUOTAS = 0.3             # Peso de las cuotas (0 = solo media, 0.5 = mucha influencia)
 PESO_GOLES = 0.2              # Peso de over/under y clean sheet (0 = ignorar)
@@ -293,6 +294,19 @@ def _name_match(excel_name, card_name):
     if all(any(cw.startswith(ew) for cw in card_words) for ew in excel_words):
         return 0.9
 
+    # Nombre abreviado: "S. HERRERA" ↔ "Sergio Herrera"
+    if len(excel_words) >= 2 and len(card_words) >= 2:
+        first_card = card_words[0].rstrip('.')
+        if len(first_card) == 1 and excel_words[0][0] == first_card:
+            rest_sim = _similarity(' '.join(excel_words[1:]), ' '.join(card_words[1:]))
+            if rest_sim > 0.8:
+                return 0.85 + rest_sim * 0.1
+        first_excel = excel_words[0].rstrip('.')
+        if len(first_excel) == 1 and card_words[0][0] == first_excel:
+            rest_sim = _similarity(' '.join(excel_words[1:]), ' '.join(card_words[1:]))
+            if rest_sim > 0.8:
+                return 0.85 + rest_sim * 0.1
+
     # Similaridad general
     return _similarity(excel_name, card_name)
 
@@ -314,17 +328,20 @@ def build_team_map(lineup, cards):
             continue
 
         best_score = 0
-        best_team = '?'
+        best_candidates = []
         for card in cards:
             score = _name_match(excel_name, card['name'])
             if score > best_score:
                 best_score = score
-                best_team = card['team']
-                if score >= 0.95:
-                    break
+                best_candidates = [card['team']]
+            elif score == best_score and score > 0:
+                best_candidates.append(card['team'])
 
-        if best_score < 0.5:
+        if best_score < 0.5 or not best_candidates:
             best_team = '?'
+        else:
+            # Mayoría de votos para manejar traspasos (el equipo actual aparece más veces)
+            best_team = Counter(best_candidates).most_common(1)[0][0]
 
         team_map[excel_name] = best_team
 
@@ -746,12 +763,34 @@ def _combos_satisfied(lineups, combos):
     return True
 
 
-def optimize_lineups(lineup_data, team_map, odds_map=None, combos=None):
-    """Encuentra las 4 mejores alineaciones disjuntas (maximiza score efectivo)."""
+def _greedy_fill(players, n_remaining, max_score, combos):
+    """
+    Rellena recursivamente n_remaining alineaciones disjuntas de forma greedy.
+    Devuelve lista de alineaciones o None si no es posible.
+    """
+    if n_remaining == 0:
+        return []
+    top_k = min(15, 3 ** max(0, n_remaining - 1))  # más profundidad cuando quedan más
+    cands = generate_valid_lineups(players, max_score, combos)
+    if not cands:
+        return None
+    for eff, lineup in cands[:top_k]:
+        used = {p['id'] for p in lineup}
+        rem = [p for p in players if p['id'] not in used]
+        rest = _greedy_fill(rem, n_remaining - 1, max_score, combos)
+        if rest is not None:
+            return [lineup] + rest
+    return None
+
+
+def optimize_lineups(lineup_data, team_map, odds_map=None, combos=None, n=None):
+    """Encuentra las N mejores alineaciones disjuntas (maximiza score efectivo)."""
+    if n is None:
+        n = NUM_LINEUPS
     players = build_player_pool(lineup_data, team_map, odds_map)
     has_odds = odds_map and any(p['adj_score'] != p['score'] for p in players)
 
-    print(f"\n⚙️  Optimizando 4 alineaciones (máx {MAX_PUNTOS} pts, soft cap)...")
+    print(f"\n⚙️  Optimizando {n} alineaciones (máx {MAX_PUNTOS} pts, soft cap)...")
     if has_odds:
         print(f"   📊 Cuotas aplicadas (peso: {PESO_CUOTAS})")
     if combos:
@@ -780,92 +819,57 @@ def optimize_lineups(lineup_data, team_map, odds_map=None, combos=None):
     best_result = None
     best_eff = 0
 
-    # Probar las top N primeras elecciones, greedy para el resto
-    top_1 = min(30, len(all_candidates))
+    # Probar las top K primeras como primera alineación, greedy recursivo para el resto
+    top_1 = min(50, len(all_candidates))
 
     for i in range(top_1):
         eff_1, lineup_1 = all_candidates[i]
         used_1 = {p['id'] for p in lineup_1}
         rem_1 = [p for p in players if p['id'] not in used_1]
 
-        cands_2 = generate_valid_lineups(rem_1, MAX_PUNTOS, combos)
-        if not cands_2:
+        rest = _greedy_fill(rem_1, n - 1, MAX_PUNTOS, combos)
+        if rest is None:
             continue
 
-        top_2 = min(10, len(cands_2))
-        for j in range(top_2):
-            eff_2, lineup_2 = cands_2[j]
-            used_2 = used_1 | {p['id'] for p in lineup_2}
-            rem_2 = [p for p in players if p['id'] not in used_2]
+        candidate = [lineup_1] + rest
+        all_used = {p['id'] for lu in candidate for p in lu}
+        total_eff = sum(_lineup_eff_score(lu, combos) for lu in candidate)
 
-            cands_3 = generate_valid_lineups(rem_2, MAX_PUNTOS, combos)
-            if not cands_3:
-                continue
+        # Restricciones duras
+        if must_use_ids and not must_use_ids.issubset(all_used):
+            continue
+        if combos and not _combos_satisfied(candidate, combos):
+            continue
 
-            eff_3, lineup_3 = cands_3[0]
-            used_3 = used_2 | {p['id'] for p in lineup_3}
-            rem_3 = [p for p in players if p['id'] not in used_3]
+        if total_eff > best_eff:
+            best_eff = total_eff
+            best_result = candidate
 
-            cands_4 = generate_valid_lineups(rem_3, MAX_PUNTOS, combos)
-            if not cands_4:
-                continue
-
-            eff_4, lineup_4 = cands_4[0]
-            candidate = [lineup_1, lineup_2, lineup_3, lineup_4]
-            total_eff = eff_1 + eff_2 + eff_3 + eff_4
-
-            # Validar restricciones duras
-            all_used = {p['id'] for lu in candidate for p in lu}
-
-            # Todos los jugadores bold deben estar
-            if must_use_ids and not must_use_ids.issubset(all_used):
-                continue
-
-            # Cada combo debe aparecer junto en al menos una alineación
-            if combos and not _combos_satisfied(candidate, combos):
-                continue
-
-            if total_eff > best_eff:
-                best_eff = total_eff
-                best_result = candidate
-
-    # Si no encontramos resultado con constraints, relajar y avisar
+    # Si no encontramos con constraints, relajar y avisar
     if not best_result:
         print("   ⚠️  No se pudo cumplir todas las restricciones, reintentando sin ellas...")
         for i in range(top_1):
             eff_1, lineup_1 = all_candidates[i]
             used_1 = {p['id'] for p in lineup_1}
             rem_1 = [p for p in players if p['id'] not in used_1]
-            cands_2 = generate_valid_lineups(rem_1, MAX_PUNTOS, combos)
-            if not cands_2:
+            rest = _greedy_fill(rem_1, n - 1, MAX_PUNTOS, combos)
+            if rest is None:
                 continue
-            eff_2, lineup_2 = cands_2[0]
-            used_2 = used_1 | {p['id'] for p in lineup_2}
-            rem_2 = [p for p in players if p['id'] not in used_2]
-            cands_3 = generate_valid_lineups(rem_2, MAX_PUNTOS, combos)
-            if not cands_3:
-                continue
-            eff_3, lineup_3 = cands_3[0]
-            used_3 = used_2 | {p['id'] for p in lineup_3}
-            rem_3 = [p for p in players if p['id'] not in used_3]
-            cands_4 = generate_valid_lineups(rem_3, MAX_PUNTOS, combos)
-            if not cands_4:
-                continue
-            eff_4, lineup_4 = cands_4[0]
-            total_eff = eff_1 + eff_2 + eff_3 + eff_4
+            candidate = [lineup_1] + rest
+            total_eff = sum(_lineup_eff_score(lu, combos) for lu in candidate)
             if total_eff > best_eff:
                 best_eff = total_eff
-                best_result = [lineup_1, lineup_2, lineup_3, lineup_4]
+                best_result = candidate
             break
 
     if best_result:
         raw_total = sum(p['score'] for lu in best_result for p in lu)
         if has_odds:
-            print(f"   ✅ Mejor combinación: {raw_total} pts reales (eff: {best_eff:.0f})")
+            print(f"   ✅ Mejor combinación: {raw_total} pts reales ({n} alineaciones, eff: {best_eff:.0f})")
         else:
-            print(f"   ✅ Mejor combinación encontrada: {raw_total} pts totales")
+            print(f"   ✅ Mejor combinación encontrada: {raw_total} pts totales ({n} alineaciones)")
     else:
-        print("   ❌ No se pudieron formar 4 alineaciones completas")
+        print(f"   ❌ No se pudieron formar {n} alineaciones completas")
 
     return best_result, players
 
@@ -893,7 +897,7 @@ def _lineup_eff_score(lineup, combos=None):
 
 
 def print_lineups(lineups, odds_map=None, combos=None):
-    """Imprime las 4 alineaciones optimizadas, ordenadas de mejor a peor."""
+    """Imprime las alineaciones optimizadas, ordenadas de mejor a peor."""
     # Ordenar por score efectivo (mejor primero)
     lineups = sorted(lineups, key=lambda lu: -_lineup_eff_score(lu, combos))
 
@@ -942,7 +946,8 @@ def print_lineups(lineups, odds_map=None, combos=None):
                   f"   {p['team']}{cl}{lock}{odds_info}")
 
     print(f"\n{'━' * 68}")
-    print(f"  TOTAL: {total_all} pts  (media: {total_all / len(lineups):.0f} pts/alineación)")
+    print(f"  TOTAL: {total_all} pts en {len(lineups)} alineaciones  "
+          f"(media: {total_all / len(lineups):.0f} pts/alineación)")
     print(f"{'━' * 68}")
 
 

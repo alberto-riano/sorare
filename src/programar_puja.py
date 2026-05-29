@@ -2,11 +2,12 @@
 # ============================================================
 # CONFIGURACIÓN 
 # ============================================================
-DEFAULT_IDENTIFIER = "https://sorare.com/football/market/shop/auctions?rarity=rare&lf=seasonal-spain&card=andrei-florin-ratiu-2025-rare-91"
-DEFAULT_EUROS = 7.75       # Cantidad en euros
-DEFAULT_HORA = "11:14:59"   # Hora España HH:MM o HH:MM:SS
-NOW = False                   # True = pujar YA, ignora la hora
-BG = True                    # True = ejecutar en segundo plano (puedes cerrar VS Code)
+DEFAULT_IDENTIFIER = "https://sorare.com/football/market/shop/auctions?rarity=rare&lf=seasonal-spain&card=joao-pedro-cavaco-cancelo-2025-rare-62"
+DEFAULT_EUROS = 5.7       # Cantidad en euros (con .)
+DEFAULT_HORA = "14:00:59"   # Hora España HH:MM o HH:MM:SS
+NOW = True                   # True = pujar YA, ignora la hora
+SNIPER = False                # True = pujar 1 min antes de que termine la subasta (ignora hora y NOW)
+BG = False                    # True = ejecutar en segundo plano (puedes cerrar VS Code)
 USE_CREDIT = True             # True = usar créditos de conversión disponibles al pujar
 # ============================================================
 """
@@ -17,6 +18,7 @@ Uso:
     python3 programar_puja.py                               # usa defaults de arriba
     python3 programar_puja.py <auction_id> <euros> <hora>
     python3 programar_puja.py --now                         # fuerza puja inmediata
+    python3 programar_puja.py --sniper                      # puja 1 min antes del fin
     python3 programar_puja.py --bg                          # en segundo plano
 """
 import sys
@@ -544,20 +546,27 @@ Ejemplos:
   kill $(cat output/puja_programada.pid)
         """)
     parser.add_argument('identifier', nargs='?', default=None, help='Auction ID o Asset ID (o edita DEFAULT_IDENTIFIER)')
-    parser.add_argument('euros', nargs='?', type=float, default=None, help='Euros a pujar (o edita DEFAULT_EUROS)')
+    parser.add_argument('euros', nargs='?', default=None, help='Euros a pujar (acepta , o .)')
     parser.add_argument('hora', nargs='?', default=None, help='Hora España HH:MM o HH:MM:SS (o edita DEFAULT_HORA)')
     parser.add_argument('--bg', action='store_true', help='Ejecutar en segundo plano (sobrevive a cerrar terminal)')
     parser.add_argument('--now', action='store_true', help='Pujar inmediatamente (ignora hora)')
+    parser.add_argument('--sniper', action='store_true',
+                        help='Pujar exactamente 1 minuto antes de que termine la subasta')
 
     args = parser.parse_args()
 
     # Usar argumentos o defaults
     identifier = args.identifier or DEFAULT_IDENTIFIER
-    euros = args.euros if args.euros is not None else DEFAULT_EUROS
+    if args.euros is not None:
+        euros = float(args.euros.replace(',', '.'))
+    else:
+        euros = DEFAULT_EUROS
     hora = args.hora or DEFAULT_HORA
 
     # NOW: desde argumento --now o variable global
-    do_now = args.now or NOW
+    # SNIPER: desde argumento --sniper o variable global (tiene prioridad sobre NOW)
+    do_sniper = args.sniper or SNIPER
+    do_now = (args.now or NOW) and not do_sniper
 
     # Validar
     if not identifier:
@@ -566,12 +575,13 @@ Ejemplos:
     if not euros or euros <= 0:
         print("❌ Falta la cantidad. Pásala como argumento o edita DEFAULT_EUROS en el código.")
         sys.exit(1)
-    if not do_now and not hora:
-        print("❌ Falta la hora. Pásala como argumento, edita DEFAULT_HORA, o pon NOW = True.")
+    if not do_now and not do_sniper and not hora:
+        print("❌ Falta la hora. Pásala como argumento, edita DEFAULT_HORA, o usa SNIPER/NOW = True.")
         sys.exit(1)
 
     bid_cents = int(round(euros * 100))
-    target_time = None if do_now else parse_time_spain(hora)
+    # target_time se calculará después de resolver la subasta en modo sniper
+    target_time = None if (do_now or do_sniper) else parse_time_spain(hora)
 
     print("=" * 60)
     print("🎯 PUJA PROGRAMADA — SORARE")
@@ -579,6 +589,8 @@ Ejemplos:
     print(f"   Hora actual:  {now_spain().strftime('%H:%M:%S')} (España)")
     if do_now:
         print(f"   Modo:         AHORA")
+    elif do_sniper:
+        print(f"   Modo:         SNIPER (1 min antes del fin)")
     else:
         print(f"   Puja a las:   {target_time.strftime('%H:%M:%S')} (España)")
     print(f"   Cantidad:     {euros:.2f}€ ({bid_cents} céntimos)")
@@ -590,7 +602,25 @@ Ejemplos:
 
     # Verificar subasta
     print(f"\n📋 Verificando subasta...")
-    verify_auction(auction_id, headers)
+    auction_data = verify_auction(auction_id, headers)
+
+    # En modo sniper, calcular hora = endDate - 1 minuto
+    if do_sniper:
+        end_date_str = auction_data['endDate']
+        # Parsear ISO 8601 endDate
+        end_dt = datetime.fromisoformat(end_date_str.replace('Z', '+00:00')).astimezone(SPAIN_TZ)
+        target_time = end_dt - timedelta(seconds=60)
+        remaining_to_end = (end_dt - now_spain()).total_seconds()
+        if remaining_to_end <= 0:
+            print("❌ La subasta ya ha terminado")
+            sys.exit(1)
+        if remaining_to_end <= 60:
+            print(f"   ⚡ Quedan {remaining_to_end:.0f}s — pujando YA")
+            do_now = True
+            target_time = None
+        else:
+            print(f"   🎯 Subasta termina a las {end_dt.strftime('%H:%M:%S')} (España)")
+            print(f"   🎯 Puja programada a las {target_time.strftime('%H:%M:%S')} (1 min antes)")
 
     # Obtener mi nickname para saber si estoy ganando
     my_nickname = get_my_nickname(headers)

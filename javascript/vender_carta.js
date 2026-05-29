@@ -9,9 +9,13 @@ import {
   getBase58Encoder,
   getBase58Decoder,
 } from "@solana/kit";
+import { fileURLToPath } from "url";
+import path from "path";
 
 // --- Lectura de fichero de configuración ---
-const CONFIG_PATH = "../config.txt";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CONFIG_PATH = path.join(__dirname, "..", "config", "config.txt");
 
 function readConfig(filename = CONFIG_PATH) {
   const config = {};
@@ -33,6 +37,7 @@ if (!ASSET_ID || !PRICE_CENTS) {
   console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias_en_venta]");
   process.exit(1);
 }
+const DURATION_DAYS = parseInt(DAYS) || 7;  // por defecto 7 días
 
 // --- Leer configuración ---
 const { JWT_TOKEN, PRIVATE_KEY, JWT_AUD, SOLANA_PRIVATE_KEY } = readConfig();
@@ -294,15 +299,7 @@ async function buildApprovalsCombined(
 }
 
 // --- Lógica principal unificada ---
-async function sellCard(assetId, priceCents, daysOnSale) {
-  if (daysOnSale) {
-    const now = new Date();
-    const endDate = new Date(now.getTime() + daysOnSale * 24 * 60 * 60 * 1000);
-    console.log(
-      `(Nota: la API no soporta duración, pero mostraríamos hasta: ${endDate.toISOString()})`
-    );
-  }
-
+async function sellCard(assetId, priceCents, durationDays) {
   const prepareOfferInput = {
     sendAssetIds: [assetId],
     receiveAssetIds: [],
@@ -362,4 +359,7 @@ async function sellCard(assetId, priceCents, daysOnSale) {
 }
 
 // --- Invocación principal ---
-sellCard(ASSET_ID, PRICE_CENTS, DAYS).catch(console.error);
+sellCard(ASSET_ID, PRICE_CENTS, DURATION_DAYS).catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

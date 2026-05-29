@@ -4,3 +4,6 @@
 courtois 100
 lamine yamal 700
 dani olmo 52
+gonzalo 30
+militao 22
+baena 20

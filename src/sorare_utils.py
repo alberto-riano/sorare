@@ -176,6 +176,7 @@ def get_live_single_sale_offers(player_slug, headers=None):
                 seasonYear
                 serialNumber
                 grade
+                inSeasonEligible
                 anyPlayer {
                   slug
                   displayName
@@ -372,10 +373,11 @@ def get_matching_offers(asset_id, headers=None, rates=None):
                     sort_price = float('inf')
                 matching.append({
                     'name': c['name'],
-                  'slug': c.get('slug'),
+                    'slug': c.get('slug'),
                     'serial': c['serialNumber'],
                     'season': c['seasonYear'],
                     'grade': c['grade'],
+                    'in_season_eligible': c.get('inSeasonEligible', False),
                     'team': c['anyTeam']['name'] if c['anyTeam'] else 'N/A',
                     'amounts': amounts,
                     'sort_price': sort_price,
@@ -401,3 +403,24 @@ def get_min_price_eur(asset_id, headers=None, rates=None):
     except (requests.RequestException, RuntimeError, KeyError, ValueError, TypeError) as e:
         print(f"  Error consultando precio para {asset_id[:20]}...: {e}")
         return None
+
+
+def get_min_prices_eur(asset_id, headers=None, rates=None):
+    """Devuelve (min_classic_eur, min_inseason_eur) separando ofertas classic e in-season.
+    Cada valor es float o None si no hay ofertas de ese tipo.
+    """
+    try:
+        _card, matching = get_matching_offers(asset_id, headers=headers, rates=rates)
+        classic = [m for m in matching if not m.get('in_season_eligible', False)]
+        inseason = [m for m in matching if m.get('in_season_eligible', False)]
+
+        def _cheapest(offers):
+            if not offers:
+                return None
+            price = offers[0]['sort_price']
+            return None if price == float('inf') else price / 100
+
+        return _cheapest(classic), _cheapest(inseason)
+    except (requests.RequestException, RuntimeError, KeyError, ValueError, TypeError) as e:
+        print(f"  Error consultando precios para {asset_id[:20]}...: {e}")
+        return None, None
