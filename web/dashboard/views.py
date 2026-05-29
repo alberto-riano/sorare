@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
 
 from django.contrib import messages
 from django.http import FileResponse, Http404
@@ -26,6 +29,9 @@ SALES_SELECTED_RARITY_SESSION_KEY = "sales_selected_rarity"
 SALES_CONFIRM_STATE_SESSION_KEY = "sales_confirm_state"
 SALES_DURATION_DAYS = 2
 
+# Añadir el directorio src al path para importar listar_subastas
+sys.path.insert(0, str(REPO_ROOT / 'src'))
+
 
 def _to_bool_text(value: bool) -> str:
     return "true" if value else "false"
@@ -35,24 +41,42 @@ def index(request):
     cards = [
         {
             "title": "Alertas Telegram",
+            "icon": "fas fa-bell",
             "description": "Configura players, umbrales y ejecuta alertas sin tocar archivos.",
             "url": "telegram_alerts",
             "status": "Disponible",
         },
         {
             "title": "Programar Puja",
+            "icon": "fas fa-gavel",
             "description": "Lanza pujas now, sniper o por hora con formulario guiado.",
             "url": "bid_scheduler",
             "status": "Disponible",
         },
         {
             "title": "Exportar Cartas",
+            "icon": "fas fa-tag",
             "description": "Exporta por rareza, edita precios y procesa ventas desde la web.",
             "url": "sales_workbench",
             "status": "Disponible",
         },
         {
+            "title": "Subastas La Liga",
+            "icon": "fas fa-gavel",
+            "description": "Visualiza las subastas activas de La Liga en tiempo real.",
+            "url": "auctions_list",
+            "status": "Disponible",
+        },
+        {
+            "title": "Ofertas Recibidas",
+            "icon": "fas fa-envelope-open-text",
+            "description": "Consulta las ofertas pendientes que has recibido por tus cartas.",
+            "url": "offers_received",
+            "status": "Disponible",
+        },
+        {
             "title": "Lineup Helper",
+            "icon": "fas fa-users",
             "description": "Siguiente fase: asistente visual para alinear y comparar opciones.",
             "url": None,
             "status": "Proxima iteracion",
@@ -386,3 +410,93 @@ def sales_download_excel(request):
         as_attachment=True,
         filename=current_excel.name,
     )
+
+
+def auctions_list(request):
+    """Vista para mostrar las ofertas/subastas activas de La Liga."""
+    import listar_subastas
+    
+    auctions = []
+    error = None
+    loading = False
+    
+    if request.method == "POST" or request.GET.get("load"):
+        loading = True
+        try:
+            # Filtros desde el formulario
+            team_filters = request.POST.getlist("teams") or request.GET.getlist("teams") or None
+            rarity = request.POST.get("rarity") or request.GET.get("rarity") or "rare"
+            
+            # Fetch auctions
+            auctions = listar_subastas.fetch_la_liga_rare_auctions(
+                team_filters=team_filters if team_filters else None,
+                rarity=rarity
+            )
+            
+            # Ordenar por fecha de fin
+            auctions.sort(key=lambda x: x['end_date'])
+            
+            messages.success(request, f"✅ Encontradas {len(auctions)} subastas activas")
+        except Exception as e:
+            error = str(e)
+            messages.error(request, f"Error al cargar subastas: {error}")
+    
+    # Equipos disponibles para filtro
+    available_teams = listar_subastas.LA_LIGA_TEAM_SLUGS
+    
+    return render(
+        request,
+        "dashboard/auctions.html",
+        {
+            "auctions": auctions,
+            "error": error,
+            "loading": loading,
+            "available_teams": available_teams,
+        },
+    )
+
+
+def offers_received(request):
+    """Muestra las ofertas recibidas pendientes."""
+    import listar_ofertas_recibidas
+
+    offers = []
+    eth_rate = 0
+    error = None
+    try:
+        offers, eth_rate = listar_ofertas_recibidas.fetch_pending_offers_received()
+    except Exception as e:
+        error = str(e)
+
+    return render(
+        request,
+        "dashboard/offers_received.html",
+        {"offers": offers, "error": error, "total": len(offers), "eth_rate": eth_rate},
+    )
+
+
+@csrf_exempt
+def offers_market_prices(request):
+    """AJAX endpoint: calcula precios mínimos de mercado para una lista de asset_ids."""
+    import json
+    from sorare_utils import build_headers, fetch_exchange_rates, get_all_min_prices_for_player
+
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+
+    try:
+        body = json.loads(request.body)
+        asset_ids = body.get("asset_ids", [])
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    headers = build_headers()
+    rates = fetch_exchange_rates()
+    results = {}
+    for asset_id in asset_ids:
+        if not asset_id or asset_id in results:
+            continue
+        prices = get_all_min_prices_for_player(asset_id, headers=headers, rates=rates)
+        results[asset_id] = prices
+
+    return JsonResponse({"prices": results})

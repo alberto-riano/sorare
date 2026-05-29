@@ -1,0 +1,315 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Ofertas Recibidas – Sorare Command Center{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 1.5rem;">
+    <h1><i class="fas fa-envelope-open-text"></i> Ofertas Recibidas</h1>
+    <p style="color: var(--muted);">Ofertas pendientes ordenadas por precio (mayor a menor) · ETH/EUR: €{{ eth_rate|floatformat:2 }}</p>
+</div>
+
+{% if error %}
+<div class="message message-error">
+    <i class="fas fa-exclamation-triangle"></i> {{ error }}
+</div>
+{% endif %}
+
+{% if offers %}
+<div class="offers-toolbar">
+    <span class="offers-count"><i class="fas fa-inbox"></i> <strong>{{ total }}</strong> ofertas</span>
+    <div class="filter-buttons">
+        <button class="filter-btn active" data-filter="all"><i class="fas fa-list"></i> Todas</button>
+        <button class="filter-btn" data-filter="buy"><i class="fas fa-coins"></i> Me compran</button>
+        <button class="filter-btn" data-filter="sell"><i class="fas fa-shopping-cart"></i> Me venden</button>
+        <button class="filter-btn" data-filter="swap"><i class="fas fa-exchange-alt"></i> Intercambio</button>
+    </div>
+    <div class="sort-buttons">
+        <button class="sort-btn active" data-sort="price-desc"><i class="fas fa-sort-amount-down"></i> Precio ↓</button>
+        <button class="sort-btn" data-sort="price-asc"><i class="fas fa-sort-amount-up"></i> Precio ↑</button>
+        <button class="sort-btn" data-sort="date"><i class="fas fa-calendar"></i> Fecha</button>
+    </div>
+    <button class="calc-btn" id="calcPricesBtn"><i class="fas fa-calculator"></i> Calcular precios</button>
+</div>
+
+<div class="offers-grid" id="offersGrid">
+{% for offer in offers %}
+<div class="offer-card offer-{{ offer.offer_type }}"
+     data-type="{{ offer.offer_type }}"
+     data-price="{{ offer.sort_price_eur }}"
+     data-date="{{ offer.createdAt }}">
+
+    <div class="offer-header">
+        <span class="offer-type-badge type-{{ offer.offer_type }}">
+            {% if offer.offer_type == 'buy' %}
+                <i class="fas fa-coins"></i> Me compran
+            {% elif offer.offer_type == 'sell' %}
+                <i class="fas fa-shopping-cart"></i> Me venden
+            {% elif offer.offer_type == 'swap' %}
+                <i class="fas fa-exchange-alt"></i> Intercambio
+            {% else %}
+                <i class="fas fa-question"></i> Otro
+            {% endif %}
+        </span>
+        <span class="offer-sender">
+            <i class="fas fa-user"></i> {{ offer.sender_nickname }}
+        </span>
+    </div>
+
+    <!-- Price banners -->
+    {% if offer.eth_they_send > 0 or offer.eur_they_send > 0 %}
+    <div class="price-banner price-incoming">
+        <div class="price-left">
+            <span class="price-icon"><i class="fas fa-arrow-down"></i></span>
+            <span class="price-label">Me pagan</span>
+        </div>
+        <div class="price-right">
+            <span class="price-eur">{{ offer.eur_they_send|floatformat:2 }} €</span>
+            <span class="price-eth">{{ offer.eth_they_send|floatformat:4 }} ETH</span>
+        </div>
+    </div>
+    {% endif %}
+    {% if offer.eth_they_ask > 0 or offer.eur_they_ask > 0 %}
+    <div class="price-banner price-outgoing">
+        <div class="price-left">
+            <span class="price-icon"><i class="fas fa-arrow-up"></i></span>
+            <span class="price-label">Me piden</span>
+        </div>
+        <div class="price-right">
+            <span class="price-eur">{{ offer.eur_they_ask|floatformat:2 }} €</span>
+            <span class="price-eth">{{ offer.eth_they_ask|floatformat:4 }} ETH</span>
+        </div>
+    </div>
+    {% endif %}
+    {% if offer.price_unknown %}
+    <div class="price-banner price-unknown">
+        <div class="price-left">
+            <span class="price-icon"><i class="fas fa-eye-slash"></i></span>
+            <span class="price-label">También pide dinero</span>
+        </div>
+        <div class="price-right">
+            <span class="price-hint">Precio no visible vía API</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="offer-body">
+        {% if offer.my_cards %}
+        <div class="offer-section">
+            <span class="offer-label"><i class="fas fa-arrow-right"></i> Quiere mi carta:</span>
+            {% for card in offer.my_cards %}
+            <div class="card-tag rarity-{{ card.rarity }}" data-asset="{{ card.asset_id }}" data-rarity="{{ card.rarity }}">
+                <span class="card-player">{{ card.player }}</span>
+                <span class="card-meta">{{ card.season_display }} · Lvl {{ card.level }}</span>
+                <div class="card-market" style="display:none;"></div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if offer.their_cards %}
+        <div class="offer-section">
+            <span class="offer-label"><i class="fas fa-arrow-left"></i> Me ofrece carta:</span>
+            {% for card in offer.their_cards %}
+            <div class="card-tag rarity-{{ card.rarity }}" data-asset="{{ card.asset_id }}" data-rarity="{{ card.rarity }}">
+                <span class="card-player">{{ card.player }}</span>
+                <span class="card-meta">{{ card.season_display }} · Lvl {{ card.level }}</span>
+                <div class="card-market" style="display:none;"></div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="offer-footer">
+        <span class="offer-expiry"><i class="fas fa-clock"></i> {{ offer.endDate|slice:":10" }}</span>
+    </div>
+</div>
+{% endfor %}
+</div>
+
+<script>
+document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const filter = btn.dataset.filter;
+        document.querySelectorAll('.offer-card').forEach(card => {
+            if (filter === 'all') card.style.display = '';
+            else card.style.display = card.dataset.type === filter ? '' : 'none';
+        });
+    });
+});
+document.querySelectorAll('.sort-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const grid = document.getElementById('offersGrid');
+        const cards = [...grid.querySelectorAll('.offer-card')];
+        cards.sort((a, b) => {
+            if (btn.dataset.sort === 'price-desc') return parseFloat(b.dataset.price) - parseFloat(a.dataset.price);
+            if (btn.dataset.sort === 'price-asc') return parseFloat(a.dataset.price) - parseFloat(b.dataset.price);
+            if (btn.dataset.sort === 'date') return b.dataset.date.localeCompare(a.dataset.date);
+        });
+        cards.forEach(c => grid.appendChild(c));
+    });
+});
+
+// Calcular precios de mercado
+document.getElementById('calcPricesBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('calcPricesBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Calculando...';
+
+    // Collect all asset_ids from limited/rare cards
+    const cardTags = document.querySelectorAll('.card-tag[data-asset]');
+    const assetIds = new Set();
+    cardTags.forEach(el => {
+        const asset = el.dataset.asset;
+        const rarity = el.dataset.rarity;
+        if (asset && (rarity === 'limited' || rarity === 'rare')) {
+            assetIds.add(asset);
+        }
+    });
+
+    if (assetIds.size === 0) {
+        btn.innerHTML = '<i class="fas fa-calculator"></i> Sin cartas';
+        return;
+    }
+
+    try {
+        const resp = await fetch('/ofertas-recibidas/precios/', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+            body: JSON.stringify({asset_ids: [...assetIds]})
+        });
+        const data = await resp.json();
+        if (data.prices) {
+            cardTags.forEach(el => {
+                const asset = el.dataset.asset;
+                const prices = data.prices[asset];
+                if (!prices) return;
+                const marketDiv = el.querySelector('.card-market');
+                let html = '';
+                if (prices.limited_classic != null) html += `<span class="mp-limited">C: ${prices.limited_classic}€</span>`;
+                if (prices.limited_inseason != null) html += `<span class="mp-limited">IS: ${prices.limited_inseason}€</span>`;
+                if (prices.rare_classic != null) html += `<span class="mp-rare">C: ${prices.rare_classic}€</span>`;
+                if (prices.rare_inseason != null) html += `<span class="mp-rare">IS: ${prices.rare_inseason}€</span>`;
+                if (html) {
+                    marketDiv.innerHTML = html;
+                    marketDiv.style.display = 'flex';
+                }
+            });
+        }
+        btn.innerHTML = '<i class="fas fa-check"></i> Calculado';
+    } catch (e) {
+        btn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Error';
+    }
+});
+</script>
+
+{% else %}
+<div style="text-align: center; padding: 3rem; color: var(--muted);">
+    <i class="fas fa-inbox" style="font-size: 3rem; margin-bottom: 1rem; display: block;"></i>
+    <p>No tienes ofertas pendientes.</p>
+</div>
+{% endif %}
+
+<style>
+.offers-toolbar {
+    display: flex; align-items: center; gap: 1rem; margin-bottom: 1.2rem; flex-wrap: wrap;
+}
+.offers-count { color: var(--accent); font-size: 0.9rem; }
+.filter-buttons, .sort-buttons { display: flex; gap: 0.4rem; }
+.filter-btn, .sort-btn {
+    background: var(--card); border: 1px solid var(--border); color: var(--muted);
+    padding: 0.35rem 0.75rem; border-radius: 8px; cursor: pointer; font-size: 0.75rem; transition: all 0.2s;
+}
+.filter-btn:hover, .filter-btn.active, .sort-btn:hover, .sort-btn.active {
+    background: var(--accent); color: white; border-color: var(--accent);
+}
+.offers-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 1rem; }
+
+.offer-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 1.2rem; transition: transform 0.2s, box-shadow 0.2s;
+    border-top: 3px solid var(--border);
+}
+.offer-card:hover { transform: translateY(-3px); box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
+.offer-card.offer-buy { border-top-color: #10b981; }
+.offer-card.offer-sell { border-top-color: #f59e0b; }
+.offer-card.offer-swap { border-top-color: #8b5cf6; }
+
+.offer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem; }
+.offer-type-badge {
+    font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 0.3rem 0.7rem; border-radius: 6px; border: 1px solid;
+}
+.type-buy { background: var(--accent); color: #fff; border-color: var(--accent); }
+.type-sell { background: rgba(245,158,11,0.08); color: #fbbf24; border-color: rgba(245,158,11,0.25); }
+.type-swap { background: rgba(139,92,246,0.08); color: #a78bfa; border-color: rgba(139,92,246,0.25); }
+.offer-sender { font-size: 0.85rem; color: var(--fg); }
+
+/* Price banners - elegant minimal style */
+.price-banner {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.55rem 0.85rem; border-radius: 10px; margin-bottom: 0.5rem;
+}
+.price-left { display: flex; align-items: center; gap: 0.5rem; }
+.price-icon { font-size: 0.7rem; opacity: 0.7; }
+.price-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 500; }
+.price-right { display: flex; flex-direction: column; align-items: flex-end; }
+.price-eur { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.3px; }
+.price-eth { font-size: 0.68rem; opacity: 0.5; margin-top: 1px; }
+
+.price-incoming {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+}
+.price-incoming .price-label, .price-incoming .price-icon { color: rgba(255,255,255,0.85); }
+.price-incoming .price-eur { color: #fff; }
+
+.price-outgoing {
+    background: rgba(251, 146, 60, 0.15);
+    border: 1px solid rgba(251, 146, 60, 0.4);
+}
+.price-outgoing .price-label, .price-outgoing .price-icon { color: #fb923c; }
+.price-outgoing .price-eur { color: #c2410c; }
+
+.price-unknown {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+.price-unknown .price-label, .price-unknown .price-icon { color: #a1a1aa; }
+.price-hint { font-size: 0.7rem; color: #71717a; font-style: italic; }
+
+/* Card tags with rarity colors */
+.card-tag {
+    display: flex; flex-direction: column; padding: 0.5rem 0.8rem;
+    border-radius: 8px; margin: 0.3rem 0; border-left: 4px solid;
+}
+.card-tag.rarity-limited { background: rgba(253,224,71,0.08); border-left-color: #fde047; }
+.card-tag.rarity-rare { background: rgba(239,68,68,0.08); border-left-color: #ef4444; }
+.card-tag.rarity-super_rare { background: rgba(59,130,246,0.08); border-left-color: #3b82f6; }
+.card-tag.rarity-unique { background: rgba(168,85,247,0.08); border-left-color: #a855f7; }
+.card-tag.rarity-unknown { background: rgba(255,255,255,0.03); border-left-color: var(--border); }
+.card-market { display: flex; gap: 6px; margin-top: 4px; font-size: 0.6rem; flex-wrap: wrap; }
+.card-market span { padding: 1px 6px; border-radius: 3px; font-weight: 500; }
+.mp-limited { background: #fde047; color: #1a1a1a; border: 1px solid #eab308; font-weight: 600; }
+.mp-rare { background: #f87171; color: #1a1a1a; border: 1px solid #ef4444; font-weight: 600; }
+.calc-btn {
+    background: var(--card); border: 1px solid var(--border); color: var(--muted);
+    padding: 0.35rem 0.85rem; border-radius: 8px; cursor: pointer; font-size: 0.75rem;
+    transition: all 0.2s; margin-left: auto;
+}
+.calc-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+.calc-btn:disabled { opacity: 0.6; cursor: wait; }
+.card-player { font-size: 0.9rem; font-weight: 600; color: var(--fg); }
+.card-meta { font-size: 0.7rem; color: var(--muted); margin-top: 0.15rem; }
+
+.offer-body { margin-bottom: 0.6rem; }
+.offer-section { margin-bottom: 0.5rem; }
+.offer-label { display: block; font-size: 0.7rem; color: var(--muted); margin-bottom: 0.25rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.offer-footer { padding-top: 0.5rem; border-top: 1px solid var(--border); }
+.offer-expiry { font-size: 0.75rem; color: var(--muted); }
+</style>
+{% endblock %}

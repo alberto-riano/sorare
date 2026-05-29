@@ -8,4 +8,7 @@ urlpatterns = [
     path("puja/", views.bid_scheduler, name="bid_scheduler"),
     path("ventas/", views.sales_workbench, name="sales_workbench"),
     path("ventas/download/", views.sales_download_excel, name="sales_download_excel"),
+    path("ofertas/", views.auctions_list, name="auctions_list"),
+    path("ofertas-recibidas/", views.offers_received, name="offers_received"),
+    path("ofertas-recibidas/precios/", views.offers_market_prices, name="offers_market_prices"),
 ]

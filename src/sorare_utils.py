@@ -388,6 +388,43 @@ def get_matching_offers(asset_id, headers=None, rates=None):
     return card, matching
 
 
+def get_all_min_prices_for_player(asset_id, headers=None, rates=None):
+    """Devuelve dict con 4 precios mínimos para el jugador de la carta:
+    limited_classic, limited_inseason, rare_classic, rare_inseason.
+    Cada valor es float (EUR) o None.
+    """
+    try:
+        card = get_card_info(asset_id, headers=headers)
+        player_slug = card['anyPlayer']['slug']
+        offers = get_live_single_sale_offers(player_slug, headers=headers)
+        if rates is None:
+            rates = (0.92, 1.17, 1800.0)
+
+        buckets = {
+            'limited_classic': [], 'limited_inseason': [],
+            'rare_classic': [], 'rare_inseason': [],
+        }
+        for offer in offers:
+            for c in offer['senderSide']['anyCards']:
+                rarity = c.get('rarityTyped', '').lower()
+                if rarity not in ('limited', 'rare'):
+                    continue
+                in_season = c.get('inSeasonEligible', False)
+                amounts = offer['receiverSide']['amounts']
+                price = to_eur_cents(amounts, rates)
+                if price is None or price == float('inf'):
+                    continue
+                key = f"{rarity}_{'inseason' if in_season else 'classic'}"
+                buckets[key].append(price / 100)
+
+        result = {}
+        for key, prices in buckets.items():
+            result[key] = round(min(prices), 2) if prices else None
+        return result
+    except Exception:
+        return {'limited_classic': None, 'limited_inseason': None, 'rare_classic': None, 'rare_inseason': None}
+
+
 def get_min_price_eur(asset_id, headers=None, rates=None):
     """Devuelve el precio mínimo en EUR (como float) de las ofertas de venta
     para cartas de la misma rareza y jugador. Devuelve None si no hay ofertas.

@@ -69,26 +69,61 @@ body {
   text-decoration: none;
   color: var(--ink);
   letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.brand i {
+  color: var(--accent);
+  font-size: 1.3rem;
 }
 
 nav {
   display: flex;
-  gap: 0.8rem;
+  gap: 0.5rem;
+  flex: 1;
+  justify-content: center;
 }
 
 nav a {
   text-decoration: none;
   color: var(--ink);
   font-size: 0.9rem;
-  padding: 0.55rem 0.8rem;
+  padding: 0.55rem 0.9rem;
   border-radius: 999px;
   border: 1px solid transparent;
   transition: 160ms ease;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+nav a i {
+  font-size: 1rem;
 }
 
 nav a:hover {
   border-color: var(--line);
   transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.user-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), #0f766e);
+  color: white;
+  font-size: 0.88rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);
+}
+
+.user-badge i {
+  font-size: 1.1rem;
 }
 
 .page {
@@ -138,6 +173,30 @@ body.sales-export-pending .sales-edit-panel {
 .module-card {
   display: grid;
   gap: 0.9rem;
+  transition: all 240ms ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.module-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  opacity: 0;
+  transition: opacity 240ms ease;
+}
+
+.module-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.15);
+}
+
+.module-card:hover::before {
+  opacity: 1;
 }
 
 .module-head {
@@ -150,6 +209,14 @@ body.sales-export-pending .sales-edit-panel {
 .module-head h2 {
   margin: 0;
   font-size: 1.12rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.module-head h2 i {
+  color: var(--accent);
+  font-size: 1.3rem;
 }
 
 .badge {
@@ -611,6 +678,15 @@ pre {
   .site-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  nav {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .user-badge {
+    align-self: flex-end;
   }
 
   .table-head {

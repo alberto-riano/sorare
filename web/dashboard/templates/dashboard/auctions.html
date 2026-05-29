@@ -1,0 +1,136 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Ofertas Activas | Sorare{% endblock %}
+
+{% block content %}
+<section class="hero panel reveal">
+  <p class="kicker">Live auctions</p>
+  <h1><i class="fas fa-fire"></i> Subastas Activas de La Liga</h1>
+  <p class="hero-text">Visualiza en tiempo real las ofertas activas de cartas de La Liga disponibles en Sorare.</p>
+</section>
+
+<section class="panel form-panel reveal" style="animation-delay: 100ms;">
+  <h2><i class="fas fa-filter"></i> Cargar Subastas</h2>
+  <form method="post">
+    {% csrf_token %}
+    <div class="field-grid">
+      <label>
+        <span>Rareza</span>
+        <select name="rarity">
+          <option value="rare" selected>Rare (Rojas)</option>
+          <option value="limited">Limited (Amarillas)</option>
+          <option value="super_rare">Super Rare (Azules)</option>
+          <option value="unique">Unique (Negras)</option>
+        </select>
+      </label>
+    </div>
+    <div class="btn-row">
+      <button type="submit" class="btn btn-accent">
+        <i class="fas fa-sync"></i>
+        Cargar Subastas
+      </button>
+    </div>
+  </form>
+</section>
+
+{% if auctions %}
+<section class="panel reveal" style="animation-delay: 200ms;">
+  <div class="table-head">
+    <h2><i class="fas fa-list"></i> Resultados ({{ auctions|length }} subastas)</h2>
+  </div>
+  
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th><i class="fas fa-user"></i> Jugador</th>
+          <th><i class="fas fa-shield-alt"></i> Equipo</th>
+          <th><i class="fas fa-running"></i> Pos</th>
+          <th><i class="fas fa-hashtag"></i> Serial</th>
+          <th><i class="fas fa-calendar"></i> Temporada</th>
+          <th><i class="fas fa-euro-sign"></i> Puja Actual</th>
+          <th><i class="fas fa-user-tag"></i> Pujador</th>
+          <th><i class="fas fa-clock"></i> Finaliza</th>
+          <th><i class="fas fa-link"></i> Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for auction in auctions %}
+        <tr>
+          <td><strong>{{ auction.player }}</strong></td>
+          <td>{{ auction.team }}</td>
+          <td>{{ auction.position }}</td>
+          <td>{{ auction.serial }}</td>
+          <td>{{ auction.season }}</td>
+          <td>
+            {% if auction.bid_eur %}
+              <span style="color: var(--accent); font-weight: 600;">{{ auction.bid_eur|floatformat:2 }}€</span>
+            {% else %}
+              <span style="color: var(--muted);">Sin pujas</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if auction.bidder %}
+              <span class="badge">{{ auction.bidder }}</span>
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td style="font-size: 0.78rem; font-family: 'IBM Plex Mono', monospace;">
+            {{ auction.end_date|slice:":16" }}
+          </td>
+          <td>
+            <div style="display: flex; gap: 0.4rem;">
+              <a 
+                href="#" 
+                onclick="navigator.clipboard.writeText('{{ auction.auction_id }}'); alert('ID copiado: {{ auction.auction_id }}'); return false;"
+                class="btn btn-compact btn-secondary"
+                title="Copiar Auction ID"
+              >
+                <i class="fas fa-copy"></i>
+              </a>
+              <a 
+                href="#" 
+                onclick="navigator.clipboard.writeText('{{ auction.asset_id }}'); alert('Asset ID copiado: {{ auction.asset_id }}'); return false;"
+                class="btn btn-compact"
+                title="Copiar Asset ID"
+              >
+                <i class="fas fa-barcode"></i>
+              </a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="margin-top: 1rem; padding: 0.8rem; border: 1px dashed var(--line); border-radius: 12px; background: rgba(255,255,255,0.5);">
+    <p style="margin: 0 0 0.5rem; font-size: 0.88rem; color: var(--muted);">
+      <i class="fas fa-info-circle"></i> <strong>Para pujar:</strong>
+    </p>
+    <pre style="font-size: 0.8rem; margin: 0;">node javascript/pujar_carta.js &lt;auction_id&gt; &lt;puja_en_centimos_EUR&gt;
+
+Ejemplo: node javascript/pujar_carta.js EnglishAuction:xxxx 800  (= 8.00€)</pre>
+  </div>
+</section>
+{% elif loading %}
+<section class="panel reveal" style="animation-delay: 200ms;">
+  <div class="processing-indicator is-visible">
+    <div class="processing-dot"></div>
+    <div>
+      <strong>Cargando subastas...</strong>
+      <p>Esto puede tardar unos minutos mientras se escanean todas las subastas activas.</p>
+    </div>
+  </div>
+</section>
+{% else %}
+<section class="panel reveal" style="animation-delay: 200ms; text-align: center; padding: 2rem;">
+  <i class="fas fa-search" style="font-size: 3rem; color: var(--muted); margin-bottom: 1rem;"></i>
+  <p style="color: var(--muted); font-size: 1rem;">
+    Haz clic en "Cargar Subastas" para ver las ofertas activas.
+  </p>
+</section>
+{% endif %}
+
+{% endblock %}

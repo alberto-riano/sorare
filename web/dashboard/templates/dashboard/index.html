@@ -13,7 +13,10 @@
   {% for card in cards %}
     <article class="panel module-card reveal" style="animation-delay: {{ forloop.counter0 }}00ms;">
       <div class="module-head">
-        <h2>{{ card.title }}</h2>
+        <h2>
+          <i class="{{ card.icon }}"></i>
+          {{ card.title }}
+        </h2>
         <span class="badge">{{ card.status }}</span>
       </div>
       <p>{{ card.description }}</p>

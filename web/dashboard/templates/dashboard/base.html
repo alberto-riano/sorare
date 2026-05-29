@@ -4,22 +4,43 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Sorare Control Hub{% endblock %}</title>
+  <title>{% block title %}Sorare Command Center{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="{% static 'dashboard/style.css' %}">
 </head>
 <body>
   <div class="bg-orb orb-a"></div>
   <div class="bg-orb orb-b"></div>
   <header class="site-header">
-    <a class="brand" href="{% url 'index' %}">Sorare Command Deck</a>
+    <a class="brand" href="{% url 'index' %}">
+      <i class="fas fa-futbol"></i>
+      Sorare Command Center
+    </a>
     <nav>
-      <a href="{% url 'telegram_alerts' %}">Alertas Telegram</a>
-      <a href="{% url 'bid_scheduler' %}">Programar Puja</a>
-      <a href="{% url 'sales_workbench' %}">Ventas</a>
+      <a href="{% url 'telegram_alerts' %}">
+        <i class="fas fa-bell"></i>
+        <span>Alertas</span>
+      </a>
+      <a href="{% url 'bid_scheduler' %}">
+        <i class="fas fa-gavel"></i>
+        <span>Pujas</span>
+      </a>
+      <a href="{% url 'sales_workbench' %}">
+        <i class="fas fa-tag"></i>
+        <span>Ventas</span>
+      </a>
+      <a href="{% url 'auctions_list' %}">
+        <i class="fas fa-fire"></i>
+        <span>Ofertas</span>
+      </a>
     </nav>
+    <div class="user-badge">
+      <i class="fas fa-user-circle"></i>
+      <span>burguis</span>
+    </div>
   </header>
 
   <main class="page">
