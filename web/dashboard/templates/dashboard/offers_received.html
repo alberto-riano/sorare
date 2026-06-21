@@ -184,7 +184,7 @@ document.getElementById('calcPricesBtn').addEventListener('click', async () => {
     }
 
     try {
-        const resp = await fetch('/ofertas-recibidas/precios/', {
+        const resp = await fetch('{% url "offers_market_prices" %}', {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
             body: JSON.stringify({asset_ids: [...assetIds]})

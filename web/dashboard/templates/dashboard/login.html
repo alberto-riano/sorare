@@ -16,12 +16,12 @@
 
   <form method="post" class="form-panel">
     {% csrf_token %}
-    <div class="field-grid">
-      <label class="span-2">
+    <div class="field-grid single-column">
+      <label>
         <span>Usuario</span>
         {{ form.username }}
       </label>
-      <label class="span-2">
+      <label>
         <span>Contraseña</span>
         {{ form.password }}
       </label>
