@@ -32,6 +32,10 @@ SALES_DURATION_DAYS = 2
 # Añadir el directorio src al path para importar listar_subastas
 sys.path.insert(0, str(REPO_ROOT / 'src'))
 
+from web_services import token_service  # noqa: E402  (requiere src en sys.path)
+
+OTP_CHALLENGE_SESSION_KEY = "sorare_otp_challenge"
+
 
 def _to_bool_text(value: bool) -> str:
     return "true" if value else "false"
@@ -72,6 +76,13 @@ def index(request):
             "icon": "fas fa-envelope-open-text",
             "description": "Consulta las ofertas pendientes que has recibido por tus cartas.",
             "url": "offers_received",
+            "status": "Disponible",
+        },
+        {
+            "title": "Renovar Token",
+            "icon": "fas fa-key",
+            "description": "Renueva el JWT con tu MFA cuando caduque, sin tocar archivos.",
+            "url": "refresh_token",
             "status": "Disponible",
         },
         {
@@ -463,15 +474,25 @@ def offers_received(request):
     offers = []
     eth_rate = 0
     error = None
+    token_expired = False
     try:
         offers, eth_rate = listar_ofertas_recibidas.fetch_pending_offers_received()
     except Exception as e:
         error = str(e)
+        lowered = error.lower()
+        if "signature has expired" in lowered or "unauthorized" in lowered:
+            token_expired = True
 
     return render(
         request,
         "dashboard/offers_received.html",
-        {"offers": offers, "error": error, "total": len(offers), "eth_rate": eth_rate},
+        {
+            "offers": offers,
+            "error": error,
+            "total": len(offers),
+            "eth_rate": eth_rate,
+            "token_expired": token_expired,
+        },
     )
 
 
@@ -500,3 +521,53 @@ def offers_market_prices(request):
         results[asset_id] = prices
 
     return JsonResponse({"prices": results})
+
+
+def refresh_token(request):
+    """Renueva el JWT de Sorare desde la web (login + MFA en dos pasos)."""
+    awaiting_otp = bool(request.session.get(OTP_CHALLENGE_SESSION_KEY))
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        if action == "start":
+            result = token_service.begin_refresh()
+            if result["status"] == "success":
+                request.session.pop(OTP_CHALLENGE_SESSION_KEY, None)
+                messages.success(request, "Token renovado correctamente (sin MFA).")
+                return redirect("refresh_token")
+            if result["status"] == "mfa_required":
+                request.session[OTP_CHALLENGE_SESSION_KEY] = result["otp_session_challenge"]
+                awaiting_otp = True
+                messages.info(request, "Introduce el código MFA de tu autenticador.")
+            else:
+                messages.error(request, f"Error: {result['message']}")
+
+        elif action == "verify":
+            challenge = request.session.get(OTP_CHALLENGE_SESSION_KEY)
+            otp_code = (request.POST.get("otp_code") or "").strip()
+            if not challenge:
+                messages.error(request, "La sesión MFA expiró. Vuelve a empezar.")
+            else:
+                result = token_service.finish_refresh(challenge, otp_code)
+                if result["status"] == "success":
+                    request.session.pop(OTP_CHALLENGE_SESSION_KEY, None)
+                    messages.success(request, "Token renovado correctamente con MFA.")
+                    return redirect("refresh_token")
+                messages.error(request, f"Error: {result['message']}")
+                awaiting_otp = True
+
+        elif action == "cancel":
+            request.session.pop(OTP_CHALLENGE_SESSION_KEY, None)
+            awaiting_otp = False
+            messages.info(request, "Renovación cancelada.")
+            return redirect("refresh_token")
+
+    return render(
+        request,
+        "dashboard/token.html",
+        {
+            "status": token_service.token_status(),
+            "awaiting_otp": awaiting_otp,
+        },
+    )

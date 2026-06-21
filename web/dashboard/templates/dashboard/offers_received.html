@@ -8,7 +8,14 @@
     <p style="color: var(--muted);">Ofertas pendientes ordenadas por precio (mayor a menor) · ETH/EUR: €{{ eth_rate|floatformat:2 }}</p>
 </div>
 
-{% if error %}
+{% if token_expired %}
+<div class="message message-error" style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+    <span><i class="fas fa-key"></i> Tu token de Sorare ha caducado. Renuévalo para volver a ver las ofertas.</span>
+    <a href="{% url 'refresh_token' %}" class="calc-btn" style="text-decoration:none;">
+        <i class="fas fa-sync-alt"></i> Renovar token
+    </a>
+</div>
+{% elif error %}
 <div class="message message-error">
     <i class="fas fa-exclamation-triangle"></i> {{ error }}
 </div>

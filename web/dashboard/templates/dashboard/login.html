@@ -1,0 +1,37 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Entrar | Sorare Command Center{% endblock %}
+
+{% block content %}
+<section class="panel reveal" style="max-width:420px;margin:4rem auto;">
+  <p class="kicker">Acceso restringido</p>
+  <h1><i class="fas fa-lock"></i> Iniciar sesión</h1>
+  <p style="color:var(--muted);">Introduce tus credenciales para acceder al panel.</p>
+
+  {% if form.errors %}
+    <div class="message message-error" style="margin:1rem 0;">
+      <i class="fas fa-exclamation-triangle"></i> Usuario o contraseña incorrectos.
+    </div>
+  {% endif %}
+
+  <form method="post" class="form-panel">
+    {% csrf_token %}
+    <div class="field-grid">
+      <label class="span-2">
+        <span>Usuario</span>
+        {{ form.username }}
+      </label>
+      <label class="span-2">
+        <span>Contraseña</span>
+        {{ form.password }}
+      </label>
+    </div>
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="btn-row">
+      <button class="btn btn-accent" type="submit">
+        <i class="fas fa-right-to-bracket"></i> Entrar
+      </button>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Renovar Token | Sorare{% endblock %}
+
+{% block content %}
+<section class="panel reveal">
+  <p class="kicker">Sesión Sorare</p>
+  <h1><i class="fas fa-key"></i> Renovar Token (JWT)</h1>
+  <p>Inicia sesión en Sorare con tu email y contraseña guardados y valida el código MFA de tu autenticador para conseguir un token nuevo, sin tocar archivos.</p>
+</section>
+
+<section class="panel reveal" style="animation-delay: 100ms;">
+  <h2>Estado actual</h2>
+  {% if status.valid %}
+    <p><span class="badge" style="background:#16331f;color:#7CFCB0;padding:.3rem .7rem;border-radius:8px;">
+      <i class="fas fa-circle-check"></i> Token válido
+    </span></p>
+    {% if status.expires_at_iso %}
+      <p style="color:var(--muted);">Caduca el <strong>{{ status.expires_at_iso }}</strong>.</p>
+    {% endif %}
+  {% else %}
+    <p><span class="badge" style="background:#3a1620;color:#ff9aa9;padding:.3rem .7rem;border-radius:8px;">
+      <i class="fas fa-triangle-exclamation"></i> Token caducado o no válido
+    </span></p>
+    <p style="color:var(--muted);">Renuévalo abajo para evitar errores de <em>Signature has expired</em>.</p>
+  {% endif %}
+</section>
+
+{% if not awaiting_otp %}
+<form method="post" class="panel form-panel reveal" style="animation-delay: 160ms;">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="start">
+  <h2>Paso 1 · Iniciar sesión</h2>
+  <p style="color:var(--muted);">Usa el <code>EMAIL</code> y <code>PASSWORD</code> del archivo de configuración. Tras pulsar, Sorare pedirá el código MFA.</p>
+  <div class="btn-row">
+    <button class="btn btn-accent" type="submit">
+      <i class="fas fa-right-to-bracket"></i> Iniciar sesión
+    </button>
+  </div>
+</form>
+{% else %}
+<form method="post" class="panel form-panel reveal" style="animation-delay: 160ms;">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="verify">
+  <h2>Paso 2 · Código MFA</h2>
+  <p style="color:var(--muted);">Introduce el código de 6 dígitos de tu app autenticador (Google Authenticator / Authy).</p>
+  <div class="field-grid">
+    <label class="span-2">
+      <span>Código MFA (6 dígitos)</span>
+      <input type="text" name="otp_code" inputmode="numeric" autocomplete="one-time-code"
+             pattern="[0-9]*" maxlength="6" required autofocus
+             style="letter-spacing:.4em;font-size:1.3rem;text-align:center;">
+    </label>
+  </div>
+  <div class="btn-row" style="gap:.6rem;">
+    <button class="btn btn-accent" type="submit">
+      <i class="fas fa-check"></i> Validar y renovar
+    </button>
+    <button class="btn" type="submit" name="action" value="cancel" formnovalidate>
+      Cancelar
+    </button>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

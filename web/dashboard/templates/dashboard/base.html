@@ -36,10 +36,23 @@
         <i class="fas fa-fire"></i>
         <span>Ofertas</span>
       </a>
+      <a href="{% url 'refresh_token' %}">
+        <i class="fas fa-key"></i>
+        <span>Token</span>
+      </a>
     </nav>
     <div class="user-badge">
       <i class="fas fa-user-circle"></i>
-      <span>burguis</span>
+      <span>{{ user.username|default:'burguis' }}</span>
+      {% if user.is_authenticated %}
+        <form method="post" action="{% url 'logout' %}" style="display:inline;margin-left:.6rem;">
+          {% csrf_token %}
+          <button type="submit" title="Cerrar sesión"
+                  style="background:none;border:none;color:inherit;cursor:pointer;font-size:1rem;">
+            <i class="fas fa-right-from-bracket"></i>
+          </button>
+        </form>
+      {% endif %}
     </div>
   </header>
 
