@@ -16,5 +16,9 @@ __pycache__/
 *.pyo
 .venv/
 
+# Django (cada entorno genera lo suyo)
+web/db.sqlite3
+web/staticfiles/
+
 # Outputs
 output/
