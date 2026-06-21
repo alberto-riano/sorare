@@ -1,0 +1,38 @@
+# Servicio systemd para el panel de Sorare con gunicorn (socket unix).
+# Convive con el gunicorn de crochet-shop: cada proyecto su socket y servicio.
+#
+# 1) Ajusta User/Group y rutas si tu usuario no es "ubuntu".
+# 2) Copia este archivo a /etc/systemd/system/sorare-web.service
+# 3) sudo systemctl daemon-reload
+#    sudo systemctl enable --now sorare-web
+#    sudo systemctl status sorare-web
+
+[Unit]
+Description=Sorare Command Center (Django + gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+# Grupo www-data para que nginx pueda leer el socket.
+Group=www-data
+UMask=007
+
+# Carpeta del proyecto Django (donde está manage.py)
+WorkingDirectory=/home/ubuntu/sorare/web
+
+# Carga las variables de entorno de producción
+EnvironmentFile=/home/ubuntu/sorare/deploy/.env
+
+# gunicorn en un socket unix propio del proyecto Sorare (nginx hace de proxy).
+ExecStart=/home/ubuntu/sorare/.venv/bin/gunicorn \
+    --workers 3 \
+    --timeout 600 \
+    --bind unix:/home/ubuntu/sorare/gunicorn.sock \
+    sorare_web.wsgi:application
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -2,6 +2,9 @@ import requests
 import bcrypt
 import os
 import re
+import json
+import base64
+import time
 
 config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'config.txt')
 
@@ -15,6 +18,38 @@ def read_config():
                 key, value = line.split('=', 1)
                 config[key] = value
     return config
+
+
+def get_token_status(token=None):
+    """Devuelve el estado del JWT actual leyendo su payload (claim `exp`).
+
+    Resultado: {"valid": bool, "expired": bool, "expires_at": int|None,
+                "seconds_left": int|None}
+    No verifica la firma (solo decodifica el payload para informar en la UI).
+    """
+    if token is None:
+        token = read_config().get('JWT_TOKEN', '')
+
+    if not token:
+        return {"valid": False, "expired": True, "expires_at": None, "seconds_left": None}
+
+    try:
+        payload_b64 = token.split('.')[1]
+        padding = '=' * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64 + padding))
+        exp = int(payload.get('exp'))
+    except Exception:
+        return {"valid": False, "expired": True, "expires_at": None, "seconds_left": None}
+
+    now = int(time.time())
+    seconds_left = exp - now
+    expired = seconds_left <= 0
+    return {
+        "valid": not expired,
+        "expired": expired,
+        "expires_at": exp,
+        "seconds_left": seconds_left,
+    }
 
 
 def update_token_in_config(new_token):
@@ -79,71 +114,111 @@ def sign_in(input_data):
     return resp.json()['data']['signIn']
 
 
-def main():
-    # Leer email y password del archivo config.txt
-    config = read_config()
-    email = config.get('EMAIL')
-    password = config.get('PASSWORD')
+# ---------------------------------------------------------------------------
+# API reutilizable (CLI + Web)
+# ---------------------------------------------------------------------------
+
+def start_login(email=None, password=None):
+    """Primer paso del login.
+
+    Devuelve un dict con una de estas formas:
+      - {"status": "mfa_required", "otp_session_challenge": str}
+      - {"status": "success", "token": str, "expired_at": str}
+      - {"status": "error", "message": str}
+    """
+    if email is None or password is None:
+        config = read_config()
+        email = email or config.get('EMAIL')
+        password = password or config.get('PASSWORD')
 
     if not email or not password:
-        print("Error: EMAIL o PASSWORD no encontrados en config.txt")
-        return
-
-    print(f"Usando email: {email}")
+        return {"status": "error", "message": "EMAIL o PASSWORD no encontrados en config.txt"}
 
     salt = get_salt(email)
     hashed_password = hash_password(password, salt)
 
-    # Primera llamada con email y password hasheada
-    input_data = {
-        "email": email,
-        "password": hashed_password
-    }
-    response1 = sign_in(input_data)
+    response = sign_in({"email": email, "password": hashed_password})
 
-    if response1.get('errors'):
-        print("Errores en login:", response1['errors'])
-        if any(error['message'] == '2fa_missing' for error in response1['errors']):
-            otp_session = response1.get('otpSessionChallenge')
+    errors = response.get('errors') or []
+    if errors:
+        if any(error.get('message') == '2fa_missing' for error in errors):
+            otp_session = response.get('otpSessionChallenge')
             if otp_session:
-                print("2FA activado, otpSessionChallenge:", otp_session)
-                # Aquí pedimos el código OTP por teclado
-                otp_code = input("Introduce el código OTP (6 dígitos) de tu autenticador 2FA: ").strip()
-                input_data_2fa = {
-                    "otpSessionChallenge": otp_session,
-                    "otpAttempt": otp_code
-                }
-                response2 = sign_in(input_data_2fa)
-                if response2.get('errors'):
-                    print("Errores en 2FA:", response2['errors'])
-                    return
-                if response2.get('currentUser'):
-                    print("Login exitoso con 2FA!")
-                    print("Usuario:", response2['currentUser']['slug'])
-                    token = response2['jwtToken']['token']
-                    print("Token:", token)
-                    print("Expira en:", response2['jwtToken']['expiredAt'])
+                return {"status": "mfa_required", "otp_session_challenge": otp_session}
+            return {"status": "error", "message": "No se obtuvo otpSessionChallenge para 2FA."}
+        messages = "; ".join(e.get('message', '') for e in errors)
+        return {"status": "error", "message": messages or "Error de login desconocido."}
 
-                    # Actualizar token en config.txt
-                    update_token_in_config(token)
-                    return
-                else:
-                    print("No se obtuvo token después de 2FA. Revisa el código OTP.")
-            else:
-                print("No se obtuvo otpSessionChallenge para 2FA.")
-        else:
-            return
-    elif response1.get('currentUser'):
+    if response.get('currentUser'):
+        jwt = response.get('jwtToken') or {}
+        return {
+            "status": "success",
+            "token": jwt.get('token'),
+            "expired_at": jwt.get('expiredAt'),
+        }
+
+    return {"status": "error", "message": "Login fallido sin usuario y sin error conocido."}
+
+
+def complete_login_with_otp(otp_session_challenge, otp_code):
+    """Segundo paso del login con el codigo MFA.
+
+    Devuelve un dict:
+      - {"status": "success", "token": str, "expired_at": str}
+      - {"status": "error", "message": str}
+    """
+    if not otp_session_challenge:
+        return {"status": "error", "message": "Falta el otpSessionChallenge."}
+    if not otp_code:
+        return {"status": "error", "message": "Falta el codigo MFA."}
+
+    response = sign_in({
+        "otpSessionChallenge": otp_session_challenge,
+        "otpAttempt": str(otp_code).strip(),
+    })
+
+    errors = response.get('errors') or []
+    if errors:
+        messages = "; ".join(e.get('message', '') for e in errors)
+        return {"status": "error", "message": messages or "Error al validar el codigo MFA."}
+
+    if response.get('currentUser'):
+        jwt = response.get('jwtToken') or {}
+        return {
+            "status": "success",
+            "token": jwt.get('token'),
+            "expired_at": jwt.get('expiredAt'),
+        }
+
+    return {"status": "error", "message": "No se obtuvo token despues de 2FA. Revisa el codigo MFA."}
+
+
+def main():
+    result = start_login()
+
+    if result["status"] == "error":
+        print("Error en login:", result["message"])
+        return
+
+    if result["status"] == "success":
         print("Login exitoso sin 2FA")
-        print("Usuario:", response1['currentUser']['slug'])
-        token = response1['jwtToken']['token']
-        print("Token:", token)
-        print("Expira en:", response1['jwtToken']['expiredAt'])
+        print("Token:", result["token"])
+        print("Expira en:", result["expired_at"])
+        update_token_in_config(result["token"])
+        return
 
-        # Actualizar token en config.txt
-        update_token_in_config(token)
+    # status == mfa_required
+    print("2FA activado, otpSessionChallenge:", result["otp_session_challenge"])
+    otp_code = input("Introduce el codigo OTP (6 digitos) de tu autenticador 2FA: ").strip()
+    result2 = complete_login_with_otp(result["otp_session_challenge"], otp_code)
+
+    if result2["status"] == "success":
+        print("Login exitoso con 2FA!")
+        print("Token:", result2["token"])
+        print("Expira en:", result2["expired_at"])
+        update_token_in_config(result2["token"])
     else:
-        print("Login fallido sin usuario y sin error conocido.")
+        print("Error en 2FA:", result2["message"])
 
 
 if __name__ == "__main__":

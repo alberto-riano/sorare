@@ -1,0 +1,34 @@
+# =====================================================================
+# Crontab de ejemplo para la EC2 (Sorare).
+#
+# Edita tu crontab con:   crontab -e
+# Pega y ajusta las rutas (este ejemplo asume /home/ubuntu/sorare).
+#
+# IMPORTANTE sobre el token y el MFA:
+#   El JWT de Sorare caduca y, por el MFA, NO se puede renovar de forma
+#   100% automática. Por eso usamos `relistar_y_avisar.py`: si el token
+#   está vigente, relista; si va a caducar, te avisa por Telegram para que
+#   entres al panel web y pulses "Renovar token".
+#
+# Las líneas exportan PATH para que cron encuentre python del virtualenv.
+# =====================================================================
+
+SHELL=/bin/bash
+PATH=/home/ubuntu/sorare/.venv/bin:/usr/local/bin:/usr/bin:/bin
+
+# Variables útiles (ajusta la ruta del proyecto):
+SORARE_DIR=/home/ubuntu/sorare
+PY=/home/ubuntu/sorare/.venv/bin/python
+
+# --- Relistar cartas (rojas) cada 6 horas, con log ---
+0 */6 * * * cd $SORARE_DIR && $PY src/relistar_y_avisar.py --rojas >> $SORARE_DIR/output/cron_relistar.log 2>&1
+
+# --- Relistar todas las rarezas una vez al día (08:00) ---
+0 8 * * * cd $SORARE_DIR && $PY src/relistar_y_avisar.py --rojas --amarillas --azules >> $SORARE_DIR/output/cron_relistar.log 2>&1
+
+# --- Aviso de token: comprobar cada hora si caduca pronto y avisar ---
+#     (margen 8h; no relista, solo chequea/avisa porque no pasa rareza con --margen alto)
+30 * * * * cd $SORARE_DIR && $PY src/relistar_y_avisar.py --rojas --margen-horas 8 >> $SORARE_DIR/output/cron_token.log 2>&1
+
+# --- (Opcional) Alerta de chollos por Telegram cada 30 min ---
+# */30 * * * * cd $SORARE_DIR && $PY src/alerta_telegram.py >> $SORARE_DIR/output/cron_alertas.log 2>&1
