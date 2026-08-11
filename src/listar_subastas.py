@@ -40,6 +40,7 @@ query GetLaLigaTeams($competition: String!, $seasonYear: Int!) {
 BUYING_AUCTIONS_QUERY = '''
 query GetBuyingFootballAuctions {
   currentUser {
+    nickname
     buyingTokenAuctions(sport: [FOOTBALL]) {
       id
       open
@@ -92,7 +93,9 @@ def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None, season_year
         raise ValueError("Esta consulta optimizada solo admite cartas Rare")
 
     data = graphql_request(BUYING_AUCTIONS_QUERY, headers=headers)
-    nodes = (data.get("currentUser") or {}).get("buyingTokenAuctions") or []
+    current_user = data.get("currentUser") or {}
+    my_nickname = (current_user.get("nickname") or "").strip()
+    nodes = current_user.get("buyingTokenAuctions") or []
     results = []
 
     for auction in nodes:
@@ -128,6 +131,7 @@ def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None, season_year
                 'auction_id': auction['id'],
                 'bid_eur': bid_eur,
                 'bidder': bidder,
+                'is_winning': bool(bidder and my_nickname and bidder.casefold() == my_nickname.casefold()),
                 'end_date': auction['endDate'],
             })
 

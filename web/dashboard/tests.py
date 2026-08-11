@@ -35,13 +35,18 @@ class LaLigaAuctionTests(SimpleTestCase):
             self._card("wrong-rarity", "limited", 2026, "real-madrid-madrid"),
             self._card("wrong-league", "rare", 2026, "arsenal-london"),
         ]
-        response = {"currentUser": {"buyingTokenAuctions": [self._auction(card) for card in cards]}}
+        response = {"currentUser": {"nickname": "burguis", "buyingTokenAuctions": [self._auction(card) for card in cards]}}
+        response["currentUser"]["buyingTokenAuctions"][0]["bestBid"] = {
+            "amounts": {"eurCents": 1250},
+            "userBidder": {"nickname": "BURGuis"},
+        }
         with patch.object(listar_subastas, "graphql_request", return_value=response):
             auctions, pages, total = listar_subastas.fetch_all_live_auctions(
                 {}, rarity="rare", team_slugs={"real-madrid-madrid"}, season_year=2026
             )
 
         self.assertEqual([auction["asset_id"] for auction in auctions], ["wanted"])
+        self.assertTrue(auctions[0]["is_winning"])
         self.assertEqual((pages, total), (1, 4))
 
     @staticmethod
