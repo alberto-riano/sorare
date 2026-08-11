@@ -1,33 +1,32 @@
 {% extends 'dashboard/base.html' %}
 
-{% block title %}Ofertas Activas | Sorare{% endblock %}
+{% block title %}Subastas Rare LaLiga 2026-2027 | Sorare{% endblock %}
 
 {% block content %}
 <section class="hero panel reveal">
   <p class="kicker">Live auctions</p>
-  <h1><i class="fas fa-fire"></i> Subastas Activas de La Liga</h1>
-  <p class="hero-text">Visualiza en tiempo real las ofertas activas de cartas de La Liga disponibles en Sorare.</p>
+  <h1><i class="fas fa-fire"></i> Subastas Rare de LaLiga</h1>
+  <p class="hero-text">Cartas rojas de los 20 equipos de LaLiga correspondientes exclusivamente a la temporada {{ season_label }}.</p>
 </section>
 
 <section class="panel form-panel reveal" style="animation-delay: 100ms;">
-  <h2><i class="fas fa-filter"></i> Cargar Subastas</h2>
+  <h2><i class="fas fa-filter"></i> LaLiga {{ season_label }}</h2>
   <form method="post">
     {% csrf_token %}
     <div class="field-grid">
       <label>
         <span>Rareza</span>
-        <select name="rarity">
-          <option value="rare" selected>Rare (Rojas)</option>
-          <option value="limited">Limited (Amarillas)</option>
-          <option value="super_rare">Super Rare (Azules)</option>
-          <option value="unique">Unique (Negras)</option>
-        </select>
+        <input value="Rare (Rojas)" disabled>
+      </label>
+      <label>
+        <span>Temporada</span>
+        <input value="{{ season_label }}" disabled>
       </label>
     </div>
     <div class="btn-row">
       <button type="submit" class="btn btn-accent">
         <i class="fas fa-sync"></i>
-        Cargar Subastas
+        Cargar subastas Rare
       </button>
     </div>
   </form>

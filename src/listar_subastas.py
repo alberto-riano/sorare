@@ -21,29 +21,21 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sorare_utils import graphql_request, build_headers
 
-# Slugs de equipos de La Liga
-LA_LIGA_TEAM_SLUGS = [
-    "athletic-club-bilbao",
-    "atletico-madrid-madrid",
-    "barcelona-barcelona",
-    "celta-de-vigo-vigo",
-    #"deportivo-alaves-vitoria-gasteiz",
-    #"elche-elche",
-    #"espanyol-barcelona",
-    #"getafe-getafe-madrid",
-    #"girona-girona",
-    #"levante-valencia",
-    #"mallorca-palma-de-mallorca",
-    #"osasuna-pamplona-irunea",
-    #"rayo-vallecano-madrid",
-    "real-betis-sevilla",
-    "real-madrid-madrid",
-    #"real-oviedo-oviedo",
-    "real-sociedad-donostia-san-sebastian",
-    #"sevilla-sevilla-1890",
-    #"valencia-valencia",
-    "villarreal-villarreal",
-]
+LA_LIGA_COMPETITION_SLUG = "primera-division-es"
+DEFAULT_SEASON_YEAR = 2026
+
+LA_LIGA_TEAMS_QUERY = '''
+query GetLaLigaTeams($competition: String!, $seasonYear: Int!) {
+  football {
+    competition(slug: $competition) {
+      displayName
+      contestants(seasonStartYear: $seasonYear) {
+        anyTeam { name slug }
+      }
+    }
+  }
+}
+'''
 
 LIVE_AUCTIONS_QUERY = '''
 query GetLiveAuctions($after: String) {
@@ -75,15 +67,30 @@ query GetLiveAuctions($after: String) {
 '''
 
 
-def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None):
+def fetch_la_liga_teams(headers, season_year=DEFAULT_SEASON_YEAR):
+    """Obtiene de Sorare los clubes que disputan LaLiga en la temporada indicada."""
+    data = graphql_request(
+        LA_LIGA_TEAMS_QUERY,
+        {"competition": LA_LIGA_COMPETITION_SLUG, "seasonYear": season_year},
+        headers=headers,
+    )
+    competition = data["football"]["competition"]
+    teams = {}
+    for contestant in competition.get("contestants") or []:
+        team = contestant.get("anyTeam") or {}
+        if team.get("slug"):
+            teams[team["slug"]] = team.get("name") or team["slug"]
+    if not teams:
+        raise RuntimeError(f"Sorare no devolvió equipos de LaLiga para {season_year}-{season_year + 1}")
+    return teams
+
+
+def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None, season_year=DEFAULT_SEASON_YEAR):
     """
     Pagina tokens.liveAuctions y filtra por rareza y equipos en cliente.
     Devuelve lista de subastas que cumplen los filtros.
     """
-    if team_slugs is None:
-        team_slugs = set(LA_LIGA_TEAM_SLUGS)
-    else:
-        team_slugs = set(team_slugs)
+    team_slugs = set(team_slugs or [])
 
     results = []
     cursor = None
@@ -112,6 +119,10 @@ def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None):
 
             # Filtrar por rareza
             if card.get('rarityTyped') != rarity:
+                continue
+
+            # 2026 representa la temporada europea 2026-2027 en Sorare.
+            if card.get('seasonYear') != season_year:
                 continue
 
             # Filtrar por equipo
@@ -155,10 +166,10 @@ def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None):
     return results, page, total
 
 
-def match_team_slug(partial):
+def match_team_slug(partial, team_slugs):
     """Encuentra el slug completo dado un nombre parcial."""
     partial_lower = partial.lower()
-    matches = [s for s in LA_LIGA_TEAM_SLUGS if partial_lower in s]
+    matches = [s for s in team_slugs if partial_lower in s]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -169,34 +180,40 @@ def match_team_slug(partial):
     return None
 
 
-def fetch_la_liga_rare_auctions(team_filters=None, rarity="rare"):
+def fetch_la_liga_rare_auctions(team_filters=None, rarity="rare", season_year=DEFAULT_SEASON_YEAR):
     """
     Busca subastas activas de cartas de La Liga via liveAuctions.
     Filtra en cliente por rareza y equipo.
     """
     headers = build_headers()
+    la_liga_teams = fetch_la_liga_teams(headers, season_year=season_year)
 
     # Determinar equipos
     if team_filters:
         team_slugs = []
         for t in team_filters:
-            slug = match_team_slug(t)
+            slug = match_team_slug(t, la_liga_teams)
             if slug:
                 team_slugs.append(slug)
             else:
                 print(f"⚠️  Equipo '{t}' no encontrado. Equipos disponibles:")
-                for s in LA_LIGA_TEAM_SLUGS:
+                for s in la_liga_teams:
                     print(f"     {s}")
                 sys.exit(1)
     else:
-        team_slugs = LA_LIGA_TEAM_SLUGS
+        team_slugs = list(la_liga_teams)
 
     team_filter_str = f" (equipos: {', '.join(team_filters)})" if team_filters else ""
-    print(f"🔍 Buscando subastas {rarity} de La Liga{team_filter_str}...")
+    print(f"🔍 Buscando subastas {rarity} de LaLiga {season_year}-{season_year + 1}{team_filter_str}...")
     print(f"   Paginando todas las subastas activas de fútbol y filtrando...\n")
 
     start = time.time()
-    results, pages, total = fetch_all_live_auctions(headers, rarity=rarity, team_slugs=team_slugs)
+    results, pages, total = fetch_all_live_auctions(
+        headers,
+        rarity=rarity,
+        team_slugs=team_slugs,
+        season_year=season_year,
+    )
     elapsed = time.time() - start
 
     print(f"   Escaneadas {total} subastas en {pages} páginas ({elapsed:.1f}s)")
@@ -245,9 +262,15 @@ def main():
     parser.add_argument('--team', action='append', help='Filtrar por equipo (nombre parcial). Se puede repetir.')
     parser.add_argument('--rarity', default='rare', choices=['limited', 'rare', 'super_rare', 'unique'],
                         help='Rareza a buscar (default: rare)')
+    parser.add_argument('--season-year', type=int, default=DEFAULT_SEASON_YEAR,
+                        help='Año inicial de temporada (default: 2026 para 2026-2027)')
     args = parser.parse_args()
 
-    auctions = fetch_la_liga_rare_auctions(team_filters=args.team, rarity=args.rarity)
+    auctions = fetch_la_liga_rare_auctions(
+        team_filters=args.team,
+        rarity=args.rarity,
+        season_year=args.season_year,
+    )
     print_results(auctions)
 
 

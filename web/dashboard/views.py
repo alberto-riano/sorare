@@ -429,7 +429,7 @@ def sales_download_excel(request):
 
 
 def auctions_list(request):
-    """Vista para mostrar las ofertas/subastas activas de La Liga."""
+    """Subastas Rare de LaLiga correspondientes a la temporada 2026-2027."""
     import listar_subastas
     
     auctions = []
@@ -441,12 +441,11 @@ def auctions_list(request):
         try:
             # Filtros desde el formulario
             team_filters = request.POST.getlist("teams") or request.GET.getlist("teams") or None
-            rarity = request.POST.get("rarity") or request.GET.get("rarity") or "rare"
-            
             # Fetch auctions
             auctions = listar_subastas.fetch_la_liga_rare_auctions(
                 team_filters=team_filters if team_filters else None,
-                rarity=rarity
+                rarity="rare",
+                season_year=2026,
             )
             
             # Ordenar por fecha de fin
@@ -457,9 +456,6 @@ def auctions_list(request):
             error = str(e)
             messages.error(request, f"Error al cargar subastas: {error}")
     
-    # Equipos disponibles para filtro
-    available_teams = listar_subastas.LA_LIGA_TEAM_SLUGS
-    
     return render(
         request,
         "dashboard/auctions.html",
@@ -467,7 +463,7 @@ def auctions_list(request):
             "auctions": auctions,
             "error": error,
             "loading": loading,
-            "available_teams": available_teams,
+            "season_label": "2026-2027",
         },
     )
 
