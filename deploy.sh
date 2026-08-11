@@ -58,7 +58,7 @@ cd "$PROJECT_DIR/web"
 info "Reiniciando $SERVICE_NAME"
 sudo systemctl restart "$SERVICE_NAME"
 
-SOCKET_PATH="${SORARE_SOCKET_PATH:-$PROJECT_DIR/gunicorn.sock}"
+SOCKET_PATH="${SORARE_SOCKET_PATH:-/run/sorare/gunicorn.sock}"
 HEALTH_PATH="/healthz/"
 HTTP_STATUS="000"
 for _attempt in {1..30}; do

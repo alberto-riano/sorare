@@ -17,6 +17,8 @@ User=ubuntu
 # Grupo www-data para que nginx pueda leer el socket.
 Group=www-data
 UMask=007
+RuntimeDirectory=sorare
+RuntimeDirectoryMode=0750
 
 # Carpeta del proyecto Django (donde está manage.py)
 WorkingDirectory=/home/ubuntu/sorare/web
@@ -28,7 +30,7 @@ EnvironmentFile=/home/ubuntu/sorare/deploy/.env
 ExecStart=/home/ubuntu/sorare/.venv/bin/gunicorn \
     --workers 3 \
     --timeout 600 \
-    --bind unix:/home/ubuntu/sorare/gunicorn.sock \
+    --bind unix:/run/sorare/gunicorn.sock \
     sorare_web.wsgi:application
 
 Restart=on-failure

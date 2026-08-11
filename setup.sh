@@ -59,7 +59,7 @@ if [ ! -f "$ENV_FILE" ]; then
         printf "DJANGO_FORCE_SCRIPT_NAME='%s'\n" "$URL_PREFIX"
         printf "DJANGO_CSRF_TRUSTED_ORIGINS='http://%s,https://%s'\n" "$PUBLIC_HOST" "$PUBLIC_HOST"
         printf "DJANGO_SECURE_COOKIES=false\n"
-        printf "SORARE_SOCKET_PATH='%s/gunicorn.sock'\n" "$PROJECT_DIR"
+        printf "SORARE_SOCKET_PATH='/run/sorare/gunicorn.sock'\n"
     } > "$ENV_FILE"
     chmod 600 "$ENV_FILE"
 else
@@ -86,9 +86,11 @@ Type=simple
 User=$SERVICE_USER
 Group=www-data
 UMask=007
+RuntimeDirectory=sorare
+RuntimeDirectoryMode=0750
 WorkingDirectory=$PROJECT_DIR/web
 EnvironmentFile=$ENV_FILE
-ExecStart=$VENV_DIR/bin/gunicorn --workers 2 --timeout 600 --bind unix:$PROJECT_DIR/gunicorn.sock sorare_web.wsgi:application
+ExecStart=$VENV_DIR/bin/gunicorn --workers 2 --timeout 600 --bind unix:/run/sorare/gunicorn.sock sorare_web.wsgi:application
 Restart=on-failure
 RestartSec=5
 
@@ -120,7 +122,7 @@ server {
 
     location ${URL_PREFIX}/ {
         rewrite ^${URL_PREFIX:-}/(.*) /\$1 break;
-        proxy_pass http://unix:$PROJECT_DIR/gunicorn.sock;
+        proxy_pass http://unix:/run/sorare/gunicorn.sock;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
