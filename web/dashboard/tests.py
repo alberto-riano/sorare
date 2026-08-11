@@ -31,15 +31,7 @@ class LaLigaAuctionTests(SimpleTestCase):
             self._card("wrong-rarity", "limited", 2026, "real-madrid-madrid"),
             self._card("wrong-league", "rare", 2026, "arsenal-london"),
         ]
-        response = {
-            "football": {
-                "allCards": {
-                    "totalCount": len(cards),
-                    "nodes": cards,
-                    "pageInfo": {"hasNextPage": False, "endCursor": None},
-                }
-            }
-        }
+        response = {"currentUser": {"buyingTokenAuctions": [self._auction(card) for card in cards]}}
         with patch.object(listar_subastas, "graphql_request", return_value=response):
             auctions, pages, total = listar_subastas.fetch_all_live_auctions(
                 {}, rarity="rare", team_slugs={"real-madrid-madrid"}, season_year=2026
@@ -59,7 +51,6 @@ class LaLigaAuctionTests(SimpleTestCase):
             "anyTeam": {"name": "Equipo", "slug": team_slug},
             "anyPositions": ["Defender"],
         }
-        card["latestEnglishAuction"] = LaLigaAuctionTests._auction(card)
         return card
 
     @staticmethod
