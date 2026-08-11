@@ -48,7 +48,7 @@ query GetLiveAuctions($after: String) {
         endDate
         bestBid {
           amounts { eurCents }
-          bidder { ... on User { nickname } }
+          userBidder { nickname }
         }
         anyCards {
           assetId
@@ -137,7 +137,7 @@ def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None, season_year
                 eur_cents = auction['bestBid']['amounts'].get('eurCents')
                 if eur_cents:
                     bid_eur = eur_cents / 100
-                bidder = auction['bestBid'].get('bidder', {}).get('nickname')
+                bidder = auction['bestBid'].get('userBidder', {}).get('nickname')
 
             results.append({
                 'player': card['anyPlayer']['displayName'],
