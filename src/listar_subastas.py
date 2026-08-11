@@ -16,6 +16,9 @@ Uso:
 import sys
 import os
 import argparse
+from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -23,6 +26,9 @@ from sorare_utils import graphql_request, build_headers
 
 LA_LIGA_COMPETITION_SLUG = "primera-division-es"
 DEFAULT_SEASON_YEAR = 2026
+CACHE_PATH = Path(__file__).resolve().parents[1] / "output" / "la_liga_rare_2026_auctions.json"
+FULL_REFRESH_HOURS = 24
+REQUEST_INTERVAL_SECONDS = 1.1
 
 LA_LIGA_TEAMS_QUERY = '''
 query GetLaLigaTeams($competition: String!, $seasonYear: Int!) {
@@ -60,6 +66,31 @@ query GetBuyingFootballAuctions {
         anyTeam { name slug }
         anyPositions
       }
+    }
+  }
+}
+'''
+
+LIVE_AUCTIONS_QUERY = '''
+query GetAllLiveFootballAuctions($after: String, $updatedAfter: ISO8601DateTime) {
+  currentUser { nickname }
+  tokens {
+    liveAuctions(sport: FOOTBALL, first: 50, after: $after, updatedAfter: $updatedAfter) {
+      totalCount
+      nodes {
+        id
+        open
+        endDate
+        bestBid { amounts { eurCents } userBidder { nickname } }
+        myLastBid { amounts { eurCents } maximumAmounts { eurCents } }
+        anyCards {
+          assetId rarityTyped seasonYear serialNumber
+          anyPlayer { displayName slug }
+          anyTeam { name slug }
+          anyPositions
+        }
+      }
+      pageInfo { hasNextPage endCursor }
     }
   }
 }
@@ -195,6 +226,134 @@ def fetch_bid_positions(headers, auctions, my_nickname):
     return positions
 
 
+def _rows_from_live_auctions(nodes, team_slugs, my_nickname, season_year=DEFAULT_SEASON_YEAR):
+    rows = []
+    for auction in nodes:
+        if not auction.get('open'):
+            continue
+        best_bid = auction.get('bestBid') or {}
+        bidder = (best_bid.get('userBidder') or {}).get('nickname')
+        eur_cents = (best_bid.get('amounts') or {}).get('eurCents')
+        my_last_bid = auction.get('myLastBid') or {}
+        my_max_cents = (my_last_bid.get('maximumAmounts') or {}).get('eurCents')
+        for card in auction.get('anyCards') or []:
+            team = card.get('anyTeam') or {}
+            if card.get('rarityTyped') != 'rare' or card.get('seasonYear') != season_year:
+                continue
+            if team.get('slug') not in team_slugs:
+                continue
+            is_winning = bool(bidder and my_nickname and bidder.casefold() == my_nickname.casefold())
+            rows.append({
+                'player': card['anyPlayer']['displayName'],
+                'player_slug': card['anyPlayer']['slug'],
+                'team': team['name'],
+                'team_slug': team['slug'],
+                'serial': card['serialNumber'],
+                'season': card['seasonYear'],
+                'position': card.get('anyPositions', ['?'])[0],
+                'asset_id': card['assetId'],
+                'auction_id': auction['id'],
+                'bid_eur': eur_cents / 100 if eur_cents is not None else None,
+                'bidder': bidder,
+                'is_winning': is_winning,
+                'has_bid': bool(my_last_bid),
+                'my_bid_eur': my_max_cents / 100 if my_max_cents is not None else None,
+                'is_outbid': bool(my_last_bid) and not is_winning,
+                'bid_position': 1 if is_winning else None,
+                'end_date': auction['endDate'],
+            })
+    return rows
+
+
+def load_auction_cache():
+    if not CACHE_PATH.exists():
+        return None
+    try:
+        return json.loads(CACHE_PATH.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def refresh_auction_cache(force_full=False):
+    """Sincroniza el mercado completo; después solo procesa cambios recientes."""
+    headers = build_headers()
+    teams = fetch_la_liga_teams(headers, season_year=DEFAULT_SEASON_YEAR)
+    previous = load_auction_cache()
+    now = datetime.now(timezone.utc)
+    full_refreshed_at = None
+    if previous and previous.get('full_refreshed_at'):
+        full_refreshed_at = datetime.fromisoformat(previous['full_refreshed_at'])
+    full = force_full or not previous or not full_refreshed_at or now - full_refreshed_at >= timedelta(hours=FULL_REFRESH_HOURS)
+    updated_after = None
+    if not full:
+        last_update = datetime.fromisoformat(previous['updated_at'])
+        updated_after = (last_update - timedelta(minutes=2)).isoformat()
+
+    cursor = None
+    page = 0
+    scanned = 0
+    changed_nodes = []
+    my_nickname = previous.get('my_nickname', '') if previous else ''
+    while True:
+        for attempt in range(3):
+            try:
+                data = graphql_request(
+                    LIVE_AUCTIONS_QUERY,
+                    {'after': cursor, 'updatedAfter': updated_after},
+                    headers=headers,
+                )
+                break
+            except Exception as exc:
+                if '429' not in str(exc) or attempt == 2:
+                    raise
+                time.sleep(65)
+        my_nickname = ((data.get('currentUser') or {}).get('nickname') or my_nickname).strip()
+        connection = data['tokens']['liveAuctions']
+        nodes = connection['nodes']
+        changed_nodes.extend(nodes)
+        scanned += len(nodes)
+        page += 1
+        print(f"Página {page}: {scanned}/{connection['totalCount']} subastas revisadas", flush=True)
+        if not connection['pageInfo']['hasNextPage']:
+            break
+        cursor = connection['pageInfo']['endCursor']
+        time.sleep(REQUEST_INTERVAL_SECONDS)
+
+    fresh_rows = _rows_from_live_auctions(changed_nodes, set(teams), my_nickname)
+    if full:
+        merged = fresh_rows
+        full_timestamp = now.isoformat()
+    else:
+        changed_ids = {node['id'] for node in changed_nodes}
+        merged = [row for row in previous.get('auctions', []) if row['auction_id'] not in changed_ids]
+        merged.extend(fresh_rows)
+        full_timestamp = previous['full_refreshed_at']
+
+    merged = [row for row in merged if datetime.fromisoformat(row['end_date'].replace('Z', '+00:00')) > now]
+    unique = {(row['auction_id'], row['asset_id']): row for row in merged}
+    merged = list(unique.values())
+    outbid = [row for row in merged if row['is_outbid']]
+    positions = fetch_bid_positions(headers, outbid, my_nickname)
+    for row in merged:
+        if row['is_outbid']:
+            row['bid_position'] = positions.get(row['auction_id'])
+    merged.sort(key=lambda row: row['end_date'])
+
+    payload = {
+        'updated_at': now.isoformat(),
+        'full_refreshed_at': full_timestamp,
+        'my_nickname': my_nickname,
+        'scanned_count': scanned,
+        'auctions': merged,
+    }
+    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = CACHE_PATH.with_suffix('.tmp')
+    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+    temporary.replace(CACHE_PATH)
+    print(f"Caché actualizada: {len(merged)} subastas Rare de LaLiga 2026-2027")
+    return payload
+
+
 def match_team_slug(partial, team_slugs):
     """Encuentra el slug completo dado un nombre parcial."""
     partial_lower = partial.lower()
@@ -214,38 +373,27 @@ def fetch_la_liga_rare_auctions(team_filters=None, rarity="rare", season_year=DE
     Busca subastas activas de cartas Rare de LaLiga mediante las cartas de los
     participantes oficiales de la temporada.
     """
-    headers = build_headers()
-    la_liga_teams = fetch_la_liga_teams(headers, season_year=season_year)
+    if rarity != 'rare' or season_year != DEFAULT_SEASON_YEAR:
+        raise ValueError("La caché actual contiene Rare de LaLiga 2026-2027")
+    cache = load_auction_cache()
+    if not cache:
+        raise RuntimeError("La sincronización inicial del mercado está en curso. Vuelve a intentarlo en unos minutos.")
+    results = list(cache.get('auctions') or [])
 
     # Determinar equipos
     if team_filters:
-        team_slugs = []
+        available_team_slugs = {row['team_slug'] for row in results}
+        selected_team_slugs = []
         for t in team_filters:
-            slug = match_team_slug(t, la_liga_teams)
+            slug = match_team_slug(t, available_team_slugs)
             if slug:
-                team_slugs.append(slug)
+                selected_team_slugs.append(slug)
             else:
                 print(f"⚠️  Equipo '{t}' no encontrado. Equipos disponibles:")
-                for s in la_liga_teams:
+                for s in available_team_slugs:
                     print(f"     {s}")
                 sys.exit(1)
-    else:
-        team_slugs = list(la_liga_teams)
-
-    team_filter_str = f" (equipos: {', '.join(team_filters)})" if team_filters else ""
-    print(f"🔍 Buscando subastas {rarity} de LaLiga {season_year}-{season_year + 1}{team_filter_str}...")
-    print("   Consultando las subastas disponibles para tu cuenta...\n")
-
-    start = time.time()
-    results, pages, total = fetch_all_live_auctions(
-        headers,
-        rarity=rarity,
-        team_slugs=team_slugs,
-        season_year=season_year,
-    )
-    elapsed = time.time() - start
-
-    print(f"   Escaneadas {total} subastas en {pages} páginas ({elapsed:.1f}s)")
+        results = [row for row in results if row['team_slug'] in selected_team_slugs]
     return results
 
 

@@ -99,6 +99,8 @@ WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now "$SERVICE_NAME"
+PROJECT_DIR="$PROJECT_DIR" VENV_DIR="$VENV_DIR" ENV_FILE="$ENV_FILE" SERVICE_USER="$SERVICE_USER" \
+    bash "$PROJECT_DIR/deploy/install-auction-refresh.sh"
 
 NGINX_SITE="/etc/nginx/sites-available/sorare"
 REDIRECT_LOCATION=""

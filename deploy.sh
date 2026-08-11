@@ -55,6 +55,9 @@ cd "$PROJECT_DIR/web"
 "$VENV_DIR/bin/python" manage.py migrate --no-input
 "$VENV_DIR/bin/python" manage.py collectstatic --no-input
 
+PROJECT_DIR="$PROJECT_DIR" VENV_DIR="$VENV_DIR" ENV_FILE="$ENV_FILE" \
+    bash "$PROJECT_DIR/deploy/install-auction-refresh.sh"
+
 info "Reiniciando $SERVICE_NAME"
 sudo systemctl restart "$SERVICE_NAME"
 

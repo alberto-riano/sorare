@@ -70,6 +70,17 @@ class LaLigaAuctionTests(SimpleTestCase):
             )
         self.assertEqual(positions["EnglishAuction:test"], 3)
 
+    def test_market_rows_include_auctions_without_my_bid(self):
+        card = self._card("market-card", "rare", 2026, "real-madrid-madrid")
+        auction = self._auction(card)
+        rows = listar_subastas._rows_from_live_auctions(
+            [auction], {"real-madrid-madrid"}, "burguis", season_year=2026
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]["has_bid"])
+        self.assertFalse(rows[0]["is_winning"])
+        self.assertFalse(rows[0]["is_outbid"])
+
     @staticmethod
     def _card(asset_id, rarity, season, team_slug):
         card = {
