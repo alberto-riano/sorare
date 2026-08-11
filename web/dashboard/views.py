@@ -434,27 +434,21 @@ def auctions_list(request):
     
     auctions = []
     error = None
-    loading = False
-    
-    if request.method == "POST" or request.GET.get("load"):
-        loading = True
-        try:
-            # Filtros desde el formulario
-            team_filters = request.POST.getlist("teams") or request.GET.getlist("teams") or None
-            # Fetch auctions
-            auctions = listar_subastas.fetch_la_liga_rare_auctions(
-                team_filters=team_filters if team_filters else None,
-                rarity="rare",
-                season_year=2026,
-            )
-            
-            # Ordenar por fecha de fin
-            auctions.sort(key=lambda x: x['end_date'])
-            
-            messages.success(request, f"✅ Encontradas {len(auctions)} subastas activas")
-        except Exception as e:
-            error = str(e)
-            messages.error(request, f"Error al cargar subastas: {error}")
+    loading = True
+
+    try:
+        team_filters = request.POST.getlist("teams") or request.GET.getlist("teams") or None
+        auctions = listar_subastas.fetch_la_liga_rare_auctions(
+            team_filters=team_filters if team_filters else None,
+            rarity="rare",
+            season_year=2026,
+        )
+        auctions.sort(key=lambda x: x['end_date'])
+        if request.method == "POST":
+            messages.success(request, f"Actualizadas {len(auctions)} subastas activas")
+    except Exception as e:
+        error = str(e)
+        messages.error(request, f"Error al cargar subastas: {error}")
     
     return render(
         request,
