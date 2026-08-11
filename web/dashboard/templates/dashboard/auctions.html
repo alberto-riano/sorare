@@ -45,22 +45,18 @@
           <th><i class="fas fa-user"></i> Jugador</th>
           <th><i class="fas fa-shield-alt"></i> Equipo</th>
           <th><i class="fas fa-running"></i> Pos</th>
-          <th><i class="fas fa-hashtag"></i> Serial</th>
-          <th><i class="fas fa-calendar"></i> Temporada</th>
           <th><i class="fas fa-euro-sign"></i> Puja Actual</th>
-          <th><i class="fas fa-user-tag"></i> Pujador</th>
           <th><i class="fas fa-clock"></i> Finaliza</th>
-          <th><i class="fas fa-link"></i> Acciones</th>
+          <th><i class="fas fa-chart-line"></i> Mercado</th>
+          <th><i class="fas fa-gavel"></i> Pujar</th>
         </tr>
       </thead>
       <tbody>
         {% for auction in auctions %}
-        <tr>
+        <tr class="auction-main-row">
           <td><strong>{{ auction.player }}</strong></td>
           <td>{{ auction.team }}</td>
           <td>{{ auction.position }}</td>
-          <td>{{ auction.serial }}</td>
-          <td>{{ auction.season }}</td>
           <td>
             {% if auction.bid_eur %}
               <span style="color: var(--accent); font-weight: 600;">{{ auction.bid_eur|floatformat:2 }}€</span>
@@ -68,35 +64,36 @@
               <span style="color: var(--muted);">Sin pujas</span>
             {% endif %}
           </td>
-          <td>
-            {% if auction.bidder %}
-              <span class="badge">{{ auction.bidder }}</span>
-            {% else %}
-              —
-            {% endif %}
-          </td>
           <td style="font-size: 0.78rem; font-family: 'IBM Plex Mono', monospace;">
             {{ auction.end_date|slice:":16" }}
           </td>
           <td>
-            <div style="display: flex; gap: 0.4rem;">
-              <a 
-                href="#" 
-                onclick="navigator.clipboard.writeText('{{ auction.auction_id }}'); alert('ID copiado: {{ auction.auction_id }}'); return false;"
-                class="btn btn-compact btn-secondary"
-                title="Copiar Auction ID"
-              >
-                <i class="fas fa-copy"></i>
-              </a>
-              <a 
-                href="#" 
-                onclick="navigator.clipboard.writeText('{{ auction.asset_id }}'); alert('Asset ID copiado: {{ auction.asset_id }}'); return false;"
-                class="btn btn-compact"
-                title="Copiar Asset ID"
-              >
-                <i class="fas fa-barcode"></i>
-              </a>
-            </div>
+            <button type="button" class="btn btn-compact btn-secondary history-toggle"
+                    data-player-slug="{{ auction.player_slug }}"
+                    data-target="history-{{ forloop.counter }}">
+              <i class="fas fa-chart-line"></i> Últimas 5
+            </button>
+          </td>
+          <td>
+            <form method="post" class="inline-bid-form">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="place_bid">
+              <input type="hidden" name="auction_id" value="{{ auction.auction_id }}">
+              <div class="inline-bid-amount">
+                <input type="number" name="euros" min="0.01" step="0.01" inputmode="decimal"
+                       aria-label="Importe de puja para {{ auction.player }}" placeholder="€" required>
+                <button class="btn btn-compact btn-accent" type="submit">
+                  <i class="fas fa-gavel"></i> Pujar
+                </button>
+              </div>
+              <label class="inline-check"><input type="checkbox" name="confirm" required> Confirmar importe</label>
+              <label class="inline-check"><input type="checkbox" name="use_credit" checked> Usar créditos</label>
+            </form>
+          </td>
+        </tr>
+        <tr id="history-{{ forloop.counter }}" class="history-row" hidden>
+          <td colspan="7">
+            <div class="history-content" aria-live="polite">Pulsa para cargar las ventas comparables.</div>
           </td>
         </tr>
         {% endfor %}
@@ -104,14 +101,7 @@
     </table>
   </div>
 
-  <div style="margin-top: 1rem; padding: 0.8rem; border: 1px dashed var(--line); border-radius: 12px; background: rgba(255,255,255,0.5);">
-    <p style="margin: 0 0 0.5rem; font-size: 0.88rem; color: var(--muted);">
-      <i class="fas fa-info-circle"></i> <strong>Para pujar:</strong>
-    </p>
-    <pre style="font-size: 0.8rem; margin: 0;">node javascript/pujar_carta.js &lt;auction_id&gt; &lt;puja_en_centimos_EUR&gt;
-
-Ejemplo: node javascript/pujar_carta.js EnglishAuction:xxxx 800  (= 8.00€)</pre>
-  </div>
+  <p class="auction-warning"><i class="fas fa-shield-halved"></i> La puja se envía inmediatamente al confirmar. Revisa bien el importe.</p>
 </section>
 {% elif loading %}
 <section class="panel reveal" style="animation-delay: 200ms;">
@@ -131,5 +121,50 @@ Ejemplo: node javascript/pujar_carta.js EnglishAuction:xxxx 800  (= 8.00€)</pr
   </p>
 </section>
 {% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('.history-toggle').forEach(function (button) {
+    button.addEventListener('click', async function () {
+      var row = document.getElementById(button.dataset.target);
+      var content = row.querySelector('.history-content');
+      row.hidden = !row.hidden;
+      if (row.hidden || row.dataset.loaded === 'true') return;
+      content.textContent = 'Cargando últimas ventas Rare 2026-2027…';
+      try {
+        var url = '{% url "auction_price_history" %}?player_slug=' + encodeURIComponent(button.dataset.playerSlug);
+        var response = await fetch(url, {headers: {'X-Requested-With': 'XMLHttpRequest'}});
+        var payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'No se pudo cargar el historial');
+        content.textContent = '';
+        if (!payload.sales.length) {
+          content.textContent = 'No hay ventas comparables Rare 2026-2027.';
+        } else {
+          var list = document.createElement('div');
+          list.className = 'history-sales';
+          payload.sales.forEach(function (sale) {
+            var item = document.createElement('div');
+            item.className = 'history-sale history-' + sale.kind;
+            var icon = document.createElement('i');
+            icon.className = 'fas ' + sale.icon;
+            var price = document.createElement('strong');
+            price.textContent = sale.eur === null ? '—' : Number(sale.eur).toFixed(2) + ' €';
+            var label = document.createElement('span');
+            label.textContent = sale.label;
+            var date = document.createElement('small');
+            date.textContent = sale.date ? new Date(sale.date).toLocaleDateString('es-ES') : '';
+            item.append(icon, price, label, date);
+            list.appendChild(item);
+          });
+          content.appendChild(list);
+        }
+        row.dataset.loaded = 'true';
+      } catch (error) {
+        content.textContent = error.message;
+      }
+    });
+  });
+});
+</script>
 
 {% endblock %}

@@ -142,10 +142,8 @@ const AUCTION_QUERY = gql`
           amounts {
             eurCents
           }
-          bidder {
-            ... on User {
-              nickname
-            }
+          userBidder {
+            nickname
           }
         }
         anyCards {

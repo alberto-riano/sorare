@@ -222,12 +222,12 @@ def get_live_single_sale_offers(player_slug, headers=None):
     return all_offers
 
 
-def get_recent_prices(player_slug, rarity, season=None, headers=None):
+def get_recent_prices(player_slug, rarity, season=None, headers=None, first=10):
     """Obtiene precios recientes de ventas realizadas para un jugador y rareza."""
     query = '''
-    query GetTokenPrices($playerSlug: String!, $rarity: Rarity!, $season: Int) {
+    query GetTokenPrices($playerSlug: String!, $rarity: Rarity!, $season: Int, $first: Int!) {
       tokens {
-        tokenPrices(playerSlug: $playerSlug, rarity: $rarity, season: $season, first: 10) {
+        tokenPrices(playerSlug: $playerSlug, rarity: $rarity, season: $season, first: $first) {
           amounts {
             eurCents
             wei
@@ -239,6 +239,10 @@ def get_recent_prices(player_slug, rarity, season=None, headers=None):
             seasonYear
             grade
           }
+          deal {
+            __typename
+            ... on TokenOffer { type }
+          }
         }
       }
     }
@@ -246,6 +250,7 @@ def get_recent_prices(player_slug, rarity, season=None, headers=None):
     variables = {
         'playerSlug': player_slug,
         'rarity': rarity,
+        'first': first,
     }
     if season is not None:
         variables['season'] = season

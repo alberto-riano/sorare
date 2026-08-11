@@ -136,7 +136,7 @@ def _find_auction_by_asset_id(asset_id, headers):
               endDate
               bestBid {
                 amounts { eurCents }
-                bidder { ... on User { nickname } }
+                userBidder { nickname }
               }
             }
           }
@@ -161,7 +161,7 @@ def _find_auction_by_asset_id(asset_id, headers):
     print(f"   Finaliza: {auction['endDate']}")
     if auction.get('bestBid'):
         eur = auction['bestBid']['amounts']['eurCents'] / 100
-        bidder = auction['bestBid'].get('bidder', {}).get('nickname', '?')
+        bidder = auction['bestBid'].get('userBidder', {}).get('nickname', '?')
         print(f"   Puja actual: {eur:.2f}€ (by {bidder})")
     return auction['id']
 
@@ -185,7 +185,7 @@ def _find_auction_by_card_slug(card_slug, headers):
             endDate
             bestBid {
               amounts { eurCents }
-              bidder { ... on User { nickname } }
+              userBidder { nickname }
             }
           }
         }
@@ -210,7 +210,7 @@ def _find_auction_by_card_slug(card_slug, headers):
     print(f"   Finaliza: {auction['endDate']}")
     if auction.get('bestBid'):
         eur = auction['bestBid']['amounts']['eurCents'] / 100
-        bidder = auction['bestBid'].get('bidder', {}).get('nickname', '?')
+        bidder = auction['bestBid'].get('userBidder', {}).get('nickname', '?')
         print(f"   Puja actual: {eur:.2f}€ (by {bidder})")
     return auction['id']
 
@@ -253,7 +253,7 @@ def _find_auction_by_player_slug(slug, headers):
                 endDate
                 bestBid {
                   amounts { eurCents }
-                  bidder { ... on User { nickname } }
+                  userBidder { nickname }
                 }
               }
             }
@@ -284,7 +284,7 @@ def _find_auction_by_player_slug(slug, headers):
         for i, c in enumerate(active_auctions):
             a = c['latestEnglishAuction']
             eur = a['bestBid']['amounts']['eurCents'] / 100 if a.get('bestBid') else 0
-            bidder = a['bestBid']['bidder']['nickname'] if a.get('bestBid') and a['bestBid'].get('bidder') else '-'
+            bidder = a['bestBid']['userBidder']['nickname'] if a.get('bestBid') and a['bestBid'].get('userBidder') else '-'
             print(f"      {i+1}. #{c['serialNumber']} (season {c['seasonYear']}) — {eur:.2f}€ (by {bidder}) — fin: {a['endDate']}")
         active_auctions.sort(key=lambda c: c['latestEnglishAuction'].get('bestBid', {}).get('amounts', {}).get('eurCents', 0))
         chosen = active_auctions[0]
@@ -297,7 +297,7 @@ def _find_auction_by_player_slug(slug, headers):
     print(f"   Finaliza: {auction['endDate']}")
     if auction.get('bestBid'):
         eur = auction['bestBid']['amounts']['eurCents'] / 100
-        bidder = auction['bestBid'].get('bidder', {}).get('nickname', '?')
+        bidder = auction['bestBid'].get('userBidder', {}).get('nickname', '?')
         print(f"   Puja actual: {eur:.2f}€ (by {bidder})")
     else:
         print(f"   Sin pujas aún")
@@ -315,7 +315,7 @@ def verify_auction(auction_id, headers):
           endDate
           bestBid {
             amounts { eurCents }
-            bidder { ... on User { nickname } }
+            userBidder { nickname }
           }
           anyCards {
             anyPlayer { displayName }
@@ -342,7 +342,7 @@ def verify_auction(auction_id, headers):
     print(f"   Fin:     {auction['endDate']}")
     if auction.get('bestBid'):
         eur = auction['bestBid']['amounts']['eurCents'] / 100
-        bidder = auction['bestBid'].get('bidder', {}).get('nickname', '?')
+        bidder = auction['bestBid'].get('userBidder', {}).get('nickname', '?')
         print(f"   Puja actual: {eur:.2f}€ (by {bidder})")
     else:
         print(f"   Sin pujas aún")
@@ -359,7 +359,7 @@ def check_auction_status(auction_id, headers):
           open
           bestBid {
             amounts { eurCents }
-            bidder { ... on User { nickname } }
+            userBidder { nickname }
           }
         }
       }
@@ -374,7 +374,7 @@ def check_auction_status(auction_id, headers):
         bid = auction.get('bestBid')
         if bid:
             eur = bid['amounts']['eurCents'] / 100
-            bidder = bid.get('bidder', {}).get('nickname', '?')
+            bidder = bid.get('userBidder', {}).get('nickname', '?')
             return eur, bidder, auction['open']
         return 0, None, auction['open']
     except Exception:

@@ -21,7 +21,7 @@ from web_services.sales_excel import (
     save_prices,
 )
 
-from .forms import BidScheduleForm, ExportCardsForm, TelegramSettingsForm
+from .forms import BidScheduleForm, ExportCardsForm, InlineBidForm, TelegramSettingsForm
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PATHS = SorarePaths(repo_root=REPO_ROOT)
@@ -436,6 +436,30 @@ def auctions_list(request):
     error = None
     loading = True
 
+    if request.method == "POST" and request.POST.get("action") == "place_bid":
+        bid_form = InlineBidForm(request.POST)
+        if bid_form.is_valid():
+            data = bid_form.cleaned_data
+            result = run_bid_scheduler(
+                PATHS,
+                BidRequest(
+                    identifier=data["auction_id"],
+                    euros=str(data["euros"]),
+                    hora="",
+                    now=True,
+                    sniper=False,
+                    background=False,
+                    use_credit=bool(data["use_credit"]),
+                ),
+            )
+            if result.exit_code == 0:
+                messages.success(request, f"Puja de {data['euros']:.2f} € enviada correctamente.")
+            else:
+                detail = result.stderr or result.stdout or "Error desconocido"
+                messages.error(request, f"La puja no se pudo completar: {detail[-500:]}")
+            return redirect("auctions_list")
+        messages.error(request, "No se envió la puja: revisa el importe y la confirmación.")
+
     try:
         team_filters = request.POST.getlist("teams") or request.GET.getlist("teams") or None
         auctions = listar_subastas.fetch_la_liga_rare_auctions(
@@ -460,6 +484,50 @@ def auctions_list(request):
             "season_label": "2026-2027",
         },
     )
+
+
+def auction_price_history(request):
+    """Últimas cinco ventas Rare 2026 del jugador solicitado."""
+    import re
+    from sorare_utils import build_headers, get_recent_prices
+
+    player_slug = request.GET.get("player_slug", "").strip()
+    if not re.fullmatch(r"[a-z0-9-]{1,160}", player_slug):
+        return JsonResponse({"error": "Jugador no válido"}, status=400)
+
+    try:
+        prices = get_recent_prices(
+            player_slug,
+            rarity="rare",
+            season=2026,
+            first=5,
+            headers=build_headers(),
+        )
+    except Exception as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+
+    sales = []
+    for price in prices[:5]:
+        deal = price.get("deal") or {}
+        typename = deal.get("__typename")
+        offer_type = deal.get("type")
+        if typename == "TokenAuction":
+            kind, icon, label = "auction", "fa-gavel", "Subasta"
+        elif typename == "TokenPrimaryOffer" or offer_type in {"SINGLE_SALE_OFFER", "SINGLE_BUY_OFFER"}:
+            kind, icon, label = "instant", "fa-bolt", "Compra instantánea"
+        else:
+            kind, icon, label = "trade", "fa-right-left", "Oferta entre managers"
+        eur_cents = (price.get("amounts") or {}).get("eurCents")
+        sales.append(
+            {
+                "date": price.get("date"),
+                "eur": eur_cents / 100 if eur_cents is not None else None,
+                "kind": kind,
+                "icon": icon,
+                "label": label,
+            }
+        )
+    return JsonResponse({"sales": sales, "season": "2026-2027", "rarity": "Rare"})
 
 
 def offers_received(request):

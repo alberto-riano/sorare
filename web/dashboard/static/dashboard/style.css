@@ -478,6 +478,74 @@ textarea {
   max-height: 140px;
 }
 
+.inline-bid-form {
+  min-width: 190px;
+}
+
+.inline-bid-amount {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.inline-bid-amount input {
+  width: 78px;
+  padding: 0.4rem;
+}
+
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0.35rem 0.55rem 0 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.history-row td {
+  background: #f8faf8;
+  padding: 0.8rem;
+}
+
+.history-sales {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.5rem;
+}
+
+.history-sale {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.15rem 0.45rem;
+  padding: 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+}
+
+.history-sale i {
+  grid-row: span 3;
+  color: var(--accent);
+}
+
+.history-sale span,
+.history-sale small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.history-instant i { color: var(--accent-2); }
+.history-trade i { color: #6366f1; }
+
+.auction-warning {
+  margin: 1rem 0 0;
+  padding: 0.7rem;
+  color: var(--bad);
+  background: #fff1f2;
+  border-radius: 10px;
+  font-size: 0.82rem;
+}
+
 .in-season-row {
   background: #ecfdf5;
 }

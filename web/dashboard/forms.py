@@ -50,6 +50,19 @@ class BidScheduleForm(forms.Form):
         return cleaned_data
 
 
+class InlineBidForm(forms.Form):
+    auction_id = forms.CharField(max_length=200, widget=forms.HiddenInput)
+    euros = forms.DecimalField(min_value=0.01, decimal_places=2, max_digits=8)
+    use_credit = forms.BooleanField(required=False, initial=True)
+    confirm = forms.BooleanField(required=True, error_messages={"required": "Confirma la puja antes de enviarla."})
+
+    def clean_auction_id(self):
+        auction_id = self.cleaned_data["auction_id"].strip()
+        if not auction_id.startswith("EnglishAuction:"):
+            raise forms.ValidationError("Identificador de subasta no válido.")
+        return auction_id
+
+
 class ExportCardsForm(forms.Form):
     rarity = forms.ChoiceField(
         choices=[
@@ -60,5 +73,4 @@ class ExportCardsForm(forms.Form):
         initial="super_rare",
     )
     max_cards = forms.IntegerField(min_value=1, max_value=5000, initial=10)
-
 
