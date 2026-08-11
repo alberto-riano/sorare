@@ -32,10 +32,10 @@ class LaLigaAuctionTests(SimpleTestCase):
             self._card("wrong-league", "rare", 2026, "arsenal-london"),
         ]
         response = {
-            "tokens": {
-                "liveAuctions": {
+            "football": {
+                "allCards": {
                     "totalCount": len(cards),
-                    "nodes": [self._auction(card) for card in cards],
+                    "nodes": cards,
                     "pageInfo": {"hasNextPage": False, "endCursor": None},
                 }
             }
@@ -50,7 +50,7 @@ class LaLigaAuctionTests(SimpleTestCase):
 
     @staticmethod
     def _card(asset_id, rarity, season, team_slug):
-        return {
+        card = {
             "assetId": asset_id,
             "rarityTyped": rarity,
             "seasonYear": season,
@@ -59,6 +59,8 @@ class LaLigaAuctionTests(SimpleTestCase):
             "anyTeam": {"name": "Equipo", "slug": team_slug},
             "anyPositions": ["Defender"],
         }
+        card["latestEnglishAuction"] = LaLigaAuctionTests._auction(card)
+        return card
 
     @staticmethod
     def _auction(card):
@@ -66,6 +68,7 @@ class LaLigaAuctionTests(SimpleTestCase):
             "id": f"EnglishAuction:{card['assetId']}",
             "currentPrice": "0",
             "endDate": "2026-08-12T12:00:00Z",
+            "open": True,
             "bestBid": None,
             "anyCards": [card],
         }

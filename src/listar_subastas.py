@@ -37,27 +37,34 @@ query GetLaLigaTeams($competition: String!, $seasonYear: Int!) {
 }
 '''
 
-LIVE_AUCTIONS_QUERY = '''
-query GetLiveAuctions($after: String) {
-  tokens {
-    liveAuctions(sport: FOOTBALL, first: 50, after: $after) {
+LA_LIGA_CARDS_WITH_AUCTIONS_QUERY = '''
+query GetLaLigaCardsWithAuctions($after: String, $teamSlugs: [String!]!, $seasonYears: [Int!]!) {
+  football {
+    allCards(
+      first: 50
+      after: $after
+      rarities: [rare]
+      seasonStartYears: $seasonYears
+      teamSlugs: $teamSlugs
+    ) {
       totalCount
       nodes {
-        id
-        currentPrice
-        endDate
-        bestBid {
-          amounts { eurCents }
-          userBidder { nickname }
-        }
-        anyCards {
-          assetId
-          rarityTyped
-          seasonYear
-          serialNumber
-          anyPlayer { displayName slug }
-          anyTeam { name slug }
-          anyPositions
+        assetId
+        rarityTyped
+        seasonYear
+        serialNumber
+        anyPlayer { displayName slug }
+        anyTeam { name slug }
+        anyPositions
+        latestEnglishAuction {
+          id
+          open
+          currentPrice
+          endDate
+          bestBid {
+            amounts { eurCents }
+            userBidder { nickname }
+          }
         }
       }
       pageInfo { hasNextPage endCursor }
@@ -87,10 +94,12 @@ def fetch_la_liga_teams(headers, season_year=DEFAULT_SEASON_YEAR):
 
 def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None, season_year=DEFAULT_SEASON_YEAR):
     """
-    Pagina tokens.liveAuctions y filtra por rareza y equipos en cliente.
-    Devuelve lista de subastas que cumplen los filtros.
+    Pagina solo las cartas Rare de los clubes y temporada solicitados, y conserva
+    las que tienen una subasta abierta. Evita recorrer el mercado global.
     """
     team_slugs = set(team_slugs or [])
+    if rarity != "rare":
+        raise ValueError("Esta consulta optimizada solo admite cartas Rare")
 
     results = []
     cursor = None
@@ -99,23 +108,26 @@ def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None, season_year
 
     while True:
         try:
-            data = graphql_request(LIVE_AUCTIONS_QUERY, {'after': cursor}, headers=headers)
+            data = graphql_request(
+                LA_LIGA_CARDS_WITH_AUCTIONS_QUERY,
+                {"after": cursor, "teamSlugs": sorted(team_slugs), "seasonYears": [season_year]},
+                headers=headers,
+            )
         except Exception as e:
             print(f"  ⚠️  Error en página {page + 1}: {e}", file=sys.stderr)
             break
 
-        auctions = data['tokens']['liveAuctions']
-        nodes = auctions['nodes']
+        cards_connection = data['football']['allCards']
+        nodes = cards_connection['nodes']
         page += 1
 
         if total is None:
-            total = auctions['totalCount']
+            total = cards_connection['totalCount']
 
-        for auction in nodes:
-            cards = auction.get('anyCards', [])
-            if not cards:
+        for card in nodes:
+            auction = card.get('latestEnglishAuction')
+            if not auction or not auction.get('open'):
                 continue
-            card = cards[0]
 
             # Filtrar por rareza
             if card.get('rarityTyped') != rarity:
@@ -158,9 +170,9 @@ def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None, season_year
         pages_total = (total + 49) // 50 if total else '?'
         print(f"\r   Página {page}/{pages_total} — {len(results)} subastas La Liga encontradas", end="", flush=True)
 
-        if not auctions['pageInfo']['hasNextPage']:
+        if not cards_connection['pageInfo']['hasNextPage']:
             break
-        cursor = auctions['pageInfo']['endCursor']
+        cursor = cards_connection['pageInfo']['endCursor']
 
     print()  # newline after progress
     return results, page, total
@@ -182,8 +194,8 @@ def match_team_slug(partial, team_slugs):
 
 def fetch_la_liga_rare_auctions(team_filters=None, rarity="rare", season_year=DEFAULT_SEASON_YEAR):
     """
-    Busca subastas activas de cartas de La Liga via liveAuctions.
-    Filtra en cliente por rareza y equipo.
+    Busca subastas activas de cartas Rare de LaLiga mediante las cartas de los
+    participantes oficiales de la temporada.
     """
     headers = build_headers()
     la_liga_teams = fetch_la_liga_teams(headers, season_year=season_year)
@@ -205,7 +217,7 @@ def fetch_la_liga_rare_auctions(team_filters=None, rarity="rare", season_year=DE
 
     team_filter_str = f" (equipos: {', '.join(team_filters)})" if team_filters else ""
     print(f"🔍 Buscando subastas {rarity} de LaLiga {season_year}-{season_year + 1}{team_filter_str}...")
-    print(f"   Paginando todas las subastas activas de fútbol y filtrando...\n")
+    print("   Consultando cartas de los clubes y conservando las subastas abiertas...\n")
 
     start = time.time()
     results, pages, total = fetch_all_live_auctions(
