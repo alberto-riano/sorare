@@ -114,12 +114,6 @@ server {
 
     $REDIRECT_LOCATION
 
-    location ${URL_PREFIX}/static/ {
-        alias $PROJECT_DIR/web/staticfiles/;
-        access_log off;
-        expires 7d;
-    }
-
     location ${URL_PREFIX}/ {
         rewrite ^${URL_PREFIX:-}/(.*) /\$1 break;
         proxy_pass http://unix:/run/sorare/gunicorn.sock;
