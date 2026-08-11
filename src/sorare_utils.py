@@ -241,7 +241,11 @@ def get_recent_prices(player_slug, rarity, season=None, headers=None, first=10):
           }
           deal {
             __typename
-            ... on TokenOffer { type }
+            ... on TokenOffer {
+              type
+              senderSide { anyCards { assetId } }
+              receiverSide { anyCards { assetId } }
+            }
           }
         }
       }

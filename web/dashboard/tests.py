@@ -93,7 +93,16 @@ class AuctionActionsTests(SimpleTestCase):
         get_prices.return_value = [
             {"amounts": {"eurCents": 1234}, "date": "2026-08-01T10:00:00Z", "deal": {"__typename": "TokenAuction"}},
             {"amounts": {"eurCents": 1500}, "date": "2026-08-02T10:00:00Z", "deal": {"__typename": "TokenPrimaryOffer"}},
-            {"amounts": {"eurCents": 900}, "date": "2026-08-03T10:00:00Z", "deal": {"__typename": "TokenOffer", "type": "DIRECT_OFFER"}},
+            {
+                "amounts": {"eurCents": 900},
+                "date": "2026-08-03T10:00:00Z",
+                "deal": {
+                    "__typename": "TokenOffer",
+                    "type": "DIRECT_OFFER",
+                    "senderSide": {"anyCards": [{"assetId": "a"}]},
+                    "receiverSide": {"anyCards": [{"assetId": "b"}]},
+                },
+            },
         ]
         response = auction_price_history(RequestFactory().get("/", {"player_slug": "test-player"}))
         payload = json.loads(response.content)

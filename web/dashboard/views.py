@@ -513,10 +513,14 @@ def auction_price_history(request):
         offer_type = deal.get("type")
         if typename == "TokenAuction":
             kind, icon, label = "auction", "fa-gavel", "Subasta"
+        elif typename == "TokenOffer" and (deal.get("senderSide") or {}).get("anyCards") and (deal.get("receiverSide") or {}).get("anyCards"):
+            kind, icon, label = "trade", "fa-right-left", "Intercambio entre managers"
         elif typename == "TokenPrimaryOffer" or offer_type in {"SINGLE_SALE_OFFER", "SINGLE_BUY_OFFER"}:
             kind, icon, label = "instant", "fa-bolt", "Compra instantánea"
+        elif typename == "TokenOffer":
+            kind, icon, label = "instant", "fa-handshake", "Compra a otro manager"
         else:
-            kind, icon, label = "trade", "fa-right-left", "Oferta entre managers"
+            kind, icon, label = "trade", "fa-right-left", "Operación entre managers"
         eur_cents = (price.get("amounts") or {}).get("eurCents")
         sales.append(
             {
