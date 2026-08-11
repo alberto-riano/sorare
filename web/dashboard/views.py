@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse, JsonResponse
 
 from django.contrib import messages
+from django.core.paginator import Paginator
 from django.http import FileResponse, Http404
 from django.shortcuts import redirect, render
 
@@ -467,18 +470,65 @@ def auctions_list(request):
             rarity="rare",
             season_year=2026,
         )
-        auctions.sort(key=lambda x: x['end_date'])
+        loading = False
+        auctions.sort(key=lambda x: datetime.fromisoformat(x['end_date'].replace('Z', '+00:00')))
         if request.method == "POST":
             messages.success(request, f"Actualizadas {len(auctions)} subastas activas")
     except Exception as e:
         error = str(e)
         messages.error(request, f"Error al cargar subastas: {error}")
     
+    available_teams = sorted({auction['team'] for auction in auctions})
+    available_positions = sorted({auction['position'] for auction in auctions})
+    filter_player = request.GET.get('player', '').strip()
+    filter_team = request.GET.get('team', '').strip()
+    filter_position = request.GET.get('position', '').strip()
+    filter_status = request.GET.get('status', '').strip()
+    filter_max_price = request.GET.get('max_price', '').strip()
+
+    filtered_auctions = auctions
+    if filter_player:
+        filtered_auctions = [row for row in filtered_auctions if filter_player.casefold() in row['player'].casefold()]
+    if filter_team:
+        filtered_auctions = [row for row in filtered_auctions if row['team'] == filter_team]
+    if filter_position:
+        filtered_auctions = [row for row in filtered_auctions if row['position'] == filter_position]
+    if filter_status == 'winning':
+        filtered_auctions = [row for row in filtered_auctions if row['is_winning']]
+    elif filter_status == 'outbid':
+        filtered_auctions = [row for row in filtered_auctions if row['is_outbid']]
+    try:
+        max_price = float(filter_max_price) if filter_max_price else None
+    except ValueError:
+        max_price = None
+    if max_price is not None:
+        filtered_auctions = [row for row in filtered_auctions if row['bid_eur'] is not None and row['bid_eur'] <= max_price]
+
+    madrid = ZoneInfo('Europe/Madrid')
+    for auction in filtered_auctions:
+        end_at = datetime.fromisoformat(auction['end_date'].replace('Z', '+00:00')).astimezone(madrid)
+        auction['end_date_madrid'] = end_at.strftime('%d/%m/%Y %H:%M')
+
+    paginator = Paginator(filtered_auctions, 20)
+    page_obj = paginator.get_page(request.GET.get('page'))
+    query_params = request.GET.copy()
+    query_params.pop('page', None)
+
     return render(
         request,
         "dashboard/auctions.html",
         {
-            "auctions": auctions,
+            "auctions": page_obj.object_list,
+            "page_obj": page_obj,
+            "filtered_count": len(filtered_auctions),
+            "available_teams": available_teams,
+            "available_positions": available_positions,
+            "filter_player": filter_player,
+            "filter_team": filter_team,
+            "filter_position": filter_position,
+            "filter_status": filter_status,
+            "filter_max_price": filter_max_price,
+            "pagination_query": query_params.urlencode(),
             "error": error,
             "loading": loading,
             "season_label": "2026-2027",

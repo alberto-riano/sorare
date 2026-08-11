@@ -5,7 +5,7 @@ from django.test import RequestFactory, SimpleTestCase
 
 import listar_subastas
 from dashboard.forms import InlineBidForm
-from dashboard.views import auction_price_history
+from dashboard.views import auction_price_history, auctions_list
 from web_services.process_runner import BidRequest, ScriptResult, run_bid_scheduler
 
 
@@ -107,6 +107,25 @@ class LaLigaAuctionTests(SimpleTestCase):
 
 
 class AuctionActionsTests(SimpleTestCase):
+    @patch("dashboard.views.render")
+    @patch("listar_subastas.fetch_la_liga_rare_auctions")
+    def test_auctions_are_sorted_paginated_and_shown_in_madrid_time(self, fetch_auctions, render):
+        fetch_auctions.return_value = [
+            {
+                "player": f"Jugador {index}", "team": "Equipo", "position": "Forward",
+                "bid_eur": 10, "is_winning": False, "is_outbid": False,
+                "end_date": f"2026-08-12T{hour:02d}:00:00Z",
+            }
+            for index, hour in enumerate(list(range(23, -1, -1)) + [23])
+        ]
+        render.side_effect = lambda request, template, context: context
+        context = auctions_list(RequestFactory().get("/ofertas/"))
+
+        self.assertEqual(len(context["auctions"]), 20)
+        self.assertEqual(context["page_obj"].paginator.per_page, 20)
+        self.assertEqual(context["auctions"][0]["end_date"], "2026-08-12T00:00:00Z")
+        self.assertEqual(context["auctions"][0]["end_date_madrid"], "12/08/2026 02:00")
+
     def test_inline_bid_requires_explicit_confirmation(self):
         form = InlineBidForm({"auction_id": "EnglishAuction:test", "euros": "12.50"})
         self.assertFalse(form.is_valid())

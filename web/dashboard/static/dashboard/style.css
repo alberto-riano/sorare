@@ -491,6 +491,26 @@ textarea {
   grid-template-columns: 1.4fr repeat(3, minmax(130px, 1fr)) auto auto;
   gap: 0.65rem;
   align-items: end;
+  margin-bottom: 0.9rem;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.timezone-label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.65rem;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
 }
 
 .auction-main-row {
