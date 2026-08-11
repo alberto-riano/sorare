@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from django.views.decorators.csrf import csrf_exempt
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 
 from django.contrib import messages
 from django.http import FileResponse, Http404
@@ -35,6 +35,11 @@ sys.path.insert(0, str(REPO_ROOT / 'src'))
 from web_services import token_service  # noqa: E402  (requiere src en sys.path)
 
 OTP_CHALLENGE_SESSION_KEY = "sorare_otp_challenge"
+
+
+def healthz(_request):
+    """Sonda interna para systemd/deploy; no consulta ni expone la cuenta."""
+    return HttpResponse("ok", content_type="text/plain")
 
 
 def _to_bool_text(value: bool) -> str:

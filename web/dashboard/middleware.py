@@ -23,7 +23,8 @@ class LoginRequiredMiddleware:
             path = request.path
             login_url = reverse("login")
             logout_url = reverse("logout")
-            allowed = (login_url, logout_url, settings.STATIC_URL)
+            health_url = reverse("healthz")
+            allowed = (login_url, logout_url, health_url, settings.STATIC_URL)
             if not any(path.startswith(prefix) for prefix in allowed):
                 return redirect(f"{login_url}?next={path}")
         return self.get_response(request)

@@ -1,156 +1,77 @@
-# Desplegar Sorare en tu EC2 (milesdepuntos.com/sorare)
+# Despliegue en una EC2 Ubuntu
 
-Guía adaptada a TU setup: una EC2 (`51.21.117.59`) que ya sirve
-`crochet-shop` en `www.milesdepuntos.com` con gunicorn + nginx. Aquí añadimos
-el panel de Sorare en `www.milesdepuntos.com/sorare`, con su **propio
-gunicorn** (socket aparte) y un bloque `location` en tu nginx. Crochet-shop no
-se toca.
+El repositorio incluye dos scripts:
 
-Tu forma de trabajar se mantiene: me pides cambios → `git push` desde tu
-local → en la EC2 `./deploy.sh` → ves los cambios en la URL.
+- `setup.sh`: prepara una EC2 por primera vez (Python, Node, Gunicorn, systemd y nginx).
+- `deploy.sh`: aplica las siguientes versiones con comprobaciones y health check.
 
-> ⚠️ **Seguridad.** El panel compra/vende/puja con dinero real y guarda
-> secretos (incluida la clave privada de Solana en `config/config.txt`).
-> Por eso: login obligatorio (usuario `burguis`), HTTPS (ya lo tienes en
-> milesdepuntos) y `config/config.txt` **nunca** en Git (está en `.gitignore`;
-> se sube por `scp`).
+## Primera instalación
 
----
-
-## A. Primera instalación en la EC2 (una sola vez)
-
-### 1. Clonar el repo en /home/ubuntu/sorare
+En una EC2 Ubuntu con los puertos 22 y 80 abiertos (también 443 si tendrá HTTPS):
 
 ```bash
-ssh -i /Users/albertorianogonzalez/Desktop/workspace/crochet-shop/milesdepuntos.pem ubuntu@51.21.117.59
-
-cd /home/ubuntu
-git clone TU_REPO_GIT sorare
+git clone URL_DEL_REPOSITORIO sorare
 cd sorare
+bash setup.sh
 ```
 
-### 2. Virtualenv + dependencias
+El instalador pregunta el dominio/IP y la subruta. Por defecto publica el panel
+en `http://DOMINIO/sorare/`. Si la EC2 ya tiene un `server` de nginx para ese
+dominio, no habilites dos bloques con el mismo `server_name`: copia los tres
+`location` generados en `/etc/nginx/sites-available/sorare` al bloque existente
+y deshabilita el nuevo con:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 3. Subir los secretos (desde TU portátil, NO en la EC2)
-
-`config/config.txt` no está en Git. En otra terminal de tu Mac:
-
-```bash
-scp -i /Users/albertorianogonzalez/Desktop/workspace/crochet-shop/milesdepuntos.pem \
-    config/config.txt \
-    ubuntu@51.21.117.59:/home/ubuntu/sorare/config/config.txt
-```
-
-### 4. Variables de entorno de producción
-
-```bash
-cd /home/ubuntu/sorare
-cp deploy/.env.example deploy/.env
-nano deploy/.env      # genera DJANGO_SECRET_KEY; el resto ya viene listo para milesdepuntos
-```
-
-Genera la secret key con:
-`python -c "import secrets; print(secrets.token_urlsafe(50))"`
-
-### 5. Migraciones, estáticos y tu usuario `burguis`
-
-```bash
-cd /home/ubuntu/sorare/web
-set -a && source ../deploy/.env && set +a
-
-python manage.py migrate
-python manage.py collectstatic --noinput
-python manage.py createsuperuser     # usuario: burguis  (y la contraseña que quieras)
-```
-
-### 6. Servicio gunicorn de Sorare (systemd)
-
-```bash
-sudo cp /home/ubuntu/sorare/deploy/sorare-web.service /etc/systemd/system/sorare-web.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now sorare-web
-sudo systemctl status sorare-web        # active (running) y crea gunicorn.sock
-```
-
-### 7. Enrutar /sorare en tu nginx existente
-
-Edita tu archivo de nginx de milesdepuntos (el `shop.conf`) y pega DENTRO del
-`server { ... }` del 443 los bloques `location` de
-`deploy/nginx-sorare.conf`:
-
-```bash
-sudo nano /etc/nginx/sites-available/shop.conf      # o donde tengas tu server block
-# pega los location de /home/ubuntu/sorare/deploy/nginx-sorare.conf
+sudo unlink /etc/nginx/sites-enabled/sorare
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-Abre `https://www.milesdepuntos.com/sorare/` → verás el login. Entra con
-`burguis`.
-
----
-
-## B. Día a día (tu flujo habitual)
-
-En tu Mac, cuando tengamos cambios:
+La credencial de Sorare no viaja en Git. Desde el equipo local:
 
 ```bash
-git add -A && git commit -m "cambios" && git push
+scp config/config.txt ubuntu@IP_EC2:/ruta/al/repo/config/config.txt
+ssh ubuntu@IP_EC2 'chmod 600 /ruta/al/repo/config/config.txt'
 ```
 
-En la EC2:
+Si se usa un dominio, activa TLS al terminar:
 
 ```bash
-cd /home/ubuntu/sorare && ./deploy.sh
+sudo apt-get install certbot python3-certbot-nginx
+sudo certbot --nginx -d sorare.example.com
+nano deploy/.env  # DJANGO_SECURE_COOKIES=true
+./deploy.sh
 ```
 
-`deploy.sh` hace: `git pull` → `pip install` → `migrate` → `collectstatic` →
-`systemctl restart sorare-web`. Recarga la URL y ves los cambios.
+No publiques este panel sin HTTPS: permite pujar y vender activos reales.
 
-> La primera vez, da permisos de ejecución: `chmod +x /home/ubuntu/sorare/deploy.sh`
+## Despliegues posteriores
 
----
-
-## C. Crontab (relistar cartas + aviso de token)
-
-El JWT caduca y, por el MFA, **no se renueva solo**. El cron relista mientras
-el token esté vigente y te **avisa por Telegram** cuando vaya a caducar, para
-que entres a `…/sorare/token/` y pulses **Renovar token** (te pedirá el MFA).
+Después de subir cambios al repositorio, en la EC2:
 
 ```bash
-crontab -e
-# pega y ajusta deploy/crontab.example
-crontab -l
+cd /ruta/al/repo
+./deploy.sh
 ```
 
----
+El script hace `git pull --ff-only`, instala dependencias Python y Node,
+comprueba Django y migraciones pendientes, migra, recopila estáticos, reinicia
+Gunicorn y comprueba `/healthz/` directamente sobre el socket. Si encuentra
+cambios locales inesperados, se detiene antes del pull.
 
-## D. Renovar el token desde la web (con MFA)
+## Datos que deben persistir
 
-Cuando veas `Unauthorized: Signature has expired` o el aviso de Telegram:
+- `deploy/.env`: configuración Django, no versionada.
+- `config/config.txt`: email, JWT y claves Sorare, no versionado.
+- `web/db.sqlite3`: usuarios y sesiones del panel, no versionado.
+- `output/`: Excel y logs generados, no versionado.
 
-1. `https://www.milesdepuntos.com/sorare/token/` (o el botón "Renovar token"
-   que aparece en *Ofertas Recibidas*).
-2. **Iniciar sesión** (usa el `EMAIL`/`PASSWORD` de `config.txt`).
-3. Introduce el **código MFA de 6 dígitos** y **Validar y renovar**.
-4. El nuevo JWT se guarda solo en `config/config.txt`.
+Haz copias de esos datos, especialmente `config/config.txt` y `web/db.sqlite3`.
+Para automatizaciones, adapta `deploy/crontab.example` a la ruta real del repo.
 
----
+Comandos útiles:
 
-## Notas
-
-- **Por qué un gunicorn aparte:** cada proyecto Django tiene su socket y su
-  servicio systemd. Así Sorare y crochet-shop son independientes; reiniciar
-  uno no afecta al otro.
-- **Subpath:** `DJANGO_FORCE_SCRIPT_NAME=/sorare` hace que todos los enlaces
-  internos lleven el prefijo `/sorare`. nginx quita el prefijo antes de pasar
-  la petición a gunicorn.
-- **Cookies:** Sorare usa `sorare_sessionid`/`sorare_csrftoken` para no pisar
-  la sesión de crochet-shop en el mismo dominio.
-- **Sesión larga:** configurada a 1 año y se renueva en cada visita, así no
-  tienes que re-loguearte constantemente.
+```bash
+sudo systemctl status sorare-web
+sudo journalctl -u sorare-web -n 100 --no-pager
+sudo nginx -t
+```
