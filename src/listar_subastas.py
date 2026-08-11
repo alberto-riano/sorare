@@ -50,6 +50,7 @@ query GetBuyingFootballAuctions {
         amounts { eurCents }
         userBidder { nickname }
       }
+      myLastBid { amounts { eurCents } maximumAmounts { eurCents } }
       anyCards {
         assetId
         rarityTyped
@@ -132,11 +133,66 @@ def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None, season_year
                 'bid_eur': bid_eur,
                 'bidder': bidder,
                 'is_winning': bool(bidder and my_nickname and bidder.casefold() == my_nickname.casefold()),
+                'has_bid': bool(auction.get('myLastBid')),
+                'my_bid_eur': ((auction.get('myLastBid') or {}).get('maximumAmounts') or {}).get('eurCents'),
                 'end_date': auction['endDate'],
             })
 
+    outbid = [item for item in results if item['has_bid'] and not item['is_winning']]
+    positions = fetch_bid_positions(headers, outbid, my_nickname)
+    for item in results:
+        item['is_outbid'] = item['has_bid'] and not item['is_winning']
+        item['bid_position'] = 1 if item['is_winning'] else positions.get(item['auction_id'])
+        if item['my_bid_eur'] is not None:
+            item['my_bid_eur'] /= 100
+
     print(f"   Revisadas {len(nodes)} subastas disponibles — {len(results)} de LaLiga encontradas")
     return results, 1, len(nodes)
+
+
+def fetch_bid_positions(headers, auctions, my_nickname):
+    """Calcula la posición por máximo de cada manager en una sola consulta."""
+    if not auctions or not my_nickname:
+        return {}
+
+    variables = {}
+    declarations = []
+    selections = []
+    for index, auction in enumerate(auctions):
+        key = f"id{index}"
+        variables[key] = auction['auction_id'].replace('EnglishAuction:', '')
+        declarations.append(f"${key}: String!")
+        selections.append(
+            f"""a{index}: auction(id: ${key}) {{
+              bestBid {{ userBidder {{ nickname }} }}
+              bids(first: 50) {{
+                nodes {{ amounts {{ eurCents }} maximumAmounts {{ eurCents }} userBidder {{ nickname }} }}
+              }}
+            }}"""
+        )
+    query = "query(" + ", ".join(declarations) + ") { tokens { " + " ".join(selections) + " } }"
+    data = graphql_request(query, variables, headers=headers)['tokens']
+    positions = {}
+    for index, auction in enumerate(auctions):
+        detail = data.get(f"a{index}") or {}
+        winner = ((detail.get('bestBid') or {}).get('userBidder') or {}).get('nickname', '').strip()
+        maxima = {}
+        for bid in (detail.get('bids') or {}).get('nodes') or []:
+            nickname = ((bid.get('userBidder') or {}).get('nickname') or '').strip()
+            cents = (bid.get('maximumAmounts') or {}).get('eurCents')
+            if cents is None:
+                cents = (bid.get('amounts') or {}).get('eurCents')
+            if nickname and cents is not None:
+                maxima[nickname] = max(maxima.get(nickname, 0), cents)
+        ordered = []
+        if winner:
+            ordered.append(winner)
+        ordered.extend(name for name, _ in sorted(maxima.items(), key=lambda item: item[1], reverse=True) if name.casefold() != winner.casefold())
+        for position, nickname in enumerate(ordered, 1):
+            if nickname.casefold() == my_nickname.casefold():
+                positions[auction['auction_id']] = position
+                break
+    return positions
 
 
 def match_team_slug(partial, team_slugs):

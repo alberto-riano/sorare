@@ -49,6 +49,27 @@ class LaLigaAuctionTests(SimpleTestCase):
         self.assertTrue(auctions[0]["is_winning"])
         self.assertEqual((pages, total), (1, 4))
 
+    def test_bid_position_keeps_real_winner_first(self):
+        response = {
+            "tokens": {
+                "a0": {
+                    "bestBid": {"userBidder": {"nickname": "winner"}},
+                    "bids": {
+                        "nodes": [
+                            {"maximumAmounts": {"eurCents": 5000}, "amounts": {"eurCents": 5000}, "userBidder": {"nickname": "other"}},
+                            {"maximumAmounts": {"eurCents": 3000}, "amounts": {"eurCents": 2990}, "userBidder": {"nickname": "burguis"}},
+                            {"maximumAmounts": {"eurCents": 4000}, "amounts": {"eurCents": 4000}, "userBidder": {"nickname": "winner"}},
+                        ]
+                    },
+                }
+            }
+        }
+        with patch.object(listar_subastas, "graphql_request", return_value=response):
+            positions = listar_subastas.fetch_bid_positions(
+                {}, [{"auction_id": "EnglishAuction:test"}], "BURGuis"
+            )
+        self.assertEqual(positions["EnglishAuction:test"], 3)
+
     @staticmethod
     def _card(asset_id, rarity, season, team_slug):
         card = {

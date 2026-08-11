@@ -493,13 +493,6 @@ textarea {
   align-items: end;
 }
 
-.filter-winning {
-  display: flex;
-  align-items: center;
-  padding-bottom: 0.5rem;
-  white-space: nowrap;
-}
-
 .auction-main-row {
   cursor: pointer;
   transition: background 140ms ease;
@@ -514,6 +507,11 @@ textarea {
   box-shadow: inset 4px 0 0 var(--good);
 }
 
+.auction-main-row.is-outbid {
+  background: #fff7ed;
+  box-shadow: inset 4px 0 0 #f97316;
+}
+
 .winning-badge {
   display: block;
   width: max-content;
@@ -521,6 +519,18 @@ textarea {
   padding: 0.18rem 0.4rem;
   border-radius: 999px;
   background: var(--good);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.outbid-badge {
+  display: block;
+  width: max-content;
+  margin-top: 0.25rem;
+  padding: 0.18rem 0.4rem;
+  border-radius: 999px;
+  background: #f97316;
   color: white;
   font-size: 0.68rem;
   font-weight: 700;
