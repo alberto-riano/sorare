@@ -483,8 +483,8 @@ textarea {
 }
 
 .inline-bid-form {
-  width: 82px;
-  min-width: 82px;
+  width: 116px;
+  min-width: 116px;
 }
 
 .refresh-hint {
@@ -556,6 +556,21 @@ textarea {
   flex-wrap: wrap;
 }
 
+.pagination-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  color: var(--accent);
+  text-decoration: none;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.pagination-icon:hover { background: var(--accent); color: #fff; transform: translateY(-1px); }
+.pagination-icon.is-disabled { border-color: var(--line); color: #c5c1b6; }
+
 .sortable-heading,
 .sort-buttons,
 .page-jump {
@@ -589,7 +604,12 @@ textarea {
 .page-jump input[type="number"] {
   width: 4.5rem;
   padding: 0.4rem 0.5rem;
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
+
+.page-jump input[type="number"]::-webkit-inner-spin-button,
+.page-jump input[type="number"]::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
 
 .auction-main-row {
   cursor: pointer;
@@ -712,6 +732,22 @@ textarea {
   -webkit-appearance: none;
   appearance: none;
 }
+
+.single-bid-review {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.single-bid-review:hover { background: var(--accent); color: #fff; }
 
 .inline-check {
   display: inline-flex;

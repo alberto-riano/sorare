@@ -123,6 +123,10 @@
                 <input type="text" class="batch-bid-euros" inputmode="decimal" autocomplete="off"
                        pattern="[0-9]+([.,][0-9]{1,2})?"
                        aria-label="Importe de puja para {{ auction.player }}" placeholder="€" required>
+                <button type="button" class="single-bid-review" title="Revisar puja de {{ auction.player }}"
+                        aria-label="Revisar puja de {{ auction.player }}">
+                  <i class="fas fa-gavel"></i>
+                </button>
               </div>
             </div>
           </td>
@@ -146,8 +150,12 @@
 
   {% if page_obj.paginator.num_pages > 1 %}
   <nav class="pagination" aria-label="Páginas de subastas">
-    {% if page_obj.has_previous %}<a class="btn btn-secondary btn-compact" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}
-    <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_previous %}
+      <a class="pagination-icon" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page=1" title="Primera página" aria-label="Primera página"><i class="fas fa-angles-left"></i></a>
+      <a class="pagination-icon" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}" title="Página anterior" aria-label="Página anterior"><i class="fas fa-chevron-left"></i></a>
+    {% else %}
+      <span class="pagination-icon is-disabled"><i class="fas fa-angles-left"></i></span><span class="pagination-icon is-disabled"><i class="fas fa-chevron-left"></i></span>
+    {% endif %}
     <form method="get" class="page-jump">
       {% if filter_player %}<input type="hidden" name="player" value="{{ filter_player }}">{% endif %}
       {% if filter_team %}<input type="hidden" name="team" value="{{ filter_team }}">{% endif %}
@@ -156,11 +164,17 @@
       {% if filter_status %}<input type="hidden" name="status" value="{{ filter_status }}">{% endif %}
       {% if favorites_only %}<input type="hidden" name="favorites" value="1">{% endif %}
       <input type="hidden" name="end_order" value="{{ end_order }}">
-      <label for="page-number">Ir a</label>
+      <label for="page-number">Página</label>
       <input id="page-number" name="page" type="number" min="1" max="{{ page_obj.paginator.num_pages }}" value="{{ page_obj.number }}" aria-label="Número de página">
+      <span>de {{ page_obj.paginator.num_pages }}</span>
       <button class="btn btn-secondary btn-compact" type="submit">Ir</button>
     </form>
-    {% if page_obj.has_next %}<a class="btn btn-secondary btn-compact" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Siguiente</a>{% endif %}
+    {% if page_obj.has_next %}
+      <a class="pagination-icon" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}" title="Página siguiente" aria-label="Página siguiente"><i class="fas fa-chevron-right"></i></a>
+      <a class="pagination-icon" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.paginator.num_pages }}" title="Última página" aria-label="Última página"><i class="fas fa-angles-right"></i></a>
+    {% else %}
+      <span class="pagination-icon is-disabled"><i class="fas fa-chevron-right"></i></span><span class="pagination-icon is-disabled"><i class="fas fa-angles-right"></i></span>
+    {% endif %}
   </nav>
   {% endif %}
 
@@ -250,16 +264,19 @@ document.addEventListener('DOMContentLoaded', function () {
   var reviewButton = document.getElementById('review-bids');
   var countLabel = document.getElementById('batch-bid-count');
   var modal = document.getElementById('bid-review-modal');
+  var reviewedBids = [];
 
-  function selectedBids() {
-    return bidControls.map(function (control) {
+  function bidFromControl(control) {
       var input = control.querySelector('.batch-bid-euros');
       var normalized = input.value.trim().replace(',', '.');
       if (!/^\d+(\.\d{1,2})?$/.test(normalized) || Number(normalized) <= 0) return null;
       return {auction_id: control.dataset.auctionId, player: control.dataset.player,
         player_image: control.dataset.playerImage, team_image: control.dataset.teamImage,
         euros: Number(normalized).toFixed(2), use_credit: true};
-    }).filter(Boolean);
+  }
+
+  function selectedBids() {
+    return bidControls.map(bidFromControl).filter(Boolean);
   }
 
   function updateBidCount() {
@@ -273,8 +290,8 @@ document.addEventListener('DOMContentLoaded', function () {
     control.querySelector('.batch-bid-euros').addEventListener('input', updateBidCount);
   });
 
-  if (reviewButton) reviewButton.addEventListener('click', function () {
-    var bids = selectedBids();
+  function openBidReview(bids) {
+    reviewedBids = bids;
     var list = document.getElementById('bid-review-list');
     list.textContent = '';
     bids.forEach(function (bid) {
@@ -299,6 +316,21 @@ document.addEventListener('DOMContentLoaded', function () {
     }));
     modal.hidden = false;
     document.body.classList.add('modal-open');
+  }
+
+  if (reviewButton) reviewButton.addEventListener('click', function () { openBidReview(selectedBids()); });
+
+  bidControls.forEach(function (control) {
+    control.querySelector('.single-bid-review').addEventListener('click', function () {
+      var bid = bidFromControl(control);
+      if (!bid) {
+        var input = control.querySelector('.batch-bid-euros');
+        input.focus();
+        input.reportValidity();
+        return;
+      }
+      openBidReview([bid]);
+    });
   });
 
   document.querySelectorAll('[data-close-modal]').forEach(function (button) {
@@ -316,7 +348,6 @@ document.addEventListener('DOMContentLoaded', function () {
       return;
     }
     batchSubmitForm.dataset.submitting = 'true';
-    var reviewedBids = selectedBids();
     document.querySelectorAll('.bid-review-item .review-credit input').forEach(function (checkbox, index) {
       if (reviewedBids[index]) reviewedBids[index].use_credit = checkbox.checked;
     });
@@ -327,7 +358,7 @@ document.addEventListener('DOMContentLoaded', function () {
     modal.querySelectorAll('button').forEach(function (button) { button.disabled = true; });
     var progress = document.getElementById('bid-submit-progress');
     progress.hidden = false;
-    progress.querySelector('strong').textContent = 'Enviando ' + selectedBids().length + (selectedBids().length === 1 ? ' puja…' : ' pujas…');
+    progress.querySelector('strong').textContent = 'Enviando ' + reviewedBids.length + (reviewedBids.length === 1 ? ' puja…' : ' pujas…');
   });
 
   function toggleHistory(button) {
