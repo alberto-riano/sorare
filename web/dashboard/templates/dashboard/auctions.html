@@ -9,32 +9,26 @@
   <p class="hero-text">Cartas rojas de los 20 equipos de LaLiga correspondientes exclusivamente a la temporada {{ season_label }}.</p>
 </section>
 
-<section class="panel form-panel reveal" style="animation-delay: 100ms;">
-  <h2><i class="fas fa-filter"></i> LaLiga {{ season_label }}</h2>
-  <form method="post">
+<section class="panel market-toolbar reveal" style="animation-delay: 100ms;">
+  <div class="market-toolbar-main">
+    <div>
+      <p class="market-toolbar-eyebrow">Mercado seleccionado</p>
+      <h2><i class="fas fa-filter"></i> LaLiga</h2>
+    </div>
+    <div class="market-tags" aria-label="Características del mercado">
+      <span><i class="fas fa-gem"></i> Rare</span>
+      <span><i class="fas fa-calendar"></i> {{ season_label }}</span>
+    </div>
+  </div>
+  <form method="post" class="market-refresh-form">
     {% csrf_token %}
     <input type="hidden" name="action" value="refresh_market">
-    <div class="field-grid">
-      <label>
-        <span>Rareza</span>
-        <input value="Rare (Rojas)" disabled>
-      </label>
-      <label>
-        <span>Temporada</span>
-        <input value="{{ season_label }}" disabled>
-      </label>
-    </div>
-    <div class="btn-row">
-      <button type="submit" class="btn btn-accent">
-        <i class="fas fa-sync"></i>
-        Actualizar mercado completo
-      </button>
-      <small class="refresh-hint">El barrido completo puede tardar unos minutos.</small>
-    </div>
+    <button type="submit" class="btn btn-accent"><i class="fas fa-sync"></i> Actualizar mercado</button>
+    <small class="refresh-hint">Barrido completo · puede tardar unos minutos</small>
   </form>
 </section>
 
-{% if auctions %}
+{% if not loading and not error %}
 <section class="panel reveal" style="animation-delay: 200ms;">
   <div class="table-head">
     <h2><i class="fas fa-list"></i> Resultados ({{ filtered_count }} subastas)</h2>
@@ -46,6 +40,7 @@
     <label><span>Posición</span><select name="position"><option value="">Todas</option>{% for position in available_positions %}<option value="{{ position }}"{% if filter_position == position %} selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
     <label><span>Puja máxima</span><input name="max_price" type="number" min="0" step="0.01" value="{{ filter_max_price }}" placeholder="€"></label>
     <label><span>Estado</span><select name="status"><option value="">Todos</option><option value="winning"{% if filter_status == 'winning' %} selected{% endif %}>Voy ganando</option><option value="outbid"{% if filter_status == 'outbid' %} selected{% endif %}>Me han superado</option></select></label>
+    <label class="favorites-filter"><span>Favoritos</span><span class="favorite-filter-control"><input type="checkbox" name="favorites" value="1"{% if favorites_only %} checked{% endif %}> Solo favoritos <small>({{ favorite_count }})</small></span></label>
     <div class="filter-actions"><button class="btn btn-accent btn-compact" type="submit">Filtrar</button><a class="btn btn-secondary btn-compact" href="{% url 'auctions_list' %}">Limpiar</a></div>
   </form>
   
@@ -82,6 +77,12 @@
             <span class="auction-identity">
               {% if auction.player_picture_url %}<img class="player-thumb" src="{{ auction.player_picture_url }}" alt="" loading="lazy" decoding="async">{% else %}<span class="player-thumb image-fallback"><i class="fas fa-user"></i></span>{% endif %}
               <strong>{{ auction.player }}</strong>
+              <button type="button" class="favorite-toggle{% if auction.is_favorite %} is-favorite{% endif %}"
+                      data-player-slug="{{ auction.player_slug }}" data-player-name="{{ auction.player }}"
+                      aria-label="{% if auction.is_favorite %}Quitar a {{ auction.player }} de favoritos{% else %}Añadir a {{ auction.player }} a favoritos{% endif %}"
+                      title="{% if auction.is_favorite %}Quitar de favoritos{% else %}Añadir a favoritos{% endif %}">
+                <i class="{% if auction.is_favorite %}fas{% else %}far{% endif %} fa-star"></i>
+              </button>
             </span>
           </td>
           <td>
@@ -129,6 +130,8 @@
             <div class="history-content" aria-live="polite">Pulsa para cargar las ventas comparables.</div>
           </td>
         </tr>
+        {% empty %}
+        <tr><td colspan="7" class="empty-auctions">No hay subastas que coincidan con estos filtros.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -149,6 +152,7 @@
       {% if filter_position %}<input type="hidden" name="position" value="{{ filter_position }}">{% endif %}
       {% if filter_max_price %}<input type="hidden" name="max_price" value="{{ filter_max_price }}">{% endif %}
       {% if filter_status %}<input type="hidden" name="status" value="{{ filter_status }}">{% endif %}
+      {% if favorites_only %}<input type="hidden" name="favorites" value="1">{% endif %}
       <input type="hidden" name="end_order" value="{{ end_order }}">
       <label for="page-number">Ir a</label>
       <input id="page-number" name="page" type="number" min="1" max="{{ page_obj.paginator.num_pages }}" value="{{ page_obj.number }}" aria-label="Número de página">
@@ -158,7 +162,6 @@
   </nav>
   {% endif %}
 
-  <p class="auction-warning"><i class="fas fa-shield-halved"></i> La puja se envía inmediatamente al confirmar. Revisa bien el importe.</p>
 </section>
 
 <div id="bid-review-modal" class="bid-modal" hidden>
@@ -201,6 +204,28 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('.favorite-toggle').forEach(function (button) {
+    button.addEventListener('click', async function (event) {
+      event.stopPropagation();
+      button.disabled = true;
+      var body = new URLSearchParams({player_slug: button.dataset.playerSlug, player_name: button.dataset.playerName});
+      try {
+        var response = await fetch('{% url "toggle_favorite_player" %}', {
+          method: 'POST', headers: {'X-CSRFToken': '{{ csrf_token }}', 'X-Requested-With': 'XMLHttpRequest'}, body: body
+        });
+        var payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'No se pudo guardar el favorito');
+        button.classList.toggle('is-favorite', payload.favorite);
+        button.querySelector('i').className = (payload.favorite ? 'fas' : 'far') + ' fa-star';
+        button.title = payload.favorite ? 'Quitar de favoritos' : 'Añadir a favoritos';
+      } catch (error) {
+        window.alert(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
+
   var bidControls = Array.from(document.querySelectorAll('.inline-bid-form'));
   var reviewButton = document.getElementById('review-bids');
   var countLabel = document.getElementById('batch-bid-count');

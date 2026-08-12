@@ -1,15 +1,18 @@
 import json
 from unittest.mock import patch
 
-from django.test import RequestFactory, SimpleTestCase
+from django.contrib.auth import get_user_model
+from django.test import RequestFactory, TestCase
+from django.urls import reverse
 
 import listar_subastas
 from dashboard.forms import BatchBidForm, InlineBidForm
+from dashboard.models import FavoritePlayer
 from dashboard.views import auction_price_history, auctions_list
 from web_services.process_runner import BidRequest, ScriptResult, run_bid_scheduler
 
 
-class LaLigaAuctionTests(SimpleTestCase):
+class LaLigaAuctionTests(TestCase):
     def test_fetch_la_liga_teams_uses_season_contestants(self):
         response = {
             "football": {
@@ -108,7 +111,21 @@ class LaLigaAuctionTests(SimpleTestCase):
         }
 
 
-class AuctionActionsTests(SimpleTestCase):
+class AuctionActionsTests(TestCase):
+    def test_favorite_toggle_is_persisted_per_user(self):
+        user = get_user_model().objects.create_user(username="favorites-user", password="test-password")
+        self.client.force_login(user)
+        url = reverse("toggle_favorite_player")
+
+        added = self.client.post(url, {"player_slug": "jugador-prueba", "player_name": "Jugador Prueba"})
+        self.assertEqual(added.status_code, 200)
+        self.assertTrue(added.json()["favorite"])
+        self.assertTrue(FavoritePlayer.objects.filter(user=user, player_slug="jugador-prueba").exists())
+
+        removed = self.client.post(url, {"player_slug": "jugador-prueba", "player_name": "Jugador Prueba"})
+        self.assertFalse(removed.json()["favorite"])
+        self.assertFalse(FavoritePlayer.objects.filter(user=user, player_slug="jugador-prueba").exists())
+
     def test_batch_bid_requires_final_confirmation_and_validates_every_bid(self):
         bids = json.dumps([
             {"auction_id": "EnglishAuction:first", "euros": "12.50", "use_credit": True},
@@ -139,6 +156,7 @@ class AuctionActionsTests(SimpleTestCase):
         fetch_auctions.return_value = [
             {
                 "player": f"Jugador {index}", "team": "Equipo", "position": "Forward",
+                "player_slug": f"jugador-{index}",
                 "bid_eur": 10, "is_winning": False, "is_outbid": False,
                 "end_date": f"2026-08-12T{hour:02d}:00:00Z",
             }
@@ -156,6 +174,14 @@ class AuctionActionsTests(SimpleTestCase):
         self.assertEqual(descending["end_order"], "desc")
         self.assertEqual(descending["page_obj"].number, 2)
         self.assertEqual(descending["auctions"][0]["end_date"], "2026-08-12T04:00:00Z")
+
+        user = get_user_model().objects.create_user(username="filter-user")
+        FavoritePlayer.objects.create(user=user, player_slug="jugador-23", player_name="Jugador 23")
+        favorite_request = RequestFactory().get("/ofertas/?favorites=1")
+        favorite_request.user = user
+        favorites = auctions_list(favorite_request)
+        self.assertEqual(favorites["filtered_count"], 1)
+        self.assertEqual(favorites["auctions"][0]["player_slug"], "jugador-23")
 
     def test_inline_bid_requires_explicit_confirmation(self):
         form = InlineBidForm({"auction_id": "EnglishAuction:test", "euros": "12.50"})

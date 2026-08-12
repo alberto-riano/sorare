@@ -25,6 +25,7 @@ from web_services.sales_excel import (
 )
 
 from .forms import BatchBidForm, BidScheduleForm, ExportCardsForm, InlineBidForm, TelegramSettingsForm
+from .models import FavoritePlayer
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PATHS = SorarePaths(repo_root=REPO_ROOT)
@@ -511,6 +512,12 @@ def auctions_list(request):
     filter_position = request.GET.get('position', '').strip()
     filter_status = request.GET.get('status', '').strip()
     filter_max_price = request.GET.get('max_price', '').strip()
+    favorites_only = request.GET.get('favorites') == '1'
+    favorite_slugs = set()
+    if getattr(request, "user", None) and request.user.is_authenticated:
+        favorite_slugs = set(
+            FavoritePlayer.objects.filter(user=request.user).values_list('player_slug', flat=True)
+        )
     end_order = request.GET.get('end_order', 'asc')
     if end_order not in {'asc', 'desc'}:
         end_order = 'asc'
@@ -537,6 +544,11 @@ def auctions_list(request):
         max_price = None
     if max_price is not None:
         filtered_auctions = [row for row in filtered_auctions if row['bid_eur'] is not None and row['bid_eur'] <= max_price]
+    if favorites_only:
+        filtered_auctions = [row for row in filtered_auctions if row['player_slug'] in favorite_slugs]
+
+    for auction in filtered_auctions:
+        auction['is_favorite'] = auction['player_slug'] in favorite_slugs
 
     madrid = ZoneInfo('Europe/Madrid')
     for auction in filtered_auctions:
@@ -564,6 +576,8 @@ def auctions_list(request):
             "filter_position": filter_position,
             "filter_status": filter_status,
             "filter_max_price": filter_max_price,
+            "favorites_only": favorites_only,
+            "favorite_count": len(favorite_slugs),
             "end_order": end_order,
             "pagination_query": query_params.urlencode(),
             "sort_query": sort_query_params.urlencode(),
@@ -572,6 +586,27 @@ def auctions_list(request):
             "season_label": "2026-2027",
         },
     )
+
+
+def toggle_favorite_player(request):
+    """Añade o elimina un jugador de los favoritos del usuario autenticado."""
+    import re
+
+    if request.method != "POST":
+        return JsonResponse({"error": "Método no permitido"}, status=405)
+    player_slug = request.POST.get("player_slug", "").strip()
+    player_name = request.POST.get("player_name", "").strip()
+    if not re.fullmatch(r"[a-z0-9-]{1,180}", player_slug) or not 1 <= len(player_name) <= 180:
+        return JsonResponse({"error": "Jugador no válido"}, status=400)
+
+    favorite, created = FavoritePlayer.objects.get_or_create(
+        user=request.user,
+        player_slug=player_slug,
+        defaults={"player_name": player_name},
+    )
+    if not created:
+        favorite.delete()
+    return JsonResponse({"favorite": created})
 
 
 def auction_price_history(request):

@@ -11,6 +11,7 @@ urlpatterns = [
     path("ventas/download/", views.sales_download_excel, name="sales_download_excel"),
     path("ofertas/", views.auctions_list, name="auctions_list"),
     path("ofertas/historial/", views.auction_price_history, name="auction_price_history"),
+    path("ofertas/favorito/", views.toggle_favorite_player, name="toggle_favorite_player"),
     path("ofertas-recibidas/", views.offers_received, name="offers_received"),
     path("ofertas-recibidas/precios/", views.offers_market_prices, name="offers_market_prices"),
     path("token/", views.refresh_token, name="refresh_token"),

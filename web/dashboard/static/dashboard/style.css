@@ -492,13 +492,48 @@ textarea {
   color: var(--muted);
 }
 
+.market-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding-top: 1.1rem;
+  padding-bottom: 1.1rem;
+}
+
+.market-toolbar-main,
+.market-tags,
+.market-refresh-form {
+  display: flex;
+  align-items: center;
+}
+
+.market-toolbar-main { gap: 1.5rem; }
+.market-toolbar h2 { margin: 0; }
+.market-toolbar-eyebrow { margin: 0 0 .18rem; color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; }
+.market-tags { gap: .45rem; }
+.market-tags span { display: inline-flex; align-items: center; gap: .35rem; padding: .42rem .68rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; font-size: .78rem; font-weight: 600; }
+.market-tags .fa-gem { color: #dc2626; }
+.market-refresh-form { justify-content: flex-end; gap: .75rem; }
+
 .auction-filters {
   display: grid;
-  grid-template-columns: 1.4fr repeat(3, minmax(130px, 1fr)) auto auto;
+  grid-template-columns: 1.35fr repeat(3, minmax(120px, 1fr)) auto auto auto;
   gap: 0.65rem;
   align-items: end;
   margin-bottom: 0.9rem;
 }
+
+.favorite-filter-control {
+  display: flex;
+  align-items: center;
+  min-height: 39px;
+  gap: .4rem;
+  white-space: nowrap;
+}
+
+.favorite-filter-control input { width: 1rem; height: 1rem; margin: 0; }
+.favorite-filter-control small { color: var(--muted); }
 
 .filter-actions {
   display: flex;
@@ -566,6 +601,23 @@ textarea {
   gap: 0.55rem;
   min-width: 0;
 }
+
+.favorite-toggle {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: #b8b5aa;
+  padding: .25rem;
+  cursor: pointer;
+  font-size: .92rem;
+  line-height: 1;
+  transition: color 140ms ease, transform 140ms ease;
+}
+
+.favorite-toggle:hover { color: #d4a514; transform: scale(1.12); }
+.favorite-toggle.is-favorite { color: #eab308; }
+.favorite-toggle:disabled { opacity: .5; cursor: wait; }
+.empty-auctions { padding: 2rem !important; text-align: center !important; color: var(--muted); }
 
 .player-thumb,
 .team-badge {
@@ -637,6 +689,13 @@ textarea {
 
 @media (max-width: 980px) {
   .auction-filters { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+  .market-toolbar { align-items: flex-start; flex-direction: column; }
+  .market-refresh-form { justify-content: flex-start; }
+}
+
+@media (max-width: 620px) {
+  .market-toolbar-main, .market-refresh-form { align-items: flex-start; flex-direction: column; gap: .65rem; }
+  .market-tags { flex-wrap: wrap; }
 }
 
 .inline-bid-amount {
