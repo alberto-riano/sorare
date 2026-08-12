@@ -1,5 +1,7 @@
 import json
+from datetime import datetime
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase
@@ -157,7 +159,7 @@ class AuctionActionsTests(TestCase):
             {
                 "player": f"Jugador {index}", "team": "Equipo", "position": "Forward",
                 "player_slug": f"jugador-{index}",
-                "bid_eur": 10, "is_winning": False, "is_outbid": False,
+                "bid_eur": 10, "is_winning": False, "is_outbid": False, "has_bid": index == 23,
                 "end_date": f"2026-08-12T{hour:02d}:00:00Z",
             }
             for index, hour in enumerate(list(range(23, -1, -1)) + [23])
@@ -168,7 +170,10 @@ class AuctionActionsTests(TestCase):
         self.assertEqual(len(context["auctions"]), 20)
         self.assertEqual(context["page_obj"].paginator.per_page, 20)
         self.assertEqual(context["auctions"][0]["end_date"], "2026-08-12T00:00:00Z")
-        self.assertEqual(context["auctions"][0]["end_date_madrid"], "12/08/2026 02:00")
+        end_at = datetime.fromisoformat("2026-08-12T00:00:00+00:00").astimezone(ZoneInfo("Europe/Madrid"))
+        days_until = (end_at.date() - datetime.now(ZoneInfo("Europe/Madrid")).date()).days
+        expected_end = f"Hoy {end_at:%H:%M}" if days_until == 0 else f"Mañana {end_at:%H:%M}" if days_until == 1 else end_at.strftime("%d/%m/%Y %H:%M")
+        self.assertEqual(context["auctions"][0]["end_date_madrid"], expected_end)
 
         descending = auctions_list(RequestFactory().get("/ofertas/?end_order=desc&page=2"))
         self.assertEqual(descending["end_order"], "desc")
@@ -182,6 +187,10 @@ class AuctionActionsTests(TestCase):
         favorites = auctions_list(favorite_request)
         self.assertEqual(favorites["filtered_count"], 1)
         self.assertEqual(favorites["auctions"][0]["player_slug"], "jugador-23")
+
+        participated = auctions_list(RequestFactory().get("/ofertas/?has_bid=1"))
+        self.assertEqual(participated["filtered_count"], 1)
+        self.assertEqual(participated["auctions"][0]["player_slug"], "jugador-23")
 
     def test_inline_bid_requires_explicit_confirmation(self):
         form = InlineBidForm({"auction_id": "EnglishAuction:test", "euros": "12.50"})

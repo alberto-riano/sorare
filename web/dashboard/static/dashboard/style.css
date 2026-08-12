@@ -483,8 +483,8 @@ textarea {
 }
 
 .inline-bid-form {
-  width: 102px;
-  min-width: 102px;
+  width: 82px;
+  min-width: 82px;
 }
 
 .refresh-hint {
@@ -527,9 +527,16 @@ textarea {
 .favorite-filter-control {
   display: flex;
   align-items: center;
-  min-height: 39px;
+  height: 42px;
   gap: .4rem;
   white-space: nowrap;
+}
+
+.auction-filters > label > input:not([type="checkbox"]),
+.auction-filters > label > select,
+.filter-actions .btn {
+  box-sizing: border-box;
+  height: 42px;
 }
 
 .favorite-filter-control input { width: 1rem; height: 1rem; margin: 0; }
@@ -538,12 +545,6 @@ textarea {
 .filter-actions {
   display: flex;
   gap: 0.35rem;
-}
-
-.timezone-label {
-  display: block;
-  color: var(--muted);
-  font-size: 0.65rem;
 }
 
 .pagination {
@@ -755,6 +756,9 @@ textarea {
 .bid-review-team { position: absolute; right: 0; bottom: -1px; width: 21px; height: 21px; border: 2px solid var(--panel); border-radius: 6px; }
 .bid-review-player img, .bid-review-team img { width: 100%; height: 100%; object-fit: contain; }
 .bid-review-price { color: var(--accent); font-weight: 700; font-family: 'IBM Plex Mono', monospace; }
+.review-credit { display: inline-flex; grid-template-columns: none; align-items: center; gap: .4rem; white-space: nowrap; }
+.review-credit input { width: 1rem; height: 1rem; margin: 0; }
+.review-credit span { color: var(--muted); font-size: .75rem; }
 .bid-modal-actions { justify-content: flex-end; gap: .6rem; }
 .modal-open { overflow: hidden; }
 .bid-modal.is-submitting .bid-modal-card { cursor: wait; }

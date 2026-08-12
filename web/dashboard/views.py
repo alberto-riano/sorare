@@ -511,7 +511,7 @@ def auctions_list(request):
     filter_team = request.GET.get('team', '').strip()
     filter_position = request.GET.get('position', '').strip()
     filter_status = request.GET.get('status', '').strip()
-    filter_max_price = request.GET.get('max_price', '').strip()
+    has_bid_only = request.GET.get('has_bid') == '1'
     favorites_only = request.GET.get('favorites') == '1'
     favorite_slugs = set()
     if getattr(request, "user", None) and request.user.is_authenticated:
@@ -538,12 +538,8 @@ def auctions_list(request):
         filtered_auctions = [row for row in filtered_auctions if row['is_winning']]
     elif filter_status == 'outbid':
         filtered_auctions = [row for row in filtered_auctions if row['is_outbid']]
-    try:
-        max_price = float(filter_max_price) if filter_max_price else None
-    except ValueError:
-        max_price = None
-    if max_price is not None:
-        filtered_auctions = [row for row in filtered_auctions if row['bid_eur'] is not None and row['bid_eur'] <= max_price]
+    if has_bid_only:
+        filtered_auctions = [row for row in filtered_auctions if row['has_bid']]
     if favorites_only:
         filtered_auctions = [row for row in filtered_auctions if row['player_slug'] in favorite_slugs]
 
@@ -551,9 +547,16 @@ def auctions_list(request):
         auction['is_favorite'] = auction['player_slug'] in favorite_slugs
 
     madrid = ZoneInfo('Europe/Madrid')
+    today_madrid = datetime.now(madrid).date()
     for auction in filtered_auctions:
         end_at = datetime.fromisoformat(auction['end_date'].replace('Z', '+00:00')).astimezone(madrid)
-        auction['end_date_madrid'] = end_at.strftime('%d/%m/%Y %H:%M')
+        days_until = (end_at.date() - today_madrid).days
+        if days_until == 0:
+            auction['end_date_madrid'] = f"Hoy {end_at:%H:%M}"
+        elif days_until == 1:
+            auction['end_date_madrid'] = f"Mañana {end_at:%H:%M}"
+        else:
+            auction['end_date_madrid'] = end_at.strftime('%d/%m/%Y %H:%M')
 
     paginator = Paginator(filtered_auctions, 20)
     page_obj = paginator.get_page(request.GET.get('page'))
@@ -575,7 +578,7 @@ def auctions_list(request):
             "filter_team": filter_team,
             "filter_position": filter_position,
             "filter_status": filter_status,
-            "filter_max_price": filter_max_price,
+            "has_bid_only": has_bid_only,
             "favorites_only": favorites_only,
             "favorite_count": len(favorite_slugs),
             "end_order": end_order,

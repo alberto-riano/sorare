@@ -35,13 +35,14 @@
   </div>
 
   <form method="get" class="auction-filters">
+    <input type="hidden" name="end_order" value="{{ end_order }}">
     <label><span>Buscar jugador</span><input name="player" type="search" value="{{ filter_player }}" placeholder="Nombre"></label>
     <label><span>Equipo</span><select name="team"><option value="">Todos</option>{% for team in available_teams %}<option value="{{ team }}"{% if filter_team == team %} selected{% endif %}>{{ team }}</option>{% endfor %}</select></label>
     <label><span>Posición</span><select name="position"><option value="">Todas</option>{% for position in available_positions %}<option value="{{ position }}"{% if filter_position == position %} selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
-    <label><span>Puja máxima</span><input name="max_price" type="number" min="0" step="0.01" value="{{ filter_max_price }}" placeholder="€"></label>
+    <label class="favorites-filter"><span>Participación</span><span class="favorite-filter-control"><input type="checkbox" name="has_bid" value="1"{% if has_bid_only %} checked{% endif %}> He pujado</span></label>
     <label><span>Estado</span><select name="status"><option value="">Todos</option><option value="winning"{% if filter_status == 'winning' %} selected{% endif %}>Voy ganando</option><option value="outbid"{% if filter_status == 'outbid' %} selected{% endif %}>Me han superado</option></select></label>
     <label class="favorites-filter"><span>Favoritos</span><span class="favorite-filter-control"><input type="checkbox" name="favorites" value="1"{% if favorites_only %} checked{% endif %}> Solo favoritos <small>({{ favorite_count }})</small></span></label>
-    <div class="filter-actions"><button class="btn btn-accent btn-compact" type="submit">Filtrar</button><a class="btn btn-secondary btn-compact" href="{% url 'auctions_list' %}">Limpiar</a></div>
+    <div class="filter-actions"><a class="btn btn-secondary btn-compact" href="{% url 'auctions_list' %}">Limpiar</a></div>
   </form>
   
   <div class="table-wrap">
@@ -104,7 +105,7 @@
             {% endif %}
           </td>
           <td style="font-size: 0.78rem; font-family: 'IBM Plex Mono', monospace;">
-            {{ auction.end_date_madrid }} <small class="timezone-label">Madrid</small>
+            {{ auction.end_date_madrid }}
           </td>
           <td>
             <button type="button" class="btn btn-compact btn-secondary history-toggle"
@@ -123,7 +124,6 @@
                        pattern="[0-9]+([.,][0-9]{1,2})?"
                        aria-label="Importe de puja para {{ auction.player }}" placeholder="€" required>
               </div>
-              <label class="inline-check"><input type="checkbox" class="batch-bid-credit" checked> <span>Usar créditos</span></label>
             </div>
           </td>
         </tr>
@@ -152,7 +152,7 @@
       {% if filter_player %}<input type="hidden" name="player" value="{{ filter_player }}">{% endif %}
       {% if filter_team %}<input type="hidden" name="team" value="{{ filter_team }}">{% endif %}
       {% if filter_position %}<input type="hidden" name="position" value="{{ filter_position }}">{% endif %}
-      {% if filter_max_price %}<input type="hidden" name="max_price" value="{{ filter_max_price }}">{% endif %}
+      {% if has_bid_only %}<input type="hidden" name="has_bid" value="1">{% endif %}
       {% if filter_status %}<input type="hidden" name="status" value="{{ filter_status }}">{% endif %}
       {% if favorites_only %}<input type="hidden" name="favorites" value="1">{% endif %}
       <input type="hidden" name="end_order" value="{{ end_order }}">
@@ -211,6 +211,19 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+  var filtersForm = document.querySelector('.auction-filters');
+  if (filtersForm) {
+    var searchTimer;
+    filtersForm.querySelectorAll('select, input[type="checkbox"]').forEach(function (control) {
+      control.addEventListener('change', function () { filtersForm.submit(); });
+    });
+    var playerSearch = filtersForm.querySelector('input[name="player"]');
+    playerSearch.addEventListener('input', function () {
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(function () { filtersForm.submit(); }, 450);
+    });
+  }
+
   document.querySelectorAll('.favorite-toggle').forEach(function (button) {
     button.addEventListener('click', async function (event) {
       event.stopPropagation();
@@ -245,7 +258,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (!/^\d+(\.\d{1,2})?$/.test(normalized) || Number(normalized) <= 0) return null;
       return {auction_id: control.dataset.auctionId, player: control.dataset.player,
         player_image: control.dataset.playerImage, team_image: control.dataset.teamImage,
-        euros: Number(normalized).toFixed(2), use_credit: control.querySelector('.batch-bid-credit').checked};
+        euros: Number(normalized).toFixed(2), use_credit: true};
     }).filter(Boolean);
   }
 
@@ -267,7 +280,7 @@ document.addEventListener('DOMContentLoaded', function () {
     bids.forEach(function (bid) {
       var row = document.createElement('div');
       row.className = 'bid-review-item';
-      row.innerHTML = '<span class="bid-review-visuals"><span class="bid-review-player"></span><span class="bid-review-team"></span></span><strong></strong><span class="bid-review-price"></span><small></small>';
+      row.innerHTML = '<span class="bid-review-visuals"><span class="bid-review-player"></span><span class="bid-review-team"></span></span><strong></strong><span class="bid-review-price"></span><label class="review-credit"><input type="checkbox" checked> <span>Usar créditos</span></label>';
       var playerImage = row.querySelector('.bid-review-player');
       var teamImage = row.querySelector('.bid-review-team');
       if (bid.player_image) playerImage.innerHTML = '<img alt="" loading="lazy">';
@@ -278,7 +291,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (bid.team_image) teamImage.querySelector('img').src = bid.team_image;
       row.querySelector('strong').textContent = bid.player;
       row.querySelector('.bid-review-price').textContent = bid.euros + ' €';
-      row.querySelector('small').textContent = bid.use_credit ? 'Con créditos' : 'Sin créditos';
+      row.querySelector('.review-credit input').addEventListener('change', function (event) { bid.use_credit = event.target.checked; });
       list.appendChild(row);
     });
     document.getElementById('batch-bids-payload').value = JSON.stringify(bids.map(function (bid) {
@@ -303,6 +316,13 @@ document.addEventListener('DOMContentLoaded', function () {
       return;
     }
     batchSubmitForm.dataset.submitting = 'true';
+    var reviewedBids = selectedBids();
+    document.querySelectorAll('.bid-review-item .review-credit input').forEach(function (checkbox, index) {
+      if (reviewedBids[index]) reviewedBids[index].use_credit = checkbox.checked;
+    });
+    document.getElementById('batch-bids-payload').value = JSON.stringify(reviewedBids.map(function (bid) {
+      return {auction_id: bid.auction_id, euros: bid.euros, use_credit: bid.use_credit};
+    }));
     modal.classList.add('is-submitting');
     modal.querySelectorAll('button').forEach(function (button) { button.disabled = true; });
     var progress = document.getElementById('bid-submit-progress');
