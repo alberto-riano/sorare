@@ -747,15 +747,27 @@ textarea {
 .bid-modal-card { position: relative; width: min(620px, 100%); max-height: 85vh; overflow: auto; background: var(--panel); border-radius: 16px; padding: 1.4rem; box-shadow: 0 24px 60px rgba(0,0,0,.3); }
 .bid-modal-close { position: absolute; top: .6rem; right: .8rem; border: 0; background: transparent; font-size: 1.8rem; cursor: pointer; }
 .bid-review-list { display: grid; gap: .5rem; margin: 1rem 0; }
-.bid-review-item { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 1rem; padding: .7rem; border: 1px solid var(--line); border-radius: 10px; }
+.bid-review-item { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: .8rem; padding: .7rem; border: 1px solid var(--line); border-radius: 10px; }
 .bid-review-item small { color: var(--muted); }
+.bid-review-visuals { position: relative; display: block; width: 46px; height: 40px; }
+.bid-review-player, .bid-review-team { display: grid; place-items: center; overflow: hidden; background: #eef2f1; color: var(--muted); }
+.bid-review-player { width: 38px; height: 38px; border-radius: 50%; }
+.bid-review-team { position: absolute; right: 0; bottom: -1px; width: 21px; height: 21px; border: 2px solid var(--panel); border-radius: 6px; }
+.bid-review-player img, .bid-review-team img { width: 100%; height: 100%; object-fit: contain; }
+.bid-review-price { color: var(--accent); font-weight: 700; font-family: 'IBM Plex Mono', monospace; }
 .bid-modal-actions { justify-content: flex-end; gap: .6rem; }
 .modal-open { overflow: hidden; }
+.bid-modal.is-submitting .bid-modal-card { cursor: wait; }
+.bid-submit-progress { display: grid; grid-template-columns: auto 1fr; column-gap: .65rem; align-items: center; margin-top: 1rem; padding: .8rem; border-radius: 10px; background: #eef8f6; color: var(--ink); }
+.bid-submit-progress[hidden] { display: none; }
+.bid-submit-progress small { grid-column: 2; color: var(--muted); }
+.bid-spinner { grid-row: 1 / 3; width: 22px; height: 22px; border: 3px solid #b7ddd7; border-top-color: var(--accent); border-radius: 50%; animation: bid-spin .75s linear infinite; }
+@keyframes bid-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 700px) {
   .batch-bid-bar { align-items: stretch; flex-direction: column; }
-  .bid-review-item { grid-template-columns: 1fr auto; }
-  .bid-review-item small { grid-column: 1 / -1; }
+  .bid-review-item { grid-template-columns: auto 1fr auto; }
+  .bid-review-item small { grid-column: 2 / -1; }
   .bid-modal-actions { align-items: stretch; flex-direction: column-reverse; }
 }
 

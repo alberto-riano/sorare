@@ -115,7 +115,9 @@
           </td>
           <td>
             <div class="inline-bid-form" onclick="event.stopPropagation()"
-                 data-auction-id="{{ auction.auction_id }}" data-player="{{ auction.player }}">
+                 data-auction-id="{{ auction.auction_id }}" data-player="{{ auction.player }}"
+                 data-player-image="{{ auction.player_picture_url|default:'' }}"
+                 data-team-image="{{ auction.team_picture_url|default:'' }}">
               <div class="inline-bid-amount">
                 <input type="text" class="batch-bid-euros" inputmode="decimal" autocomplete="off"
                        pattern="[0-9]+([.,][0-9]{1,2})?"
@@ -178,7 +180,12 @@
       <input type="hidden" name="confirm" value="on">
       <div class="bid-modal-actions">
         <button type="button" class="btn btn-secondary" data-close-modal>Volver</button>
-        <button type="submit" class="btn btn-accent"><i class="fas fa-gavel"></i> Confirmar y enviar todas</button>
+        <button type="submit" id="submit-all-bids" class="btn btn-accent"><i class="fas fa-gavel"></i> Confirmar y enviar todas</button>
+      </div>
+      <div id="bid-submit-progress" class="bid-submit-progress" role="status" aria-live="polite" hidden>
+        <span class="bid-spinner" aria-hidden="true"></span>
+        <strong>Enviando pujas…</strong>
+        <small>No cierres esta ventana hasta que termine.</small>
       </div>
     </form>
   </section>
@@ -237,6 +244,7 @@ document.addEventListener('DOMContentLoaded', function () {
       var normalized = input.value.trim().replace(',', '.');
       if (!/^\d+(\.\d{1,2})?$/.test(normalized) || Number(normalized) <= 0) return null;
       return {auction_id: control.dataset.auctionId, player: control.dataset.player,
+        player_image: control.dataset.playerImage, team_image: control.dataset.teamImage,
         euros: Number(normalized).toFixed(2), use_credit: control.querySelector('.batch-bid-credit').checked};
     }).filter(Boolean);
   }
@@ -259,9 +267,17 @@ document.addEventListener('DOMContentLoaded', function () {
     bids.forEach(function (bid) {
       var row = document.createElement('div');
       row.className = 'bid-review-item';
-      row.innerHTML = '<strong></strong><span></span><small></small>';
+      row.innerHTML = '<span class="bid-review-visuals"><span class="bid-review-player"></span><span class="bid-review-team"></span></span><strong></strong><span class="bid-review-price"></span><small></small>';
+      var playerImage = row.querySelector('.bid-review-player');
+      var teamImage = row.querySelector('.bid-review-team');
+      if (bid.player_image) playerImage.innerHTML = '<img alt="" loading="lazy">';
+      else playerImage.innerHTML = '<i class="fas fa-user"></i>';
+      if (bid.player_image) playerImage.querySelector('img').src = bid.player_image;
+      if (bid.team_image) teamImage.innerHTML = '<img alt="" loading="lazy">';
+      else teamImage.innerHTML = '<i class="fas fa-shield-alt"></i>';
+      if (bid.team_image) teamImage.querySelector('img').src = bid.team_image;
       row.querySelector('strong').textContent = bid.player;
-      row.querySelector('span').textContent = bid.euros + ' €';
+      row.querySelector('.bid-review-price').textContent = bid.euros + ' €';
       row.querySelector('small').textContent = bid.use_credit ? 'Con créditos' : 'Sin créditos';
       list.appendChild(row);
     });
@@ -273,7 +289,25 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   document.querySelectorAll('[data-close-modal]').forEach(function (button) {
-    button.addEventListener('click', function () { modal.hidden = true; document.body.classList.remove('modal-open'); });
+    button.addEventListener('click', function () {
+      if (modal.classList.contains('is-submitting')) return;
+      modal.hidden = true;
+      document.body.classList.remove('modal-open');
+    });
+  });
+
+  var batchSubmitForm = document.getElementById('batch-bid-submit');
+  if (batchSubmitForm) batchSubmitForm.addEventListener('submit', function (event) {
+    if (batchSubmitForm.dataset.submitting === 'true') {
+      event.preventDefault();
+      return;
+    }
+    batchSubmitForm.dataset.submitting = 'true';
+    modal.classList.add('is-submitting');
+    modal.querySelectorAll('button').forEach(function (button) { button.disabled = true; });
+    var progress = document.getElementById('bid-submit-progress');
+    progress.hidden = false;
+    progress.querySelector('strong').textContent = 'Enviando ' + selectedBids().length + (selectedBids().length === 1 ? ' puja…' : ' pujas…');
   });
 
   function toggleHistory(button) {
