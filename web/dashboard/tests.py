@@ -134,12 +134,13 @@ class AuctionActionsTests(TestCase):
         run_bid.return_value = ScriptResult("mock", 2, "", "❌ La puja mínima es 15,00 €")
         bids = json.dumps([{"auction_id": "EnglishAuction:test", "euros": "12.50", "use_credit": True}])
 
-        response = self.client.post(reverse("auctions_list"), {
+        response = self.client.post(f'{reverse("auctions_list")}?page=5&team=Real+Sociedad', {
             "action": "place_batch_bids", "bids": bids, "confirm": "on",
         })
 
         rendered_messages = [str(message) for message in get_messages(response.wsgi_request)]
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f'{reverse("auctions_list")}?page=5&team=Real+Sociedad')
         self.assertIn("Oyarzabal: La puja mínima es 15,00 €", rendered_messages)
         self.assertFalse(any("posiciones" in message for message in rendered_messages))
 

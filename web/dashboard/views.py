@@ -461,7 +461,7 @@ def auctions_list(request):
             else:
                 detail = result.stderr or result.stdout or "Error desconocido"
                 messages.error(request, f"La puja no se pudo completar: {detail[-500:]}")
-            return redirect("auctions_list")
+            return redirect(request.get_full_path())
         messages.error(request, "No se envió la puja: revisa el importe y la confirmación.")
 
     if request.method == "POST" and request.POST.get("action") == "place_batch_bids":
@@ -493,7 +493,7 @@ def auctions_list(request):
             if failures:
                 for failure in failures:
                     messages.error(request, failure)
-            return redirect("auctions_list")
+            return redirect(request.get_full_path())
         messages.error(request, "No se envió ninguna puja: revisa el resumen y vuelve a confirmar.")
 
     try:
