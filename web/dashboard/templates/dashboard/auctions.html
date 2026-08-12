@@ -101,20 +101,14 @@
             </button>
           </td>
           <td>
-            <form method="post" class="inline-bid-form" onclick="event.stopPropagation()">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="place_bid">
-              <input type="hidden" name="auction_id" value="{{ auction.auction_id }}">
+            <div class="inline-bid-form" onclick="event.stopPropagation()"
+                 data-auction-id="{{ auction.auction_id }}" data-player="{{ auction.player }}">
               <div class="inline-bid-amount">
-                <input type="number" name="euros" min="0.01" step="0.01" inputmode="decimal"
+                <input type="number" class="batch-bid-euros" min="0.01" step="0.01" inputmode="decimal"
                        aria-label="Importe de puja para {{ auction.player }}" placeholder="€" required>
-                <button class="btn btn-compact btn-accent" type="submit">
-                  <i class="fas fa-gavel"></i> Pujar
-                </button>
               </div>
-              <label class="inline-check"><input type="checkbox" name="confirm" required> Confirmar importe</label>
-              <label class="inline-check"><input type="checkbox" name="use_credit" checked> Usar créditos</label>
-            </form>
+              <label class="inline-check"><input type="checkbox" class="batch-bid-credit" checked> <span>Usar créditos</span></label>
+            </div>
           </td>
         </tr>
         <tr id="history-{{ forloop.counter }}" class="history-row" hidden>
@@ -125,6 +119,11 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+
+  <div class="batch-bid-bar">
+    <span id="batch-bid-count">Escribe uno o varios importes para preparar las pujas.</span>
+    <button id="review-bids" class="btn btn-accent" type="button" disabled><i class="fas fa-list-check"></i> Revisar pujas</button>
   </div>
 
   {% if page_obj.paginator.num_pages > 1 %}
@@ -148,6 +147,26 @@
 
   <p class="auction-warning"><i class="fas fa-shield-halved"></i> La puja se envía inmediatamente al confirmar. Revisa bien el importe.</p>
 </section>
+
+<div id="bid-review-modal" class="bid-modal" hidden>
+  <div class="bid-modal-backdrop" data-close-modal></div>
+  <section class="bid-modal-card" role="dialog" aria-modal="true" aria-labelledby="bid-review-title">
+    <button type="button" class="bid-modal-close" data-close-modal aria-label="Cerrar">&times;</button>
+    <h2 id="bid-review-title"><i class="fas fa-shield-halved"></i> Confirmar pujas</h2>
+    <p>Revisa todos los importes. Al confirmar, las pujas se enviarán inmediatamente.</p>
+    <div id="bid-review-list" class="bid-review-list"></div>
+    <form id="batch-bid-submit" method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="place_batch_bids">
+      <input type="hidden" id="batch-bids-payload" name="bids">
+      <input type="hidden" name="confirm" value="on">
+      <div class="bid-modal-actions">
+        <button type="button" class="btn btn-secondary" data-close-modal>Volver</button>
+        <button type="submit" class="btn btn-accent"><i class="fas fa-gavel"></i> Confirmar y enviar todas</button>
+      </div>
+    </form>
+  </section>
+</div>
 {% elif loading %}
 <section class="panel reveal" style="animation-delay: 200ms;">
   <div class="processing-indicator is-visible">
@@ -169,6 +188,55 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+  var bidControls = Array.from(document.querySelectorAll('.inline-bid-form'));
+  var reviewButton = document.getElementById('review-bids');
+  var countLabel = document.getElementById('batch-bid-count');
+  var modal = document.getElementById('bid-review-modal');
+
+  function selectedBids() {
+    return bidControls.map(function (control) {
+      var input = control.querySelector('.batch-bid-euros');
+      if (!input.value || Number(input.value) <= 0) return null;
+      return {auction_id: control.dataset.auctionId, player: control.dataset.player,
+        euros: Number(input.value).toFixed(2), use_credit: control.querySelector('.batch-bid-credit').checked};
+    }).filter(Boolean);
+  }
+
+  function updateBidCount() {
+    var count = selectedBids().length;
+    reviewButton.disabled = count === 0;
+    reviewButton.innerHTML = '<i class="fas fa-list-check"></i> Revisar ' + count + (count === 1 ? ' puja' : ' pujas');
+    countLabel.textContent = count ? count + (count === 1 ? ' puja preparada.' : ' pujas preparadas.') : 'Escribe uno o varios importes para preparar las pujas.';
+  }
+
+  bidControls.forEach(function (control) {
+    control.querySelector('.batch-bid-euros').addEventListener('input', updateBidCount);
+  });
+
+  if (reviewButton) reviewButton.addEventListener('click', function () {
+    var bids = selectedBids();
+    var list = document.getElementById('bid-review-list');
+    list.textContent = '';
+    bids.forEach(function (bid) {
+      var row = document.createElement('div');
+      row.className = 'bid-review-item';
+      row.innerHTML = '<strong></strong><span></span><small></small>';
+      row.querySelector('strong').textContent = bid.player;
+      row.querySelector('span').textContent = bid.euros + ' €';
+      row.querySelector('small').textContent = bid.use_credit ? 'Con créditos' : 'Sin créditos';
+      list.appendChild(row);
+    });
+    document.getElementById('batch-bids-payload').value = JSON.stringify(bids.map(function (bid) {
+      return {auction_id: bid.auction_id, euros: bid.euros, use_credit: bid.use_credit};
+    }));
+    modal.hidden = false;
+    document.body.classList.add('modal-open');
+  });
+
+  document.querySelectorAll('[data-close-modal]').forEach(function (button) {
+    button.addEventListener('click', function () { modal.hidden = true; document.body.classList.remove('modal-open'); });
+  });
+
   function toggleHistory(button) {
     var row = document.getElementById(button.dataset.target);
     row.hidden = !row.hidden;

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from django import forms
 
 NOTIFY_MODE_CHOICES = [
@@ -63,6 +65,34 @@ class InlineBidForm(forms.Form):
         return auction_id
 
 
+class BatchBidForm(forms.Form):
+    bids = forms.CharField(widget=forms.HiddenInput)
+    confirm = forms.BooleanField(required=True)
+
+    def clean_bids(self):
+        try:
+            raw_bids = json.loads(self.cleaned_data["bids"])
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise forms.ValidationError("El resumen de pujas no es válido.") from exc
+        if not isinstance(raw_bids, list) or not 1 <= len(raw_bids) <= 20:
+            raise forms.ValidationError("Selecciona entre 1 y 20 pujas.")
+
+        bids = []
+        for raw_bid in raw_bids:
+            if not isinstance(raw_bid, dict):
+                raise forms.ValidationError("Hay una puja no válida.")
+            form = InlineBidForm({
+                "auction_id": raw_bid.get("auction_id", ""),
+                "euros": raw_bid.get("euros", ""),
+                "use_credit": raw_bid.get("use_credit", False),
+                "confirm": True,
+            })
+            if not form.is_valid():
+                raise forms.ValidationError("Revisa los identificadores y los importes de las pujas.")
+            bids.append(form.cleaned_data)
+        return bids
+
+
 class ExportCardsForm(forms.Form):
     rarity = forms.ChoiceField(
         choices=[
@@ -73,4 +103,3 @@ class ExportCardsForm(forms.Form):
         initial="super_rare",
     )
     max_cards = forms.IntegerField(min_value=1, max_value=5000, initial=10)
-

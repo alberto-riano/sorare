@@ -24,7 +24,7 @@ from web_services.sales_excel import (
     save_prices,
 )
 
-from .forms import BidScheduleForm, ExportCardsForm, InlineBidForm, TelegramSettingsForm
+from .forms import BatchBidForm, BidScheduleForm, ExportCardsForm, InlineBidForm, TelegramSettingsForm
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PATHS = SorarePaths(repo_root=REPO_ROOT)
@@ -462,6 +462,31 @@ def auctions_list(request):
                 messages.error(request, f"La puja no se pudo completar: {detail[-500:]}")
             return redirect("auctions_list")
         messages.error(request, "No se envió la puja: revisa el importe y la confirmación.")
+
+    if request.method == "POST" and request.POST.get("action") == "place_batch_bids":
+        batch_form = BatchBidForm(request.POST)
+        if batch_form.is_valid():
+            successful = 0
+            failures = []
+            for index, data in enumerate(batch_form.cleaned_data["bids"], start=1):
+                result = run_bid_scheduler(
+                    PATHS,
+                    BidRequest(
+                        identifier=data["auction_id"], euros=str(data["euros"]), hora="",
+                        now=True, sniper=False, background=False,
+                        use_credit=bool(data["use_credit"]),
+                    ),
+                )
+                if result.exit_code == 0:
+                    successful += 1
+                else:
+                    failures.append(str(index))
+            if successful:
+                messages.success(request, f"Se enviaron correctamente {successful} pujas.")
+            if failures:
+                messages.error(request, f"Fallaron {len(failures)} pujas del resumen (posiciones {', '.join(failures)}).")
+            return redirect("auctions_list")
+        messages.error(request, "No se envió ninguna puja: revisa el resumen y vuelve a confirmar.")
 
     try:
         team_filters = request.POST.getlist("teams") or request.GET.getlist("teams") or None

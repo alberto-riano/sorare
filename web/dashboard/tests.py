@@ -4,7 +4,7 @@ from unittest.mock import patch
 from django.test import RequestFactory, SimpleTestCase
 
 import listar_subastas
-from dashboard.forms import InlineBidForm
+from dashboard.forms import BatchBidForm, InlineBidForm
 from dashboard.views import auction_price_history, auctions_list
 from web_services.process_runner import BidRequest, ScriptResult, run_bid_scheduler
 
@@ -107,6 +107,21 @@ class LaLigaAuctionTests(SimpleTestCase):
 
 
 class AuctionActionsTests(SimpleTestCase):
+    def test_batch_bid_requires_final_confirmation_and_validates_every_bid(self):
+        bids = json.dumps([
+            {"auction_id": "EnglishAuction:first", "euros": "12.50", "use_credit": True},
+            {"auction_id": "EnglishAuction:second", "euros": "8.25", "use_credit": False},
+        ])
+        unconfirmed = BatchBidForm({"bids": bids})
+        self.assertFalse(unconfirmed.is_valid())
+        self.assertIn("confirm", unconfirmed.errors)
+
+        confirmed = BatchBidForm({"bids": bids, "confirm": "on"})
+        self.assertTrue(confirmed.is_valid())
+        self.assertEqual(len(confirmed.cleaned_data["bids"]), 2)
+        self.assertTrue(confirmed.cleaned_data["bids"][0]["use_credit"])
+        self.assertFalse(confirmed.cleaned_data["bids"][1]["use_credit"])
+
     @patch("dashboard.views.render")
     @patch("listar_subastas.fetch_la_liga_rare_auctions")
     def test_auctions_are_sorted_paginated_and_shown_in_madrid_time(self, fetch_auctions, render):

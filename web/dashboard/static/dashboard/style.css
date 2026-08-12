@@ -483,7 +483,7 @@ textarea {
 }
 
 .inline-bid-form {
-  min-width: 190px;
+  min-width: 145px;
 }
 
 .auction-filters {
@@ -602,17 +602,59 @@ textarea {
 }
 
 .inline-bid-amount input {
-  width: 78px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   padding: 0.4rem;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .inline-check {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  margin: 0.35rem 0.55rem 0 0;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0;
   color: var(--muted);
   font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.inline-check input {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+.batch-bid-bar,
+.bid-modal-actions {
+  display: flex;
+  align-items: center;
+}
+
+.batch-bid-bar {
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.bid-modal[hidden] { display: none; }
+.bid-modal { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 1rem; }
+.bid-modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, .65); }
+.bid-modal-card { position: relative; width: min(620px, 100%); max-height: 85vh; overflow: auto; background: var(--panel); border-radius: 16px; padding: 1.4rem; box-shadow: 0 24px 60px rgba(0,0,0,.3); }
+.bid-modal-close { position: absolute; top: .6rem; right: .8rem; border: 0; background: transparent; font-size: 1.8rem; cursor: pointer; }
+.bid-review-list { display: grid; gap: .5rem; margin: 1rem 0; }
+.bid-review-item { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 1rem; padding: .7rem; border: 1px solid var(--line); border-radius: 10px; }
+.bid-review-item small { color: var(--muted); }
+.bid-modal-actions { justify-content: flex-end; gap: .6rem; }
+.modal-open { overflow: hidden; }
+
+@media (max-width: 700px) {
+  .batch-bid-bar { align-items: stretch; flex-direction: column; }
+  .bid-review-item { grid-template-columns: 1fr auto; }
+  .bid-review-item small { grid-column: 1 / -1; }
+  .bid-modal-actions { align-items: stretch; flex-direction: column-reverse; }
 }
 
 .history-row td {
