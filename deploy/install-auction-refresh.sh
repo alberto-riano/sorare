@@ -23,11 +23,11 @@ EOF
 
 sudo tee /etc/systemd/system/sorare-auctions-refresh.timer >/dev/null <<EOF
 [Unit]
-Description=Actualizar mercado Sorare cada cinco minutos
+Description=Actualizar mercado Sorare cada diez minutos
 
 [Timer]
 OnBootSec=15s
-OnUnitActiveSec=5min
+OnUnitActiveSec=10min
 Persistent=true
 Unit=sorare-auctions-refresh.service
 

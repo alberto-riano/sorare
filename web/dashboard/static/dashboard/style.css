@@ -515,6 +515,10 @@ textarea {
 .market-tags span { display: inline-flex; align-items: center; gap: .35rem; padding: .42rem .68rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; font-size: .78rem; font-weight: 600; }
 .market-tags .fa-gem { color: #dc2626; }
 .market-refresh-form { justify-content: flex-end; gap: .75rem; }
+.market-sync-status { display: grid; gap: .2rem; color: var(--muted); }
+.market-sync-status small { display: flex; align-items: center; gap: .35rem; white-space: nowrap; }
+.market-sync-status i { width: .9rem; color: var(--accent); text-align: center; }
+.market-sync-status strong { color: var(--ink); font-weight: 600; }
 
 .auction-filters {
   display: grid;

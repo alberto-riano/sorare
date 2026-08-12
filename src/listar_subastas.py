@@ -283,6 +283,8 @@ def refresh_auction_cache(force_full=False):
     headers = build_headers()
     teams = fetch_la_liga_teams(headers, season_year=DEFAULT_SEASON_YEAR)
     previous = load_auction_cache()
+    previous_auctions = previous.get('auctions', []) if previous else []
+    previous_keys = {(row['auction_id'], row['asset_id']) for row in previous_auctions}
     now = datetime.now(timezone.utc)
     full_refreshed_at = None
     if previous and previous.get('full_refreshed_at'):
@@ -329,13 +331,19 @@ def refresh_auction_cache(force_full=False):
         full_timestamp = now.isoformat()
     else:
         changed_ids = {node['id'] for node in changed_nodes}
-        merged = [row for row in previous.get('auctions', []) if row['auction_id'] not in changed_ids]
+        merged = [row for row in previous_auctions if row['auction_id'] not in changed_ids]
         merged.extend(fresh_rows)
         full_timestamp = previous['full_refreshed_at']
 
     merged = [row for row in merged if datetime.fromisoformat(row['end_date'].replace('Z', '+00:00')) > now]
     unique = {(row['auction_id'], row['asset_id']): row for row in merged}
     merged = list(unique.values())
+    current_keys = set(unique)
+    new_cards_count = len(current_keys - previous_keys)
+    last_new_cards_at = (
+        now.isoformat() if new_cards_count
+        else (previous or {}).get('last_new_cards_at')
+    )
     outbid = [row for row in merged if row['is_outbid']]
     positions = fetch_bid_positions(headers, outbid, my_nickname)
     for row in merged:
@@ -348,13 +356,15 @@ def refresh_auction_cache(force_full=False):
         'full_refreshed_at': full_timestamp,
         'my_nickname': my_nickname,
         'scanned_count': scanned,
+        'new_cards_count': new_cards_count,
+        'last_new_cards_at': last_new_cards_at,
         'auctions': merged,
     }
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     temporary = CACHE_PATH.with_suffix('.tmp')
     temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
     temporary.replace(CACHE_PATH)
-    print(f"Caché actualizada: {len(merged)} subastas Rare de LaLiga 2026-2027")
+    print(f"Caché actualizada: {len(merged)} subastas Rare de LaLiga 2026-2027 ({new_cards_count} nuevas)")
     return payload
 
 

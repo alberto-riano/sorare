@@ -24,7 +24,10 @@
     {% csrf_token %}
     <input type="hidden" name="action" value="refresh_market">
     <button type="submit" class="btn btn-accent"><i class="fas fa-sync"></i> Actualizar mercado</button>
-    <small class="refresh-hint">Barrido completo · puede tardar unos minutos</small>
+    <div class="market-sync-status">
+      <small><i class="fas fa-arrows-rotate"></i> Sincronizado: <strong>{{ market_updated_at|default:"Pendiente" }}</strong></small>
+      <small><i class="fas fa-plus"></i> Nuevas cartas: <strong>{% if last_new_cards_at %}{{ last_new_cards_at }}{% if last_new_cards_count %} (+{{ last_new_cards_count }}){% endif %}{% else %}Todavía ninguna{% endif %}</strong></small>
+    </div>
   </form>
 </section>
 

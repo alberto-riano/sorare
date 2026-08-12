@@ -115,6 +115,23 @@ class LaLigaAuctionTests(TestCase):
 
 
 class AuctionActionsTests(TestCase):
+    @patch("dashboard.views.render")
+    @patch("listar_subastas.load_auction_cache")
+    @patch("listar_subastas.fetch_la_liga_rare_auctions", return_value=[])
+    def test_market_sync_metadata_is_shown_in_madrid_time(self, _fetch, load_cache, render):
+        load_cache.return_value = {
+            "updated_at": "2026-08-12T08:30:00+00:00",
+            "last_new_cards_at": "2026-08-12T08:20:00+00:00",
+            "new_cards_count": 4,
+        }
+        render.side_effect = lambda request, template, context: context
+
+        context = auctions_list(RequestFactory().get("/ofertas/"))
+
+        self.assertTrue(context["market_updated_at"].endswith("10:30"))
+        self.assertTrue(context["last_new_cards_at"].endswith("10:20"))
+        self.assertEqual(context["last_new_cards_count"], 4)
+
     def test_bid_error_message_keeps_sorare_detail_and_redacts_secrets(self):
         result = ScriptResult(
             "mock", 2, "[10:00:00] Error al pujar (exit code: 2)",

@@ -512,6 +512,21 @@ def auctions_list(request):
         error = str(e)
         messages.error(request, f"Error al cargar subastas: {error}")
     
+    cache_metadata = listar_subastas.load_auction_cache() or {}
+    madrid = ZoneInfo('Europe/Madrid')
+
+    def market_timestamp(value):
+        if not value:
+            return None
+        timestamp = datetime.fromisoformat(value.replace('Z', '+00:00')).astimezone(madrid)
+        today = datetime.now(madrid).date()
+        days_ago = (today - timestamp.date()).days
+        if days_ago == 0:
+            return f"Hoy {timestamp:%H:%M}"
+        if days_ago == 1:
+            return f"Ayer {timestamp:%H:%M}"
+        return timestamp.strftime('%d/%m/%Y %H:%M')
+
     available_teams = sorted({auction['team'] for auction in auctions})
     available_positions = sorted({auction['position'] for auction in auctions})
     filter_player = request.GET.get('player', '').strip()
@@ -553,7 +568,6 @@ def auctions_list(request):
     for auction in filtered_auctions:
         auction['is_favorite'] = auction['player_slug'] in favorite_slugs
 
-    madrid = ZoneInfo('Europe/Madrid')
     today_madrid = datetime.now(madrid).date()
     for auction in filtered_auctions:
         end_at = datetime.fromisoformat(auction['end_date'].replace('Z', '+00:00')).astimezone(madrid)
@@ -594,6 +608,9 @@ def auctions_list(request):
             "error": error,
             "loading": loading,
             "season_label": "2026-2027",
+            "market_updated_at": market_timestamp(cache_metadata.get('updated_at')),
+            "last_new_cards_at": market_timestamp(cache_metadata.get('last_new_cards_at')),
+            "last_new_cards_count": cache_metadata.get('new_cards_count', 0),
         },
     )
 
