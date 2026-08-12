@@ -126,6 +126,11 @@ class AuctionActionsTests(SimpleTestCase):
         self.assertEqual(context["auctions"][0]["end_date"], "2026-08-12T00:00:00Z")
         self.assertEqual(context["auctions"][0]["end_date_madrid"], "12/08/2026 02:00")
 
+        descending = auctions_list(RequestFactory().get("/ofertas/?end_order=desc&page=2"))
+        self.assertEqual(descending["end_order"], "desc")
+        self.assertEqual(descending["page_obj"].number, 2)
+        self.assertEqual(descending["auctions"][0]["end_date"], "2026-08-12T04:00:00Z")
+
     def test_inline_bid_requires_explicit_confirmation(self):
         form = InlineBidForm({"auction_id": "EnglishAuction:test", "euros": "12.50"})
         self.assertFalse(form.is_valid())

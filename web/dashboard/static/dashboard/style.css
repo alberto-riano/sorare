@@ -511,6 +511,42 @@ textarea {
   align-items: center;
   gap: 0.75rem;
   margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.sortable-heading,
+.sort-buttons,
+.page-jump {
+  display: inline-flex;
+  align-items: center;
+}
+
+.sortable-heading {
+  gap: 0.45rem;
+}
+
+.sort-buttons {
+  gap: 0.15rem;
+}
+
+.sort-button {
+  color: var(--muted);
+  padding: 0.15rem;
+  line-height: 1;
+}
+
+.sort-button:hover,
+.sort-button.is-active {
+  color: var(--accent);
+}
+
+.page-jump {
+  gap: 0.4rem;
+}
+
+.page-jump input[type="number"] {
+  width: 4.5rem;
+  padding: 0.4rem 0.5rem;
 }
 
 .auction-main-row {

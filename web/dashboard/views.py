@@ -471,7 +471,6 @@ def auctions_list(request):
             season_year=2026,
         )
         loading = False
-        auctions.sort(key=lambda x: datetime.fromisoformat(x['end_date'].replace('Z', '+00:00')))
         if request.method == "POST":
             messages.success(request, f"Actualizadas {len(auctions)} subastas activas")
     except Exception as e:
@@ -485,6 +484,14 @@ def auctions_list(request):
     filter_position = request.GET.get('position', '').strip()
     filter_status = request.GET.get('status', '').strip()
     filter_max_price = request.GET.get('max_price', '').strip()
+    end_order = request.GET.get('end_order', 'asc')
+    if end_order not in {'asc', 'desc'}:
+        end_order = 'asc'
+
+    auctions.sort(
+        key=lambda row: datetime.fromisoformat(row['end_date'].replace('Z', '+00:00')),
+        reverse=end_order == 'desc',
+    )
 
     filtered_auctions = auctions
     if filter_player:
@@ -513,6 +520,8 @@ def auctions_list(request):
     page_obj = paginator.get_page(request.GET.get('page'))
     query_params = request.GET.copy()
     query_params.pop('page', None)
+    sort_query_params = query_params.copy()
+    sort_query_params.pop('end_order', None)
 
     return render(
         request,
@@ -528,7 +537,9 @@ def auctions_list(request):
             "filter_position": filter_position,
             "filter_status": filter_status,
             "filter_max_price": filter_max_price,
+            "end_order": end_order,
             "pagination_query": query_params.urlencode(),
+            "sort_query": sort_query_params.urlencode(),
             "error": error,
             "loading": loading,
             "season_label": "2026-2027",

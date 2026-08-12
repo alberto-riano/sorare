@@ -55,7 +55,15 @@
           <th><i class="fas fa-shield-alt"></i> Equipo</th>
           <th><i class="fas fa-running"></i> Pos</th>
           <th><i class="fas fa-euro-sign"></i> Puja Actual</th>
-          <th><i class="fas fa-clock"></i> Finaliza</th>
+          <th>
+            <span class="sortable-heading">
+              <span><i class="fas fa-clock"></i> Finaliza</span>
+              <span class="sort-buttons" aria-label="Ordenar por fecha de finalización">
+                <a href="?{% if sort_query %}{{ sort_query }}&amp;{% endif %}end_order=asc" class="sort-button{% if end_order == 'asc' %} is-active{% endif %}" title="Primero las que finalizan antes" aria-label="Primero las que finalizan antes"><i class="fas fa-arrow-up"></i></a>
+                <a href="?{% if sort_query %}{{ sort_query }}&amp;{% endif %}end_order=desc" class="sort-button{% if end_order == 'desc' %} is-active{% endif %}" title="Primero las que finalizan más tarde" aria-label="Primero las que finalizan más tarde"><i class="fas fa-arrow-down"></i></a>
+              </span>
+            </span>
+          </th>
           <th><i class="fas fa-chart-line"></i> Mercado</th>
           <th><i class="fas fa-gavel"></i> Pujar</th>
         </tr>
@@ -123,6 +131,17 @@
   <nav class="pagination" aria-label="Páginas de subastas">
     {% if page_obj.has_previous %}<a class="btn btn-secondary btn-compact" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Anterior</a>{% endif %}
     <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+    <form method="get" class="page-jump">
+      {% if filter_player %}<input type="hidden" name="player" value="{{ filter_player }}">{% endif %}
+      {% if filter_team %}<input type="hidden" name="team" value="{{ filter_team }}">{% endif %}
+      {% if filter_position %}<input type="hidden" name="position" value="{{ filter_position }}">{% endif %}
+      {% if filter_max_price %}<input type="hidden" name="max_price" value="{{ filter_max_price }}">{% endif %}
+      {% if filter_status %}<input type="hidden" name="status" value="{{ filter_status }}">{% endif %}
+      <input type="hidden" name="end_order" value="{{ end_order }}">
+      <label for="page-number">Ir a</label>
+      <input id="page-number" name="page" type="number" min="1" max="{{ page_obj.paginator.num_pages }}" value="{{ page_obj.number }}" aria-label="Número de página">
+      <button class="btn btn-secondary btn-compact" type="submit">Ir</button>
+    </form>
     {% if page_obj.has_next %}<a class="btn btn-secondary btn-compact" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Siguiente</a>{% endif %}
   </nav>
   {% endif %}
