@@ -4,6 +4,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
+from django.contrib.messages import get_messages
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
@@ -11,7 +12,7 @@ import listar_subastas
 from dashboard.forms import BatchBidForm, InlineBidForm
 from dashboard.models import FavoritePlayer
 from dashboard.views import auction_price_history, auctions_list
-from web_services.process_runner import BidRequest, ScriptResult, run_bid_scheduler
+from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler
 
 
 class LaLigaAuctionTests(TestCase):
@@ -114,6 +115,34 @@ class LaLigaAuctionTests(TestCase):
 
 
 class AuctionActionsTests(TestCase):
+    def test_bid_error_message_keeps_sorare_detail_and_redacts_secrets(self):
+        result = ScriptResult(
+            "mock", 2, "[10:00:00] Error al pujar (exit code: 2)",
+            "❌ Errores preparando la puja:\nLa puja mínima es 12,50 €\nBearer secret-token",
+        )
+        detail = bid_error_message(result)
+        self.assertIn("La puja mínima es 12,50 €", detail)
+        self.assertNotIn("secret-token", detail)
+        self.assertIn("[oculto]", detail)
+
+    @patch("dashboard.views.run_bid_scheduler")
+    @patch("listar_subastas.load_auction_cache")
+    def test_batch_bid_failure_shows_player_and_real_description(self, load_cache, run_bid):
+        user = get_user_model().objects.create_user(username="bid-error-user")
+        self.client.force_login(user)
+        load_cache.return_value = {"auctions": [{"auction_id": "EnglishAuction:test", "player": "Oyarzabal"}]}
+        run_bid.return_value = ScriptResult("mock", 2, "", "❌ La puja mínima es 15,00 €")
+        bids = json.dumps([{"auction_id": "EnglishAuction:test", "euros": "12.50", "use_credit": True}])
+
+        response = self.client.post(reverse("auctions_list"), {
+            "action": "place_batch_bids", "bids": bids, "confirm": "on",
+        })
+
+        rendered_messages = [str(message) for message in get_messages(response.wsgi_request)]
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("Oyarzabal: La puja mínima es 15,00 €", rendered_messages)
+        self.assertFalse(any("posiciones" in message for message in rendered_messages))
+
     def test_favorite_toggle_is_persisted_per_user(self):
         user = get_user_model().objects.create_user(username="favorites-user", password="test-password")
         self.client.force_login(user)

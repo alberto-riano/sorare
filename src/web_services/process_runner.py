@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -25,6 +26,27 @@ class BidRequest:
     sniper: bool
     background: bool
     use_credit: bool
+
+
+def bid_error_message(result: ScriptResult, *, max_length: int = 500) -> str:
+    """Extrae un error legible de la salida de una puja y oculta posibles secretos."""
+    raw = result.stderr or result.stdout or "Sorare no devolvió una descripción del error."
+    raw = re.sub(r"\x1b\[[0-9;]*m", "", raw)
+    lines = [line.strip().lstrip("❌").strip() for line in raw.splitlines() if line.strip()]
+    ignored = (
+        "error al pujar (exit code:", "comando: node", "pujar en subasta de sorare",
+        "auction id:", "obteniendo info", "cantidad:", "====",
+    )
+    useful = [line for line in lines if not line.casefold().startswith(ignored)]
+    detail = " · ".join(useful[-3:] if useful else lines[-1:])
+    detail = re.sub(
+        r"(?i)(authorization|bearer|jwt_token|private_key)(?:\s*[:=]\s*|\s+)\S+",
+        r"\1: [oculto]",
+        detail,
+    )
+    if not detail:
+        detail = "Sorare no devolvió una descripción del error."
+    return detail[:max_length]
 
 
 def _run_command(cmd: list[str], cwd: Path) -> ScriptResult:

@@ -13,7 +13,7 @@ from django.http import FileResponse, Http404
 from django.shortcuts import redirect, render
 
 from web_services.config_files import SorarePaths, load_telegram_alert_payload, save_telegram_alert_payload
-from web_services.process_runner import BidRequest, run_bid_scheduler, run_telegram_alert
+from web_services.process_runner import BidRequest, bid_error_message, run_bid_scheduler, run_telegram_alert
 from web_services.sales_excel import (
     excel_path_for_rarity,
     execute_sales,
@@ -469,6 +469,11 @@ def auctions_list(request):
         if batch_form.is_valid():
             successful = 0
             failures = []
+            cached_market = listar_subastas.load_auction_cache() or {}
+            player_by_auction = {
+                row.get("auction_id"): row.get("player", "Jugador desconocido")
+                for row in cached_market.get("auctions", [])
+            }
             for index, data in enumerate(batch_form.cleaned_data["bids"], start=1):
                 result = run_bid_scheduler(
                     PATHS,
@@ -481,11 +486,13 @@ def auctions_list(request):
                 if result.exit_code == 0:
                     successful += 1
                 else:
-                    failures.append(str(index))
+                    player = player_by_auction.get(data["auction_id"], f"Puja {index}")
+                    failures.append(f"{player}: {bid_error_message(result)}")
             if successful:
                 messages.success(request, f"Se enviaron correctamente {successful} pujas.")
             if failures:
-                messages.error(request, f"Fallaron {len(failures)} pujas del resumen (posiciones {', '.join(failures)}).")
+                for failure in failures:
+                    messages.error(request, failure)
             return redirect("auctions_list")
         messages.error(request, "No se envió ninguna puja: revisa el resumen y vuelve a confirmar.")
 
