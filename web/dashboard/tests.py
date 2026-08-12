@@ -122,6 +122,15 @@ class AuctionActionsTests(SimpleTestCase):
         self.assertTrue(confirmed.cleaned_data["bids"][0]["use_credit"])
         self.assertFalse(confirmed.cleaned_data["bids"][1]["use_credit"])
 
+    @patch("dashboard.views.messages.success")
+    @patch("dashboard.views.render")
+    @patch("listar_subastas.fetch_la_liga_rare_auctions", return_value=[])
+    @patch("listar_subastas.refresh_auction_cache")
+    def test_refresh_button_forces_a_full_market_scan(self, refresh_cache, fetch_auctions, render, success):
+        render.side_effect = lambda request, template, context: context
+        auctions_list(RequestFactory().post("/ofertas/", {"action": "refresh_market"}))
+        refresh_cache.assert_called_once_with(force_full=True)
+
     @patch("dashboard.views.render")
     @patch("listar_subastas.fetch_la_liga_rare_auctions")
     def test_auctions_are_sorted_paginated_and_shown_in_madrid_time(self, fetch_auctions, render):

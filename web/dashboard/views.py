@@ -489,6 +489,8 @@ def auctions_list(request):
         messages.error(request, "No se envió ninguna puja: revisa el resumen y vuelve a confirmar.")
 
     try:
+        if request.method == "POST" and request.POST.get("action") == "refresh_market":
+            listar_subastas.refresh_auction_cache(force_full=True)
         team_filters = request.POST.getlist("teams") or request.GET.getlist("teams") or None
         auctions = listar_subastas.fetch_la_liga_rare_auctions(
             team_filters=team_filters if team_filters else None,
@@ -496,8 +498,8 @@ def auctions_list(request):
             season_year=2026,
         )
         loading = False
-        if request.method == "POST":
-            messages.success(request, f"Actualizadas {len(auctions)} subastas activas")
+        if request.method == "POST" and request.POST.get("action") == "refresh_market":
+            messages.success(request, f"Mercado completo actualizado: {len(auctions)} subastas activas")
     except Exception as e:
         error = str(e)
         messages.error(request, f"Error al cargar subastas: {error}")

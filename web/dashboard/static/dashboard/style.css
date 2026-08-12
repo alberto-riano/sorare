@@ -483,7 +483,13 @@ textarea {
 }
 
 .inline-bid-form {
-  min-width: 145px;
+  width: 102px;
+  min-width: 102px;
+}
+
+.refresh-hint {
+  align-self: center;
+  color: var(--muted);
 }
 
 .auction-filters {
@@ -603,7 +609,7 @@ textarea {
 
 .inline-bid-amount input {
   box-sizing: border-box;
-  width: 100%;
+  width: 82px;
   min-width: 0;
   padding: 0.4rem;
   -webkit-appearance: none;

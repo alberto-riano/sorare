@@ -13,6 +13,7 @@
   <h2><i class="fas fa-filter"></i> LaLiga {{ season_label }}</h2>
   <form method="post">
     {% csrf_token %}
+    <input type="hidden" name="action" value="refresh_market">
     <div class="field-grid">
       <label>
         <span>Rareza</span>
@@ -26,8 +27,9 @@
     <div class="btn-row">
       <button type="submit" class="btn btn-accent">
         <i class="fas fa-sync"></i>
-        Actualizar subastas
+        Actualizar mercado completo
       </button>
+      <small class="refresh-hint">El barrido completo puede tardar unos minutos.</small>
     </div>
   </form>
 </section>
@@ -104,7 +106,8 @@
             <div class="inline-bid-form" onclick="event.stopPropagation()"
                  data-auction-id="{{ auction.auction_id }}" data-player="{{ auction.player }}">
               <div class="inline-bid-amount">
-                <input type="number" class="batch-bid-euros" min="0.01" step="0.01" inputmode="decimal"
+                <input type="text" class="batch-bid-euros" inputmode="decimal" autocomplete="off"
+                       pattern="[0-9]+([.,][0-9]{1,2})?"
                        aria-label="Importe de puja para {{ auction.player }}" placeholder="€" required>
               </div>
               <label class="inline-check"><input type="checkbox" class="batch-bid-credit" checked> <span>Usar créditos</span></label>
@@ -196,9 +199,10 @@ document.addEventListener('DOMContentLoaded', function () {
   function selectedBids() {
     return bidControls.map(function (control) {
       var input = control.querySelector('.batch-bid-euros');
-      if (!input.value || Number(input.value) <= 0) return null;
+      var normalized = input.value.trim().replace(',', '.');
+      if (!/^\d+(\.\d{1,2})?$/.test(normalized) || Number(normalized) <= 0) return null;
       return {auction_id: control.dataset.auctionId, player: control.dataset.player,
-        euros: Number(input.value).toFixed(2), use_credit: control.querySelector('.batch-bid-credit').checked};
+        euros: Number(normalized).toFixed(2), use_credit: control.querySelector('.batch-bid-credit').checked};
     }).filter(Boolean);
   }
 
