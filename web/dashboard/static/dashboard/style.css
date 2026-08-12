@@ -560,6 +560,43 @@ textarea {
   transition: background 140ms ease;
 }
 
+.auction-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.player-thumb,
+.team-badge {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  object-fit: contain;
+}
+
+.player-thumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #eef2f1;
+}
+
+.team-badge {
+  width: 25px;
+  height: 25px;
+}
+
+.image-fallback {
+  color: var(--muted);
+  background: #eef2f1;
+  font-size: 0.75rem;
+}
+
+.team-badge.image-fallback {
+  border-radius: 7px;
+}
+
 .auction-main-row:hover {
   background: #f0fdfa;
 }

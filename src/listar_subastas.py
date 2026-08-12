@@ -62,8 +62,8 @@ query GetBuyingFootballAuctions {
         rarityTyped
         seasonYear
         serialNumber
-        anyPlayer { displayName slug }
-        anyTeam { name slug }
+        anyPlayer { displayName slug squaredPictureUrl }
+        anyTeam { name slug pictureUrl }
         anyPositions
       }
     }
@@ -85,8 +85,8 @@ query GetAllLiveFootballAuctions($after: String, $updatedAfter: ISO8601DateTime)
         myLastBid { amounts { eurCents } maximumAmounts { eurCents } }
         anyCards {
           assetId rarityTyped seasonYear serialNumber
-          anyPlayer { displayName slug }
-          anyTeam { name slug }
+          anyPlayer { displayName slug squaredPictureUrl }
+          anyTeam { name slug pictureUrl }
           anyPositions
         }
       }
@@ -154,8 +154,10 @@ def fetch_all_live_auctions(headers, rarity="rare", team_slugs=None, season_year
             results.append({
                 'player': card['anyPlayer']['displayName'],
                 'player_slug': card['anyPlayer']['slug'],
+                'player_picture_url': card['anyPlayer'].get('squaredPictureUrl'),
                 'team': team['name'],
                 'team_slug': team['slug'],
+                'team_picture_url': team.get('pictureUrl'),
                 'serial': card['serialNumber'],
                 'season': card['seasonYear'],
                 'position': card.get('anyPositions', ['?'])[0],
@@ -246,8 +248,10 @@ def _rows_from_live_auctions(nodes, team_slugs, my_nickname, season_year=DEFAULT
             rows.append({
                 'player': card['anyPlayer']['displayName'],
                 'player_slug': card['anyPlayer']['slug'],
+                'player_picture_url': card['anyPlayer'].get('squaredPictureUrl'),
                 'team': team['name'],
                 'team_slug': team['slug'],
+                'team_picture_url': team.get('pictureUrl'),
                 'serial': card['serialNumber'],
                 'season': card['seasonYear'],
                 'position': card.get('anyPositions', ['?'])[0],

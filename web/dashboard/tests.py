@@ -77,6 +77,8 @@ class LaLigaAuctionTests(SimpleTestCase):
             [auction], {"real-madrid-madrid"}, "burguis", season_year=2026
         )
         self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["player_picture_url"], "https://images.example/player.png")
+        self.assertEqual(rows[0]["team_picture_url"], "https://images.example/team.png")
         self.assertFalse(rows[0]["has_bid"])
         self.assertFalse(rows[0]["is_winning"])
         self.assertFalse(rows[0]["is_outbid"])
@@ -88,8 +90,8 @@ class LaLigaAuctionTests(SimpleTestCase):
             "rarityTyped": rarity,
             "seasonYear": season,
             "serialNumber": 1,
-            "anyPlayer": {"displayName": "Jugador", "slug": "jugador"},
-            "anyTeam": {"name": "Equipo", "slug": team_slug},
+            "anyPlayer": {"displayName": "Jugador", "slug": "jugador", "squaredPictureUrl": "https://images.example/player.png"},
+            "anyTeam": {"name": "Equipo", "slug": team_slug, "pictureUrl": "https://images.example/team.png"},
             "anyPositions": ["Defender"],
         }
         return card

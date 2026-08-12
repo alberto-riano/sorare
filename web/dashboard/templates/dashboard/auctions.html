@@ -78,8 +78,18 @@
             data-winning="{% if auction.is_winning %}true{% else %}false{% endif %}"
             data-status="{% if auction.is_winning %}winning{% elif auction.is_outbid %}outbid{% endif %}"
             data-history-target="history-{{ forloop.counter }}" tabindex="0">
-          <td><strong>{{ auction.player }}</strong></td>
-          <td>{{ auction.team }}</td>
+          <td>
+            <span class="auction-identity">
+              {% if auction.player_picture_url %}<img class="player-thumb" src="{{ auction.player_picture_url }}" alt="" loading="lazy" decoding="async">{% else %}<span class="player-thumb image-fallback"><i class="fas fa-user"></i></span>{% endif %}
+              <strong>{{ auction.player }}</strong>
+            </span>
+          </td>
+          <td>
+            <span class="auction-identity team-identity">
+              {% if auction.team_picture_url %}<img class="team-badge" src="{{ auction.team_picture_url }}" alt="" loading="lazy" decoding="async">{% else %}<span class="team-badge image-fallback"><i class="fas fa-shield-alt"></i></span>{% endif %}
+              <span>{{ auction.team }}</span>
+            </span>
+          </td>
           <td>{{ auction.position }}</td>
           <td>
             {% if auction.bid_eur %}
