@@ -32,7 +32,9 @@ function readConfig(filename = CONFIG_PATH) {
 // --- Parámetros de entrada ---
 const args = process.argv.slice(2);
 const USE_CREDIT = args.includes("--use-credit");
-const positionalArgs = args.filter((a) => !a.startsWith("--"));
+const currencyIndex = args.indexOf("--currency");
+const PAYMENT_CURRENCY = currencyIndex >= 0 ? args[currencyIndex + 1] : "EUR";
+const positionalArgs = args.filter((a, index) => !a.startsWith("--") && index !== currencyIndex + 1);
 const [AUCTION_ID, BID_AMOUNT_CENTS] = positionalArgs;
 
 if (!AUCTION_ID || !BID_AMOUNT_CENTS) {
@@ -57,7 +59,10 @@ if (!JWT_TOKEN || !PRIVATE_KEY || !JWT_AUD) {
   process.exit(1);
 }
 
-const CURRENCY = "EUR";
+if (!["EUR", "ETH"].includes(PAYMENT_CURRENCY)) {
+  console.error("La moneda de pago debe ser EUR o ETH");
+  process.exit(1);
+}
 
 const client = new GraphQLClient("https://api.sorare.com/graphql", {
   headers: {
@@ -123,6 +128,7 @@ const CONFIG_QUERY = gql`
     config {
       exchangeRate {
         id
+        ethRates { eurCents }
       }
     }
   }
@@ -384,6 +390,9 @@ async function bidOnAuction(auctionId, bidAmountCents) {
   console.log("💱 Obteniendo exchange rate...");
   const configData = await client.request(CONFIG_QUERY);
   const exchangeRateId = configData.config.exchangeRate.id;
+  const amount = PAYMENT_CURRENCY === "ETH"
+    ? (BigInt(bidAmountCents) * 1000000000000000000n / BigInt(configData.config.exchangeRate.ethRates.eurCents)).toString()
+    : bidAmountCents.toString();
   console.log(`  Exchange Rate ID: ${exchangeRateId}`);
   console.log("");
 
@@ -393,7 +402,7 @@ async function bidOnAuction(auctionId, bidAmountCents) {
     console.log("  💳 Usando créditos de conversión disponibles");
   }
   const settlementInfo = {
-    currency: CURRENCY,
+    currency: PAYMENT_CURRENCY === "ETH" ? "WEI" : "EUR",
     paymentMethod: "WALLET",
     exchangeRateId: exchangeRateId,
     ...(USE_CREDIT && { useAvailableCredits: true }),
@@ -401,7 +410,7 @@ async function bidOnAuction(auctionId, bidAmountCents) {
 
   const prepareBidInput = {
     auctionId: auctionId,
-    amount: bidAmountCents.toString(),
+    amount,
     settlementInfo,
   };
 
@@ -435,7 +444,7 @@ async function bidOnAuction(auctionId, bidAmountCents) {
   const bidInput = {
     approvals,
     auctionId: auctionId,
-    amount: bidAmountCents.toString(),
+    amount,
     settlementInfo,
     clientMutationId: crypto.randomBytes(8).toString("hex"),
   };

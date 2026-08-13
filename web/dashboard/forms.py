@@ -56,6 +56,7 @@ class InlineBidForm(forms.Form):
     auction_id = forms.CharField(max_length=200, widget=forms.HiddenInput)
     euros = forms.DecimalField(min_value=0.01, decimal_places=2, max_digits=8)
     use_credit = forms.BooleanField(required=False, initial=True)
+    currency = forms.ChoiceField(choices=(("EUR", "EUR"), ("ETH", "ETH")), initial="EUR")
     confirm = forms.BooleanField(required=True, error_messages={"required": "Confirma la puja antes de enviarla."})
 
     def clean_auction_id(self):
@@ -85,6 +86,7 @@ class BatchBidForm(forms.Form):
                 "auction_id": raw_bid.get("auction_id", ""),
                 "euros": raw_bid.get("euros", ""),
                 "use_credit": raw_bid.get("use_credit", False),
+                "currency": raw_bid.get("currency", "EUR"),
                 "confirm": True,
             })
             if not form.is_valid():

@@ -798,6 +798,16 @@ textarea {
 .bid-review-list { display: grid; gap: .5rem; margin: 1rem 0; }
 .review-credit-all { display: inline-flex; width: auto; max-width: 100%; align-items: center; gap: .5rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: #f8faf9; font-weight: 700; cursor: pointer; }
 .review-credit-all span { white-space: nowrap; }
+.bid-payment-summary { display: grid; gap: .65rem; margin: .85rem 0; }
+.bid-payment-choice { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; font-weight: 700; }
+.bid-payment-choice > span { margin-right: .25rem; }
+.bid-payment-choice label { display: inline-flex; align-items: center; gap: .35rem; padding: .48rem .7rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; cursor: pointer; }
+.bid-payment-choice label:has(input:checked) { border-color: var(--accent); color: var(--accent); background: #eef8f6; }
+.payment-currency-help { color: var(--muted); }
+.modal-balances { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+.modal-balances > span { display: grid; gap: .08rem; padding: .55rem .65rem; border-radius: 10px; background: #f8faf9; border: 1px solid var(--line); }
+.modal-balances small { color: var(--muted); font-size: .68rem; font-weight: 700; }
+.modal-balances strong { font-family: 'IBM Plex Mono', monospace; font-size: .84rem; }
 .bid-review-item { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: .8rem; padding: .7rem; border: 1px solid var(--line); border-radius: 10px; }
 .bid-review-item small { color: var(--muted); }
 .bid-review-visuals { position: relative; display: block; width: 46px; height: 40px; }

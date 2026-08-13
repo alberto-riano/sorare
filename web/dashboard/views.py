@@ -629,7 +629,7 @@ def enqueue_batch_bids(request):
         BidBatchItem.objects.bulk_create([
             BidBatchItem(job=job, position=index, auction_id=data["auction_id"],
                          player_name=player_by_auction.get(data["auction_id"], f"Puja {index}"),
-                         euros=data["euros"], use_credit=bool(data["use_credit"]))
+                         euros=data["euros"], use_credit=bool(data["use_credit"]), currency=data["currency"])
             for index, data in enumerate(bids, start=1)
         ])
     return JsonResponse({"job_id": job.id, "status": job.status, "total": job.total_count}, status=202)

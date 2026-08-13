@@ -28,6 +28,7 @@ def process_next_job():
                 BidRequest(
                     identifier=item.auction_id, euros=str(item.euros), hora="",
                     now=True, sniper=False, background=False, use_credit=item.use_credit,
+                    currency=item.currency,
                 ),
             )
             if result.exit_code == 0:

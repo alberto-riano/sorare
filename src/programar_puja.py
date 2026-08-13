@@ -464,11 +464,12 @@ def monitor_auction(auction_id, headers, my_nickname, poll_interval=15):
         time.sleep(poll_interval)
 
 
-def execute_bid(auction_id, bid_cents, use_credit=True):
+def execute_bid(auction_id, bid_cents, use_credit=True, currency='EUR'):
     """Ejecuta la puja llamando al script de Node.js."""
     cmd = ['node', JS_SCRIPT, auction_id, str(bid_cents)]
     if use_credit:
         cmd.append('--use-credit')
+    cmd.extend(['--currency', currency])
     log(f"Comando: node pujar_carta.js {auction_id} {bid_cents}{' --use-credit' if use_credit else ''}")
     print()
 
@@ -554,6 +555,7 @@ Ejemplos:
                         help='Pujar exactamente 1 minuto antes de que termine la subasta')
     parser.add_argument('--use-credit', action='store_true', help='Forzar uso de creditos de conversion al pujar')
     parser.add_argument('--no-credit', action='store_true', help='Desactivar uso de creditos de conversion al pujar')
+    parser.add_argument('--currency', choices=('EUR', 'ETH'), default='EUR', help='Saldo usado para pagar la puja')
 
     args = parser.parse_args()
 
@@ -663,7 +665,7 @@ Ejemplos:
         print()
 
     # Ejecutar puja
-    exit_code = execute_bid(auction_id, bid_cents, use_credit=use_credit)
+    exit_code = execute_bid(auction_id, bid_cents, use_credit=use_credit, currency=args.currency)
 
     if exit_code == 0:
         log(f"✅ Puja ejecutada a las {now_spain().strftime('%H:%M:%S')}")

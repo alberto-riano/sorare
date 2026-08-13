@@ -54,6 +54,7 @@ class BidBatchItem(models.Model):
     player_name = models.CharField(max_length=180)
     euros = models.DecimalField(max_digits=8, decimal_places=2)
     use_credit = models.BooleanField(default=True)
+    currency = models.CharField(max_length=3, choices=(("EUR", "EUR"), ("ETH", "ETH")), default="EUR")
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED)
     error = models.TextField(blank=True)
 

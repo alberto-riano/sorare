@@ -199,8 +199,8 @@ class AuctionActionsTests(TestCase):
 
     def test_batch_bid_requires_final_confirmation_and_validates_every_bid(self):
         bids = json.dumps([
-            {"auction_id": "EnglishAuction:first", "euros": "12.50", "use_credit": True},
-            {"auction_id": "EnglishAuction:second", "euros": "8.25", "use_credit": False},
+            {"auction_id": "EnglishAuction:first", "euros": "12.50", "use_credit": True, "currency": "EUR"},
+            {"auction_id": "EnglishAuction:second", "euros": "8.25", "use_credit": False, "currency": "ETH"},
         ])
         unconfirmed = BatchBidForm({"bids": bids})
         self.assertFalse(unconfirmed.is_valid())
@@ -211,6 +211,7 @@ class AuctionActionsTests(TestCase):
         self.assertEqual(len(confirmed.cleaned_data["bids"]), 2)
         self.assertTrue(confirmed.cleaned_data["bids"][0]["use_credit"])
         self.assertFalse(confirmed.cleaned_data["bids"][1]["use_credit"])
+        self.assertEqual(confirmed.cleaned_data["bids"][1]["currency"], "ETH")
 
     @patch("dashboard.views.messages.success")
     @patch("dashboard.views.render")
@@ -280,6 +281,7 @@ class AuctionActionsTests(TestCase):
         command = run_command.call_args.args[0]
         self.assertIn("--now", command)
         self.assertIn("--use-credit", command)
+        self.assertEqual(command[-2:], ["--currency", "EUR"])
         self.assertEqual(command[2:4], ["EnglishAuction:test", "12.50"])
 
     @patch("sorare_utils.build_headers", return_value={})

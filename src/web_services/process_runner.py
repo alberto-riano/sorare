@@ -26,6 +26,7 @@ class BidRequest:
     sniper: bool
     background: bool
     use_credit: bool
+    currency: str = "EUR"
 
 
 def bid_error_message(result: ScriptResult, *, max_length: int = 500) -> str:
@@ -101,5 +102,6 @@ def run_bid_scheduler(paths: SorarePaths, request: BidRequest) -> ScriptResult:
         cmd.append("--use-credit")
     else:
         cmd.append("--no-credit")
+    cmd.extend(("--currency", request.currency.upper()))
 
     return _run_command(cmd, paths.repo_root)
