@@ -535,6 +535,24 @@ textarea {
   align-items: end;
   margin-bottom: 0.9rem;
 }
+.saved-filter-bar { display: flex; align-items: end; flex-wrap: wrap; gap: .65rem; margin-bottom: .9rem; padding: .7rem; border-radius: 12px; background: #f8faf9; border: 1px solid var(--line); }
+.saved-filter-bar > label, .save-filter-form label { display: grid; gap: .25rem; }
+.saved-filter-bar label > span { color: var(--muted); font-size: .75rem; }
+.saved-filter-bar select, .saved-filter-bar input { height: 38px; box-sizing: border-box; }
+.save-filter-form { display: flex; align-items: end; gap: .45rem; }
+.manage-saved-filters { position: relative; align-self: center; }
+.manage-saved-filters summary { color: var(--accent); cursor: pointer; font-weight: 700; }
+.manage-saved-filters > div { position: absolute; z-index: 20; right: 0; top: calc(100% + .4rem); min-width: 220px; padding: .5rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 12px 28px rgba(15,23,42,.15); }
+.manage-saved-filters form { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .35rem; }
+.manage-saved-filters button { border: 0; background: transparent; color: #dc2626; font-size: 1.2rem; cursor: pointer; }
+.team-multiselect details { position: relative; }
+.filter-field > span { display: block; margin-bottom: .25rem; color: var(--muted); font-size: .75rem; }
+.team-multiselect summary { display: flex; align-items: center; height: 42px; box-sizing: border-box; padding: 0 .75rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; list-style: none; }
+.team-multiselect summary::-webkit-details-marker { display: none; }
+.team-options { position: absolute; z-index: 30; top: calc(100% + .35rem); left: 0; width: max-content; min-width: 230px; max-height: 330px; overflow: auto; padding: .45rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 12px 28px rgba(15,23,42,.16); }
+.team-options label { display: flex; align-items: center; gap: .45rem; padding: .4rem .45rem; cursor: pointer; }
+.team-options label:hover { background: #eef8f6; }
+.team-options .btn { width: 100%; margin-top: .35rem; }
 
 .favorite-filter-control {
   display: flex;

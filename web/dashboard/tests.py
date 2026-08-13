@@ -11,7 +11,7 @@ from django.urls import reverse
 import listar_subastas
 from dashboard.forms import BatchBidForm, InlineBidForm
 from dashboard.management.commands.process_bid_queue import process_next_job
-from dashboard.models import BidBatchItem, BidBatchJob, FavoritePlayer
+from dashboard.models import AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer
 from dashboard.views import auction_price_history, auctions_list
 from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler
 
@@ -196,6 +196,17 @@ class AuctionActionsTests(TestCase):
         removed = self.client.post(url, {"player_slug": "jugador-prueba", "player_name": "Jugador Prueba"})
         self.assertFalse(removed.json()["favorite"])
         self.assertFalse(FavoritePlayer.objects.filter(user=user, player_slug="jugador-prueba").exists())
+
+    def test_saved_filter_is_private_and_keeps_multiple_teams(self):
+        user = get_user_model().objects.create_user(username="preset-user")
+        self.client.force_login(user)
+        query = "teams=Real+Madrid&teams=FC+Barcelona&favorites=1&per_page=50&page=8"
+        response = self.client.post(reverse("save_auction_filter"), {"name": "Grandes", "query": query})
+        preset = AuctionFilterPreset.objects.get(user=user, name="Grandes")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("teams=Real+Madrid", preset.query_string)
+        self.assertIn("teams=FC+Barcelona", preset.query_string)
+        self.assertNotIn("page=8", preset.query_string)
 
     def test_batch_bid_requires_final_confirmation_and_validates_every_bid(self):
         bids = json.dumps([

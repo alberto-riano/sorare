@@ -14,6 +14,7 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.http import FileResponse, Http404
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from web_services.config_files import SorarePaths, load_telegram_alert_payload, save_telegram_alert_payload
@@ -29,7 +30,7 @@ from web_services.sales_excel import (
 )
 
 from .forms import BatchBidForm, BidScheduleForm, ExportCardsForm, InlineBidForm, TelegramSettingsForm
-from .models import BidBatchItem, BidBatchJob, FavoritePlayer
+from .models import AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PATHS = SorarePaths(repo_root=REPO_ROOT)
@@ -471,9 +472,8 @@ def auctions_list(request):
     try:
         if request.method == "POST" and request.POST.get("action") == "refresh_market":
             listar_subastas.refresh_auction_cache(force_full=True)
-        team_filters = request.POST.getlist("teams") or request.GET.getlist("teams") or None
         auctions = listar_subastas.fetch_la_liga_rare_auctions(
-            team_filters=team_filters if team_filters else None,
+            team_filters=None,
             rarity="rare",
             season_year=2026,
         )
@@ -512,7 +512,7 @@ def auctions_list(request):
     available_teams = sorted({auction['team'] for auction in auctions})
     available_positions = sorted({auction['position'] for auction in auctions})
     filter_player = request.GET.get('player', '').strip()
-    filter_team = request.GET.get('team', '').strip()
+    filter_teams = [team.strip() for team in request.GET.getlist('teams') if team.strip()]
     filter_position = request.GET.get('position', '').strip()
     filter_status = request.GET.get('status', '').strip()
     has_bid_only = request.GET.get('has_bid') == '1'
@@ -534,8 +534,8 @@ def auctions_list(request):
     filtered_auctions = auctions
     if filter_player:
         filtered_auctions = [row for row in filtered_auctions if filter_player.casefold() in row['player'].casefold()]
-    if filter_team:
-        filtered_auctions = [row for row in filtered_auctions if row['team'] == filter_team]
+    if filter_teams:
+        filtered_auctions = [row for row in filtered_auctions if row['team'] in set(filter_teams)]
     if filter_position:
         filtered_auctions = [row for row in filtered_auctions if row['position'] == filter_position]
     if filter_status == 'winning':
@@ -573,6 +573,9 @@ def auctions_list(request):
     query_params.pop('page', None)
     sort_query_params = query_params.copy()
     sort_query_params.pop('end_order', None)
+    saved_filters = []
+    if getattr(request, "user", None) and request.user.is_authenticated:
+        saved_filters = AuctionFilterPreset.objects.filter(user=request.user)
 
     return render(
         request,
@@ -584,7 +587,7 @@ def auctions_list(request):
             "available_teams": available_teams,
             "available_positions": available_positions,
             "filter_player": filter_player,
-            "filter_team": filter_team,
+            "filter_teams": filter_teams,
             "filter_position": filter_position,
             "filter_status": filter_status,
             "has_bid_only": has_bid_only,
@@ -602,8 +605,41 @@ def auctions_list(request):
             "account_balances": account_balances,
             "balance_error": balance_error,
             "per_page": per_page,
+            "saved_filters": saved_filters,
         },
     )
+
+
+@require_POST
+def save_auction_filter(request):
+    from django.http import QueryDict
+
+    name = request.POST.get("name", "").strip()
+    if not 1 <= len(name) <= 60:
+        messages.error(request, "Pon un nombre de entre 1 y 60 caracteres.")
+        return redirect("auctions_list")
+    supplied = QueryDict(request.POST.get("query", "").lstrip("?"))
+    allowed = {"player", "teams", "position", "status", "has_bid", "favorites", "per_page", "end_order"}
+    clean = QueryDict("", mutable=True)
+    for key in allowed:
+        for value in supplied.getlist(key):
+            if len(value) <= 180:
+                clean.appendlist(key, value)
+    AuctionFilterPreset.objects.update_or_create(user=request.user, name=name, defaults={"query_string": clean.urlencode()})
+    messages.success(request, f'Filtro "{name}" guardado.')
+    target = reverse("auctions_list")
+    return redirect(f"{target}?{clean.urlencode()}" if clean else target)
+
+
+@require_POST
+def delete_auction_filter(request):
+    preset = AuctionFilterPreset.objects.filter(user=request.user, id=request.POST.get("preset_id")).first()
+    if preset:
+        preset.delete()
+        messages.success(request, "Filtro guardado eliminado.")
+    next_path = request.POST.get("next", "")
+    auctions_path = reverse("auctions_list")
+    return redirect(next_path if next_path.startswith(auctions_path) else auctions_path)
 
 
 @require_POST
