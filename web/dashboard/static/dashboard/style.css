@@ -530,7 +530,7 @@ textarea {
 
 .auction-filters {
   display: grid;
-  grid-template-columns: 1.35fr repeat(3, minmax(120px, 1fr)) auto auto auto;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
   gap: 0.65rem;
   align-items: end;
   margin-bottom: 0.9rem;
@@ -545,14 +545,18 @@ textarea {
 .manage-saved-filters > div { position: absolute; z-index: 20; right: 0; top: calc(100% + .4rem); min-width: 220px; padding: .5rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 12px 28px rgba(15,23,42,.15); }
 .manage-saved-filters form { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .35rem; }
 .manage-saved-filters button { border: 0; background: transparent; color: #dc2626; font-size: 1.2rem; cursor: pointer; }
-.team-multiselect details { position: relative; }
+.filter-multiselect { min-width: 0; }
+.filter-multiselect details { position: relative; }
 .filter-field > span { display: block; margin-bottom: .25rem; color: var(--muted); font-size: .75rem; }
-.team-multiselect summary { display: flex; align-items: center; height: 42px; box-sizing: border-box; padding: 0 .75rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; list-style: none; }
-.team-multiselect summary::-webkit-details-marker { display: none; }
-.team-options { position: absolute; z-index: 30; top: calc(100% + .35rem); left: 0; width: max-content; min-width: 230px; max-height: 330px; overflow: auto; padding: .45rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 12px 28px rgba(15,23,42,.16); }
-.team-options label { display: flex; align-items: center; gap: .45rem; padding: .4rem .45rem; cursor: pointer; }
-.team-options label:hover { background: #eef8f6; }
-.team-options .btn { width: 100%; margin-top: .35rem; }
+.filter-multiselect summary { display: flex; align-items: center; justify-content: space-between; height: 42px; box-sizing: border-box; padding: 0 .75rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; list-style: none; white-space: nowrap; overflow: hidden; }
+.filter-multiselect summary::after { content: '⌄'; margin-left: .5rem; color: var(--muted); }
+.filter-multiselect summary::-webkit-details-marker { display: none; }
+.filter-options { position: absolute; z-index: 30; top: calc(100% + .35rem); left: 0; width: min(300px, calc(100vw - 3rem)); max-height: 330px; overflow-x: hidden; overflow-y: auto; padding: .45rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 12px 28px rgba(15,23,42,.16); }
+.filter-options label { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: .5rem; padding: .45rem; cursor: pointer; }
+.filter-options label span { min-width: 0; overflow-wrap: anywhere; line-height: 1.25; }
+.filter-options input { width: 17px; height: 17px; margin: 0; }
+.filter-options label:hover { background: #eef8f6; }
+.filter-options .btn { width: 100%; margin-top: .35rem; }
 
 .favorite-filter-control {
   display: flex;

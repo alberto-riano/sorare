@@ -200,12 +200,14 @@ class AuctionActionsTests(TestCase):
     def test_saved_filter_is_private_and_keeps_multiple_teams(self):
         user = get_user_model().objects.create_user(username="preset-user")
         self.client.force_login(user)
-        query = "teams=Real+Madrid&teams=FC+Barcelona&favorites=1&per_page=50&page=8"
+        query = "teams=Real+Madrid&teams=FC+Barcelona&positions=Defender&positions=Forward&favorites=1&per_page=50&page=8"
         response = self.client.post(reverse("save_auction_filter"), {"name": "Grandes", "query": query})
         preset = AuctionFilterPreset.objects.get(user=user, name="Grandes")
         self.assertEqual(response.status_code, 302)
         self.assertIn("teams=Real+Madrid", preset.query_string)
         self.assertIn("teams=FC+Barcelona", preset.query_string)
+        self.assertIn("positions=Defender", preset.query_string)
+        self.assertIn("positions=Forward", preset.query_string)
         self.assertNotIn("page=8", preset.query_string)
 
     def test_batch_bid_requires_final_confirmation_and_validates_every_bid(self):
@@ -264,6 +266,11 @@ class AuctionActionsTests(TestCase):
         fifty_per_page = auctions_list(RequestFactory().get("/ofertas/?per_page=50"))
         self.assertEqual(fifty_per_page["page_obj"].paginator.per_page, 50)
         self.assertEqual(len(fifty_per_page["auctions"]), 25)
+
+        multiple_values = auctions_list(RequestFactory().get("/ofertas/?teams=Equipo&teams=Otro&positions=Forward&positions=Goalkeeper"))
+        self.assertEqual(multiple_values["filter_teams"], ["Equipo", "Otro"])
+        self.assertEqual(multiple_values["filter_positions"], ["Forward", "Goalkeeper"])
+        self.assertEqual(multiple_values["filtered_count"], 25)
 
         user = get_user_model().objects.create_user(username="filter-user")
         FavoritePlayer.objects.create(user=user, player_slug="jugador-23", player_name="Jugador 23")

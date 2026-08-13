@@ -61,8 +61,8 @@
   <form method="get" class="auction-filters">
     <input type="hidden" name="end_order" value="{{ end_order }}">
     <label><span>Buscar jugador</span><input name="player" type="search" value="{{ filter_player }}" placeholder="Nombre"></label>
-    <div class="team-multiselect filter-field"><span>Equipos</span><details><summary>{% if filter_teams %}{{ filter_teams|length }} seleccionados{% else %}Todos{% endif %}</summary><div class="team-options"><label><input type="checkbox" class="all-teams"{% if not filter_teams %} checked{% endif %}> Todos</label>{% for team in available_teams %}<label><input type="checkbox" name="teams" value="{{ team }}"{% if team in filter_teams %} checked{% endif %}> {{ team }}</label>{% endfor %}<button type="submit" class="btn btn-accent btn-compact">Aplicar equipos</button></div></details></div>
-    <label><span>Posición</span><select name="position"><option value="">Todas</option>{% for position in available_positions %}<option value="{{ position }}"{% if filter_position == position %} selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
+    <div class="filter-multiselect filter-field" data-filter-group="teams"><span>Equipos</span><details><summary>{% if filter_teams %}{{ filter_teams|length }} seleccionados{% else %}Todos{% endif %}</summary><div class="filter-options"><label><input type="checkbox" class="select-all"{% if not filter_teams %} checked{% endif %}> Todos</label>{% for team in available_teams %}<label><input type="checkbox" name="teams" value="{{ team }}"{% if team in filter_teams %} checked{% endif %}><span>{{ team }}</span></label>{% endfor %}<button type="submit" class="btn btn-accent btn-compact">Aplicar</button></div></details></div>
+    <div class="filter-multiselect filter-field" data-filter-group="positions"><span>Posiciones</span><details><summary>{% if filter_positions %}{{ filter_positions|length }} seleccionadas{% else %}Todas{% endif %}</summary><div class="filter-options"><label><input type="checkbox" class="select-all"{% if not filter_positions %} checked{% endif %}> Todas</label>{% for position in available_positions %}<label><input type="checkbox" name="positions" value="{{ position }}"{% if position in filter_positions %} checked{% endif %}><span>{{ position }}</span></label>{% endfor %}<button type="submit" class="btn btn-accent btn-compact">Aplicar</button></div></details></div>
     <label class="favorites-filter"><span>Participación</span><span class="favorite-filter-control"><input type="checkbox" name="has_bid" value="1"{% if has_bid_only %} checked{% endif %}> He pujado</span></label>
     <label><span>Estado</span><select name="status"><option value="">Todos</option><option value="winning"{% if filter_status == 'winning' %} selected{% endif %}>Voy ganando</option><option value="outbid"{% if filter_status == 'outbid' %} selected{% endif %}>Me han superado</option></select></label>
     <label class="favorites-filter"><span>Favoritos</span><span class="favorite-filter-control"><input type="checkbox" name="favorites" value="1"{% if favorites_only %} checked{% endif %}> Solo favoritos <small>({{ favorite_count }})</small></span></label>
@@ -184,7 +184,7 @@
     <form method="get" class="page-jump">
       {% if filter_player %}<input type="hidden" name="player" value="{{ filter_player }}">{% endif %}
       {% for team in filter_teams %}<input type="hidden" name="teams" value="{{ team }}">{% endfor %}
-      {% if filter_position %}<input type="hidden" name="position" value="{{ filter_position }}">{% endif %}
+      {% for position in filter_positions %}<input type="hidden" name="positions" value="{{ position }}">{% endfor %}
       {% if has_bid_only %}<input type="hidden" name="has_bid" value="1">{% endif %}
       {% if filter_status %}<input type="hidden" name="status" value="{{ filter_status }}">{% endif %}
       {% if favorites_only %}<input type="hidden" name="favorites" value="1">{% endif %}
@@ -278,14 +278,17 @@ document.addEventListener('DOMContentLoaded', function () {
     var searchTimer;
     filtersForm.querySelectorAll('select, input[type="checkbox"]').forEach(function (control) {
       control.addEventListener('change', function () {
-        if (control.classList.contains('all-teams')) {
-          filtersForm.querySelectorAll('input[name="teams"]').forEach(function (team) { team.checked = false; });
-        } else if (control.name === 'teams') {
-          filtersForm.querySelector('.all-teams').checked = false;
-        }
-        if (control.name === 'teams' || control.classList.contains('all-teams')) {
-          var selectedCount = filtersForm.querySelectorAll('input[name="teams"]:checked').length;
-          filtersForm.querySelector('.team-multiselect summary').textContent = selectedCount ? selectedCount + ' seleccionados' : 'Todos';
+        var multiselect = control.closest('.filter-multiselect');
+        if (multiselect) {
+          var group = multiselect.dataset.filterGroup;
+          if (control.classList.contains('select-all')) {
+            multiselect.querySelectorAll('input[name="' + group + '"]').forEach(function (option) { option.checked = false; });
+          } else {
+            multiselect.querySelector('.select-all').checked = false;
+          }
+          var selectedCount = multiselect.querySelectorAll('input[name="' + group + '"]:checked').length;
+          var emptyLabel = group === 'positions' ? 'Todas' : 'Todos';
+          multiselect.querySelector('summary').textContent = selectedCount ? selectedCount + (group === 'positions' ? ' seleccionadas' : ' seleccionados') : emptyLabel;
           return;
         }
         filtersForm.submit();

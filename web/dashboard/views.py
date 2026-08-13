@@ -513,7 +513,7 @@ def auctions_list(request):
     available_positions = sorted({auction['position'] for auction in auctions})
     filter_player = request.GET.get('player', '').strip()
     filter_teams = [team.strip() for team in request.GET.getlist('teams') if team.strip()]
-    filter_position = request.GET.get('position', '').strip()
+    filter_positions = [position.strip() for position in request.GET.getlist('positions') if position.strip()]
     filter_status = request.GET.get('status', '').strip()
     has_bid_only = request.GET.get('has_bid') == '1'
     favorites_only = request.GET.get('favorites') == '1'
@@ -536,8 +536,8 @@ def auctions_list(request):
         filtered_auctions = [row for row in filtered_auctions if filter_player.casefold() in row['player'].casefold()]
     if filter_teams:
         filtered_auctions = [row for row in filtered_auctions if row['team'] in set(filter_teams)]
-    if filter_position:
-        filtered_auctions = [row for row in filtered_auctions if row['position'] == filter_position]
+    if filter_positions:
+        filtered_auctions = [row for row in filtered_auctions if row['position'] in set(filter_positions)]
     if filter_status == 'winning':
         filtered_auctions = [row for row in filtered_auctions if row['is_winning']]
     elif filter_status == 'outbid':
@@ -588,7 +588,7 @@ def auctions_list(request):
             "available_positions": available_positions,
             "filter_player": filter_player,
             "filter_teams": filter_teams,
-            "filter_position": filter_position,
+            "filter_positions": filter_positions,
             "filter_status": filter_status,
             "has_bid_only": has_bid_only,
             "favorites_only": favorites_only,
@@ -619,7 +619,7 @@ def save_auction_filter(request):
         messages.error(request, "Pon un nombre de entre 1 y 60 caracteres.")
         return redirect("auctions_list")
     supplied = QueryDict(request.POST.get("query", "").lstrip("?"))
-    allowed = {"player", "teams", "position", "status", "has_bid", "favorites", "per_page", "end_order"}
+    allowed = {"player", "teams", "positions", "status", "has_bid", "favorites", "per_page", "end_order"}
     clean = QueryDict("", mutable=True)
     for key in allowed:
         for value in supplied.getlist(key):
