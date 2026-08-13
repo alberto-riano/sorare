@@ -788,7 +788,8 @@ textarea {
 .bid-modal-card { position: relative; width: min(620px, 100%); max-height: 85vh; overflow: auto; background: var(--panel); border-radius: 16px; padding: 1.4rem; box-shadow: 0 24px 60px rgba(0,0,0,.3); }
 .bid-modal-close { position: absolute; top: .6rem; right: .8rem; border: 0; background: transparent; font-size: 1.8rem; cursor: pointer; }
 .bid-review-list { display: grid; gap: .5rem; margin: 1rem 0; }
-.review-credit-all { display: inline-flex; align-items: center; gap: .5rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: #f8faf9; font-weight: 700; cursor: pointer; }
+.review-credit-all { display: inline-flex; width: auto; max-width: 100%; align-items: center; gap: .5rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: #f8faf9; font-weight: 700; cursor: pointer; }
+.review-credit-all span { white-space: nowrap; }
 .bid-review-item { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: .8rem; padding: .7rem; border: 1px solid var(--line); border-radius: 10px; }
 .bid-review-item small { color: var(--muted); }
 .bid-review-visuals { position: relative; display: block; width: 46px; height: 40px; }

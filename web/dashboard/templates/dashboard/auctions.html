@@ -193,7 +193,6 @@
     <div id="bid-review-list" class="bid-review-list"></div>
     <form id="batch-bid-submit" method="post" action="{% url 'enqueue_batch_bids' %}">
       {% csrf_token %}
-      <input type="hidden" name="action" value="place_batch_bids">
       <input type="hidden" id="batch-bids-payload" name="bids">
       <input type="hidden" name="confirm" value="on">
       <div class="bid-modal-actions">
@@ -388,9 +387,11 @@ document.addEventListener('DOMContentLoaded', function () {
     var formData = new FormData(batchSubmitForm);
     formData.set('request_key', requestKey);
     try {
-      var response = await fetch(batchSubmitForm.action, {
+      var response = await fetch(batchSubmitForm.getAttribute('action'), {
         method: 'POST', body: formData, headers: {'X-Requested-With': 'XMLHttpRequest'}
       });
+      var contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) throw new Error('El servidor devolvió una respuesta inesperada (HTTP ' + response.status + ').');
       var payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'No se pudo poner el lote en cola.');
       addPendingJob(payload.job_id);
