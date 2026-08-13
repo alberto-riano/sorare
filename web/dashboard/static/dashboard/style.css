@@ -815,15 +815,17 @@ textarea {
 .bid-modal[hidden] { display: none; }
 .bid-modal { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 1rem; }
 .bid-modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, .65); }
-.bid-modal-card { position: relative; width: min(620px, 100%); max-height: 85vh; overflow: auto; background: var(--panel); border-radius: 16px; padding: 1.4rem; box-shadow: 0 24px 60px rgba(0,0,0,.3); }
+.bid-modal-card { position: relative; box-sizing: border-box; width: min(620px, 100%); max-width: 100%; max-height: 85vh; overflow-x: hidden; overflow-y: auto; background: var(--panel); border-radius: 16px; padding: 1.4rem; box-shadow: 0 24px 60px rgba(0,0,0,.3); }
 .bid-modal-close { position: absolute; top: .6rem; right: .8rem; border: 0; background: transparent; font-size: 1.8rem; cursor: pointer; }
 .bid-review-list { display: grid; gap: .5rem; margin: 1rem 0; }
-.review-credit-all { display: inline-flex; width: auto; max-width: 100%; align-items: center; gap: .5rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: #f8faf9; font-weight: 700; cursor: pointer; }
-.review-credit-all span { white-space: nowrap; }
+.review-credit-all { display: inline-flex; width: fit-content; max-width: 100%; box-sizing: border-box; align-items: center; gap: .5rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: #f8faf9; font-weight: 700; cursor: pointer; }
+.review-credit-all input, .bid-payment-choice input { flex: 0 0 auto; width: 1rem; height: 1rem; margin: 0; padding: 0; }
+.review-credit-all span { color: var(--ink); white-space: normal; }
 .bid-payment-summary { display: grid; gap: .65rem; margin: .85rem 0; }
 .bid-payment-choice { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; font-weight: 700; }
 .bid-payment-choice > span { margin-right: .25rem; }
-.bid-payment-choice label { display: inline-flex; align-items: center; gap: .35rem; padding: .48rem .7rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; cursor: pointer; }
+.bid-payment-choice label { display: inline-flex; width: auto; align-items: center; gap: .45rem; padding: .48rem .7rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; cursor: pointer; white-space: nowrap; }
+.bid-payment-choice label span { color: inherit; }
 .bid-payment-choice label:has(input:checked) { border-color: var(--accent); color: var(--accent); background: #eef8f6; }
 .payment-currency-help { color: var(--muted); }
 .modal-balances { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
@@ -1105,6 +1107,11 @@ pre {
   .account-balance-strip { display: grid; grid-template-columns: repeat(3, 1fr); }
   .balance-heading, .balance-unavailable { grid-column: 1 / -1; }
   .balance-item { min-width: 0; padding: .6rem; }
+  .bid-modal { padding: .65rem; }
+  .bid-modal-card { padding: 1.15rem; }
+  .bid-payment-choice { align-items: stretch; }
+  .bid-payment-choice > span { flex-basis: 100%; }
+  .modal-balances { grid-template-columns: 1fr; }
   .field-grid {
     grid-template-columns: 1fr;
   }
