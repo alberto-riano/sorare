@@ -66,6 +66,31 @@ def graphql_request(query, variables=None, headers=None):
     return data['data']
 
 
+def get_account_balances(headers=None):
+    """Devuelve los saldos disponibles de la cuenta autenticada."""
+    query = '''
+    query AccountBalances {
+      currentUser {
+        availableBalances {
+          eurCents { eurCents }
+          wei { wei }
+        }
+        conversionCreditsMaxDiscount(sport: FOOTBALL) { eurCents }
+      }
+    }
+    '''
+    current_user = (graphql_request(query, headers=headers).get('currentUser') or {})
+    available = current_user.get('availableBalances') or {}
+    eur_cents = ((available.get('eurCents') or {}).get('eurCents') or 0)
+    wei = ((available.get('wei') or {}).get('wei') or 0)
+    credit_cents = ((current_user.get('conversionCreditsMaxDiscount') or {}).get('eurCents') or 0)
+    return {
+        'eur': int(eur_cents) / 100,
+        'eth': int(wei) / 1e18,
+        'credits_eur': int(credit_cents) / 100,
+    }
+
+
 def search_players_by_name(query_text, headers=None):
     """Busca jugadores por nombre usando `searchPlayers`.
 

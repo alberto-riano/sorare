@@ -9,6 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import HttpResponse, JsonResponse
 
 from django.contrib import messages
+from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.http import FileResponse, Http404
@@ -484,6 +485,16 @@ def auctions_list(request):
         messages.error(request, f"Error al cargar subastas: {error}")
     
     cache_metadata = listar_subastas.load_auction_cache() or {}
+    balance_cache = cache.get("sorare_account_balances")
+    if balance_cache is None:
+        try:
+            from sorare_utils import build_headers, get_account_balances
+            balance_cache = {"balances": get_account_balances(headers=build_headers()), "error": None}
+        except (Exception, SystemExit):
+            balance_cache = {"balances": None, "error": "No se pudo consultar ahora"}
+        cache.set("sorare_account_balances", balance_cache, 60)
+    account_balances = balance_cache["balances"]
+    balance_error = balance_cache["error"]
     madrid = ZoneInfo('Europe/Madrid')
 
     def market_timestamp(value):
@@ -550,7 +561,13 @@ def auctions_list(request):
         else:
             auction['end_date_madrid'] = end_at.strftime('%d/%m/%Y %H:%M')
 
-    paginator = Paginator(filtered_auctions, 20)
+    try:
+        per_page = int(request.GET.get('per_page', 20))
+    except (TypeError, ValueError):
+        per_page = 20
+    if per_page not in {20, 50, 100}:
+        per_page = 20
+    paginator = Paginator(filtered_auctions, per_page)
     page_obj = paginator.get_page(request.GET.get('page'))
     query_params = request.GET.copy()
     query_params.pop('page', None)
@@ -582,6 +599,9 @@ def auctions_list(request):
             "market_updated_at": market_timestamp(cache_metadata.get('updated_at')),
             "last_new_cards_at": market_timestamp(cache_metadata.get('last_new_cards_at')),
             "last_new_cards_count": cache_metadata.get('new_cards_count', 0),
+            "account_balances": account_balances,
+            "balance_error": balance_error,
+            "per_page": per_page,
         },
     )
 

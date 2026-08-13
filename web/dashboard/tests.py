@@ -249,6 +249,10 @@ class AuctionActionsTests(TestCase):
         self.assertEqual(descending["page_obj"].number, 2)
         self.assertEqual(descending["auctions"][0]["end_date"], "2026-08-12T04:00:00Z")
 
+        fifty_per_page = auctions_list(RequestFactory().get("/ofertas/?per_page=50"))
+        self.assertEqual(fifty_per_page["page_obj"].paginator.per_page, 50)
+        self.assertEqual(len(fifty_per_page["auctions"]), 25)
+
         user = get_user_model().objects.create_user(username="filter-user")
         FavoritePlayer.objects.create(user=user, player_slug="jugador-23", player_name="Jugador 23")
         favorite_request = RequestFactory().get("/ofertas/?favorites=1")

@@ -519,6 +519,14 @@ textarea {
 .market-sync-status small { display: flex; align-items: center; gap: .35rem; white-space: nowrap; }
 .market-sync-status i { width: .9rem; color: var(--accent); text-align: center; }
 .market-sync-status strong { color: var(--ink); font-weight: 600; }
+.account-balance-strip { display: flex; align-items: stretch; gap: .65rem; margin-bottom: 1rem; }
+.balance-heading, .balance-item, .balance-unavailable { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: .65rem .9rem; }
+.balance-heading { gap: .5rem; color: var(--muted); font-weight: 700; }
+.balance-heading i { color: var(--accent); }
+.balance-item { min-width: 125px; flex-direction: column; align-items: flex-start; gap: .12rem; }
+.balance-item small { color: var(--muted); font-size: .68rem; font-weight: 700; letter-spacing: .08em; }
+.balance-item strong { font-family: 'IBM Plex Mono', monospace; }
+.balance-unavailable { color: var(--muted); }
 
 .auction-filters {
   display: grid;
@@ -1062,6 +1070,9 @@ pre {
 }
 
 @media (max-width: 780px) {
+  .account-balance-strip { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .balance-heading, .balance-unavailable { grid-column: 1 / -1; }
+  .balance-item { min-width: 0; padding: .6rem; }
   .field-grid {
     grid-template-columns: 1fr;
   }

@@ -31,6 +31,17 @@
   </form>
 </section>
 
+<section class="account-balance-strip reveal" style="animation-delay: 150ms;" aria-label="Saldo disponible para pujar">
+  <div class="balance-heading"><i class="fas fa-wallet"></i><span>Disponible para pujar</span></div>
+  {% if account_balances %}
+    <div class="balance-item"><small>EUR</small><strong>{{ account_balances.eur|floatformat:2 }} €</strong></div>
+    <div class="balance-item"><small>ETH</small><strong>{{ account_balances.eth|floatformat:6 }} ETH</strong></div>
+    <div class="balance-item"><small>Créditos</small><strong>{{ account_balances.credits_eur|floatformat:2 }} €</strong></div>
+  {% else %}
+    <span class="balance-unavailable">{{ balance_error|default:"Saldo no disponible" }}</span>
+  {% endif %}
+</section>
+
 {% if not loading and not error %}
 <section class="panel reveal" style="animation-delay: 200ms;">
   <div class="table-head">
@@ -45,6 +56,7 @@
     <label class="favorites-filter"><span>Participación</span><span class="favorite-filter-control"><input type="checkbox" name="has_bid" value="1"{% if has_bid_only %} checked{% endif %}> He pujado</span></label>
     <label><span>Estado</span><select name="status"><option value="">Todos</option><option value="winning"{% if filter_status == 'winning' %} selected{% endif %}>Voy ganando</option><option value="outbid"{% if filter_status == 'outbid' %} selected{% endif %}>Me han superado</option></select></label>
     <label class="favorites-filter"><span>Favoritos</span><span class="favorite-filter-control"><input type="checkbox" name="favorites" value="1"{% if favorites_only %} checked{% endif %}> Solo favoritos <small>({{ favorite_count }})</small></span></label>
+    <label><span>Por página</span><select name="per_page"><option value="20"{% if per_page == 20 %} selected{% endif %}>20</option><option value="50"{% if per_page == 50 %} selected{% endif %}>50</option><option value="100"{% if per_page == 100 %} selected{% endif %}>100</option></select></label>
     <div class="filter-actions"><a class="btn btn-secondary btn-compact" href="{% url 'auctions_list' %}">Limpiar</a></div>
   </form>
   
@@ -166,6 +178,7 @@
       {% if has_bid_only %}<input type="hidden" name="has_bid" value="1">{% endif %}
       {% if filter_status %}<input type="hidden" name="status" value="{{ filter_status }}">{% endif %}
       {% if favorites_only %}<input type="hidden" name="favorites" value="1">{% endif %}
+      <input type="hidden" name="per_page" value="{{ per_page }}">
       <input type="hidden" name="end_order" value="{{ end_order }}">
       <label for="page-number">Página</label>
       <input id="page-number" name="page" type="number" min="1" max="{{ page_obj.paginator.num_pages }}" value="{{ page_obj.number }}" aria-label="Número de página">
