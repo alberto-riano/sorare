@@ -788,6 +788,7 @@ textarea {
 .bid-modal-card { position: relative; width: min(620px, 100%); max-height: 85vh; overflow: auto; background: var(--panel); border-radius: 16px; padding: 1.4rem; box-shadow: 0 24px 60px rgba(0,0,0,.3); }
 .bid-modal-close { position: absolute; top: .6rem; right: .8rem; border: 0; background: transparent; font-size: 1.8rem; cursor: pointer; }
 .bid-review-list { display: grid; gap: .5rem; margin: 1rem 0; }
+.review-credit-all { display: inline-flex; align-items: center; gap: .5rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px; background: #f8faf9; font-weight: 700; cursor: pointer; }
 .bid-review-item { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: .8rem; padding: .7rem; border: 1px solid var(--line); border-radius: 10px; }
 .bid-review-item small { color: var(--muted); }
 .bid-review-visuals { position: relative; display: block; width: 46px; height: 40px; }
@@ -805,6 +806,17 @@ textarea {
 .bid-submit-progress { display: grid; grid-template-columns: auto 1fr; column-gap: .65rem; align-items: center; margin-top: 1rem; padding: .8rem; border-radius: 10px; background: #eef8f6; color: var(--ink); }
 .bid-submit-progress[hidden] { display: none; }
 .bid-submit-progress small { grid-column: 2; color: var(--muted); }
+.bid-job-notifications { position: fixed; right: 1rem; bottom: 1rem; z-index: 1100; display: grid; gap: .65rem; width: min(430px, calc(100vw - 2rem)); pointer-events: none; }
+.bid-job-notice { display: grid; grid-template-columns: auto 1fr auto; gap: .7rem; align-items: start; padding: .9rem 1rem; border: 1px solid var(--line); border-left: 5px solid var(--accent); border-radius: 12px; background: #fff; box-shadow: 0 12px 35px rgba(15, 23, 42, .18); pointer-events: auto; }
+.bid-job-notice.is-success { border-left-color: #16a34a; }
+.bid-job-notice.is-error { border-left-color: #dc2626; }
+.bid-job-notice.is-pending > i { color: var(--accent); }
+.bid-job-notice.is-success > i { color: #16a34a; }
+.bid-job-notice.is-error > i { color: #dc2626; }
+.bid-job-notice div { display: grid; gap: .2rem; min-width: 0; }
+.bid-job-notice span { color: var(--muted); font-size: .84rem; }
+.bid-job-notice ul { margin: .35rem 0 0; padding-left: 1.1rem; font-size: .84rem; }
+.bid-job-notice button { border: 0; background: transparent; color: var(--muted); font-size: 1.25rem; line-height: 1; cursor: pointer; }
 .bid-spinner { grid-row: 1 / 3; width: 22px; height: 22px; border: 3px solid #b7ddd7; border-top-color: var(--accent); border-radius: 50%; animation: bid-spin .75s linear infinite; }
 @keyframes bid-spin { to { transform: rotate(360deg); } }
 

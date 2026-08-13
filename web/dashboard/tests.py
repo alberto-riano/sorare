@@ -10,7 +10,8 @@ from django.urls import reverse
 
 import listar_subastas
 from dashboard.forms import BatchBidForm, InlineBidForm
-from dashboard.models import FavoritePlayer
+from dashboard.management.commands.process_bid_queue import process_next_job
+from dashboard.models import BidBatchItem, BidBatchJob, FavoritePlayer
 from dashboard.views import auction_price_history, auctions_list
 from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler
 
@@ -144,22 +145,43 @@ class AuctionActionsTests(TestCase):
 
     @patch("dashboard.views.run_bid_scheduler")
     @patch("listar_subastas.load_auction_cache")
-    def test_batch_bid_failure_shows_player_and_real_description(self, load_cache, run_bid):
+    def test_batch_bid_is_queued_without_running_in_web_request(self, load_cache, run_bid):
         user = get_user_model().objects.create_user(username="bid-error-user")
         self.client.force_login(user)
         load_cache.return_value = {"auctions": [{"auction_id": "EnglishAuction:test", "player": "Oyarzabal"}]}
-        run_bid.return_value = ScriptResult("mock", 2, "", "❌ La puja mínima es 15,00 €")
         bids = json.dumps([{"auction_id": "EnglishAuction:test", "euros": "12.50", "use_credit": True}])
 
-        response = self.client.post(f'{reverse("auctions_list")}?page=5&team=Real+Sociedad', {
-            "action": "place_batch_bids", "bids": bids, "confirm": "on",
+        response = self.client.post(reverse("enqueue_batch_bids"), {
+            "bids": bids, "confirm": "on", "request_key": "39ed4b7a-28cd-44d4-8e45-a009ac9db384",
         })
 
-        rendered_messages = [str(message) for message in get_messages(response.wsgi_request)]
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], f'{reverse("auctions_list")}?page=5&team=Real+Sociedad')
-        self.assertIn("Oyarzabal: La puja mínima es 15,00 €", rendered_messages)
-        self.assertFalse(any("posiciones" in message for message in rendered_messages))
+        self.assertEqual(response.status_code, 202)
+        run_bid.assert_not_called()
+        job = BidBatchJob.objects.get(id=response.json()["job_id"])
+        self.assertEqual(job.status, BidBatchJob.Status.QUEUED)
+        self.assertEqual(job.items.get().player_name, "Oyarzabal")
+
+    @patch("dashboard.management.commands.process_bid_queue.run_bid_scheduler")
+    def test_worker_preserves_detailed_bid_failure(self, run_bid):
+        user = get_user_model().objects.create_user(username="worker-user")
+        job = BidBatchJob.objects.create(user=user, total_count=1)
+        BidBatchItem.objects.create(job=job, position=1, auction_id="EnglishAuction:test", player_name="Oyarzabal", euros="12.50")
+        run_bid.return_value = ScriptResult("mock", 2, "", "❌ La puja mínima es 15,00 €")
+
+        process_next_job()
+
+        job.refresh_from_db()
+        item = job.items.get()
+        self.assertEqual(job.status, BidBatchJob.Status.FAILED)
+        self.assertEqual(item.error, "La puja mínima es 15,00 €")
+
+    def test_bid_status_does_not_expose_another_users_jobs(self):
+        owner = get_user_model().objects.create_user(username="job-owner")
+        viewer = get_user_model().objects.create_user(username="job-viewer")
+        job = BidBatchJob.objects.create(user=owner, total_count=1)
+        self.client.force_login(viewer)
+        response = self.client.get(reverse("bid_jobs_status"), {"ids": str(job.id)})
+        self.assertEqual(response.json()["jobs"], [])
 
     def test_favorite_toggle_is_persisted_per_user(self):
         user = get_user_model().objects.create_user(username="favorites-user", password="test-password")

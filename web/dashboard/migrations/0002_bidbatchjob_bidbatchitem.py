@@ -1,0 +1,40 @@
+import django.db.models.deletion
+import uuid
+from django.conf import settings
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+    dependencies = [("dashboard", "0001_initial"), migrations.swappable_dependency(settings.AUTH_USER_MODEL)]
+    operations = [
+        migrations.CreateModel(
+            name="BidBatchJob",
+            fields=[
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("request_key", models.UUIDField(default=uuid.uuid4, editable=False, unique=True)),
+                ("status", models.CharField(choices=[("queued", "En cola"), ("running", "Procesando"), ("succeeded", "Completada"), ("partial", "Parcial"), ("failed", "Fallida")], db_index=True, default="queued", max_length=12)),
+                ("total_count", models.PositiveSmallIntegerField(default=0)),
+                ("success_count", models.PositiveSmallIntegerField(default=0)),
+                ("failure_count", models.PositiveSmallIntegerField(default=0)),
+                ("created_at", models.DateTimeField(auto_now_add=True, db_index=True)),
+                ("started_at", models.DateTimeField(blank=True, null=True)),
+                ("finished_at", models.DateTimeField(blank=True, null=True)),
+                ("user", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="sorare_bid_jobs", to=settings.AUTH_USER_MODEL)),
+            ], options={"ordering": ("created_at",)},
+        ),
+        migrations.CreateModel(
+            name="BidBatchItem",
+            fields=[
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
+                ("position", models.PositiveSmallIntegerField()),
+                ("auction_id", models.CharField(max_length=200)),
+                ("player_name", models.CharField(max_length=180)),
+                ("euros", models.DecimalField(decimal_places=2, max_digits=8)),
+                ("use_credit", models.BooleanField(default=True)),
+                ("status", models.CharField(choices=[("queued", "En cola"), ("running", "Procesando"), ("succeeded", "Completada"), ("failed", "Fallida")], default="queued", max_length=12)),
+                ("error", models.TextField(blank=True)),
+                ("job", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="items", to="dashboard.bidbatchjob")),
+            ], options={"ordering": ("position",)},
+        ),
+        migrations.AddConstraint(model_name="bidbatchitem", constraint=models.UniqueConstraint(fields=("job", "position"), name="unique_bid_job_position")),
+    ]

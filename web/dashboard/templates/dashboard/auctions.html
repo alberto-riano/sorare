@@ -188,9 +188,10 @@
   <section class="bid-modal-card" role="dialog" aria-modal="true" aria-labelledby="bid-review-title">
     <button type="button" class="bid-modal-close" data-close-modal aria-label="Cerrar">&times;</button>
     <h2 id="bid-review-title"><i class="fas fa-shield-halved"></i> Confirmar pujas</h2>
-    <p>Revisa todos los importes. Al confirmar, las pujas se enviarán inmediatamente.</p>
+    <p>Revisa los importes. Podrás seguir preparando otras pujas mientras se envían.</p>
+    <label class="review-credit-all"><input type="checkbox" id="review-credit-all" checked> <span>Usar créditos en todas</span></label>
     <div id="bid-review-list" class="bid-review-list"></div>
-    <form id="batch-bid-submit" method="post">
+    <form id="batch-bid-submit" method="post" action="{% url 'enqueue_batch_bids' %}">
       {% csrf_token %}
       <input type="hidden" name="action" value="place_batch_bids">
       <input type="hidden" id="batch-bids-payload" name="bids">
@@ -202,11 +203,12 @@
       <div id="bid-submit-progress" class="bid-submit-progress" role="status" aria-live="polite" hidden>
         <span class="bid-spinner" aria-hidden="true"></span>
         <strong>Enviando pujas…</strong>
-        <small>No cierres esta ventana hasta que termine.</small>
+        <small>Guardando el lote en la cola…</small>
       </div>
     </form>
   </section>
 </div>
+<aside id="bid-job-notifications" class="bid-job-notifications" aria-live="polite" aria-atomic="false"></aside>
 {% elif loading %}
 <section class="panel reveal" style="animation-delay: 200ms;">
   <div class="processing-indicator is-visible">
@@ -268,6 +270,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var countLabel = document.getElementById('batch-bid-count');
   var modal = document.getElementById('bid-review-modal');
   var reviewedBids = [];
+  var creditAll = document.getElementById('review-credit-all');
 
   function bidFromControl(control) {
       var input = control.querySelector('.batch-bid-euros');
@@ -311,15 +314,30 @@ document.addEventListener('DOMContentLoaded', function () {
       if (bid.team_image) teamImage.querySelector('img').src = bid.team_image;
       row.querySelector('strong').textContent = bid.player;
       row.querySelector('.bid-review-price').textContent = bid.euros + ' €';
-      row.querySelector('.review-credit input').addEventListener('change', function (event) { bid.use_credit = event.target.checked; });
+      row.querySelector('.review-credit input').addEventListener('change', function (event) {
+        bid.use_credit = event.target.checked;
+        var values = Array.from(document.querySelectorAll('.bid-review-item .review-credit input')).map(function (input) { return input.checked; });
+        creditAll.checked = values.every(Boolean);
+        creditAll.indeterminate = values.some(Boolean) && !creditAll.checked;
+      });
       list.appendChild(row);
     });
+    creditAll.checked = bids.every(function (bid) { return bid.use_credit; });
+    creditAll.indeterminate = bids.some(function (bid) { return bid.use_credit; }) && !creditAll.checked;
     document.getElementById('batch-bids-payload').value = JSON.stringify(bids.map(function (bid) {
       return {auction_id: bid.auction_id, euros: bid.euros, use_credit: bid.use_credit};
     }));
     modal.hidden = false;
     document.body.classList.add('modal-open');
   }
+
+  creditAll.addEventListener('change', function () {
+    document.querySelectorAll('.bid-review-item .review-credit input').forEach(function (checkbox, index) {
+      checkbox.checked = creditAll.checked;
+      if (reviewedBids[index]) reviewedBids[index].use_credit = creditAll.checked;
+    });
+    creditAll.indeterminate = false;
+  });
 
   if (reviewButton) reviewButton.addEventListener('click', function () { openBidReview(selectedBids()); });
 
@@ -345,9 +363,9 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   var batchSubmitForm = document.getElementById('batch-bid-submit');
-  if (batchSubmitForm) batchSubmitForm.addEventListener('submit', function (event) {
+  if (batchSubmitForm) batchSubmitForm.addEventListener('submit', async function (event) {
+    event.preventDefault();
     if (batchSubmitForm.dataset.submitting === 'true') {
-      event.preventDefault();
       return;
     }
     batchSubmitForm.dataset.submitting = 'true';
@@ -361,8 +379,97 @@ document.addEventListener('DOMContentLoaded', function () {
     modal.querySelectorAll('button').forEach(function (button) { button.disabled = true; });
     var progress = document.getElementById('bid-submit-progress');
     progress.hidden = false;
-    progress.querySelector('strong').textContent = 'Enviando ' + reviewedBids.length + (reviewedBids.length === 1 ? ' puja…' : ' pujas…');
+    progress.querySelector('strong').textContent = 'Añadiendo ' + reviewedBids.length + (reviewedBids.length === 1 ? ' puja a la cola…' : ' pujas a la cola…');
+    var requestKey = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() :
+      'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (character) {
+        var random = Math.random() * 16 | 0;
+        return (character === 'x' ? random : (random & 3 | 8)).toString(16);
+      });
+    var formData = new FormData(batchSubmitForm);
+    formData.set('request_key', requestKey);
+    try {
+      var response = await fetch(batchSubmitForm.action, {
+        method: 'POST', body: formData, headers: {'X-Requested-With': 'XMLHttpRequest'}
+      });
+      var payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'No se pudo poner el lote en cola.');
+      addPendingJob(payload.job_id);
+      reviewedBids.forEach(function (bid) {
+        var control = bidControls.find(function (candidate) { return candidate.dataset.auctionId === bid.auction_id; });
+        if (control) control.querySelector('.batch-bid-euros').value = '';
+      });
+      modal.hidden = true;
+      document.body.classList.remove('modal-open');
+      showJobNotice('pending', '<strong>' + payload.total + (payload.total === 1 ? ' puja enviándose' : ' pujas enviándose') + '</strong><span>Puedes seguir preparando otras mientras terminan.</span>', 'job-' + payload.job_id);
+      updateBidCount();
+      pollBidJobs();
+    } catch (error) {
+      showJobNotice('error', '<strong>No se pudo iniciar el envío</strong><span>' + escapeHtml(error.message) + '</span>');
+    } finally {
+      batchSubmitForm.dataset.submitting = 'false';
+      modal.classList.remove('is-submitting');
+      modal.querySelectorAll('button').forEach(function (button) { button.disabled = false; });
+      progress.hidden = true;
+    }
   });
+
+  var jobsStorageKey = 'sorarePendingBidJobs';
+  var polling = false;
+  function pendingJobIds() {
+    try { return JSON.parse(window.localStorage.getItem(jobsStorageKey) || '[]').filter(Number.isInteger); }
+    catch (_error) { return []; }
+  }
+  function savePendingJobs(ids) { window.localStorage.setItem(jobsStorageKey, JSON.stringify(ids)); }
+  function addPendingJob(id) {
+    var ids = pendingJobIds();
+    if (!ids.includes(id)) ids.push(id);
+    savePendingJobs(ids.slice(-30));
+  }
+  function escapeHtml(value) {
+    var node = document.createElement('span'); node.textContent = value || ''; return node.innerHTML;
+  }
+  function showJobNotice(kind, html, id) {
+    var container = document.getElementById('bid-job-notifications');
+    var notice = id ? document.getElementById(id) : null;
+    if (!notice) { notice = document.createElement('div'); notice.className = 'bid-job-notice'; if (id) notice.id = id; container.appendChild(notice); }
+    notice.className = 'bid-job-notice is-' + kind;
+    notice.innerHTML = '<i class="fas ' + (kind === 'success' ? 'fa-circle-check' : kind === 'pending' ? 'fa-spinner fa-spin' : 'fa-circle-exclamation') + '"></i><div>' + html + '</div><button type="button" aria-label="Cerrar">&times;</button>';
+    notice.querySelector('button').addEventListener('click', function () { notice.remove(); });
+  }
+  async function pollBidJobs() {
+    if (polling) return;
+    var ids = pendingJobIds();
+    if (!ids.length) return;
+    polling = true;
+    try {
+      var response = await fetch('{% url "bid_jobs_status" %}?ids=' + ids.join(','), {headers: {'X-Requested-With': 'XMLHttpRequest'}});
+      if (!response.ok) throw new Error('No se pudo consultar el estado');
+      var payload = await response.json();
+      var finished = [];
+      payload.jobs.forEach(function (job) {
+        if (job.status === 'queued' || job.status === 'running') {
+          showJobNotice('pending', '<strong>' + job.total + (job.total === 1 ? ' puja en proceso' : ' pujas en proceso') + '</strong><span>Te avisaremos al terminar.</span>', 'job-' + job.id);
+          return;
+        }
+        finished.push(job.id);
+        var failures = job.items.filter(function (item) { return item.status === 'failed'; });
+        if (!failures.length) {
+          showJobNotice('success', '<strong>' + job.successes + (job.successes === 1 ? ' puja enviada correctamente' : ' pujas enviadas correctamente') + '</strong>', 'job-' + job.id);
+        } else {
+          var details = failures.map(function (item) { return '<li><strong>' + escapeHtml(item.player) + ':</strong> ' + escapeHtml(item.error) + '</li>'; }).join('');
+          var summary = job.successes ? job.successes + ' correctas y ' + job.failures + ' fallidas' : 'No se pudieron enviar las pujas';
+          showJobNotice('error', '<strong>' + summary + '</strong><ul>' + details + '</ul>', 'job-' + job.id);
+        }
+      });
+      if (finished.length) savePendingJobs(ids.filter(function (id) { return !finished.includes(id); }));
+    } catch (_error) {
+      // Un fallo temporal no elimina el seguimiento; se volverá a consultar.
+    } finally {
+      polling = false;
+      if (pendingJobIds().length) window.setTimeout(pollBidJobs, 2000);
+    }
+  }
+  pollBidJobs();
 
   function toggleHistory(button) {
     var row = document.getElementById(button.dataset.target);

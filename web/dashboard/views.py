@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -9,11 +10,13 @@ from django.http import HttpResponse, JsonResponse
 
 from django.contrib import messages
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.http import FileResponse, Http404
 from django.shortcuts import redirect, render
+from django.views.decorators.http import require_GET, require_POST
 
 from web_services.config_files import SorarePaths, load_telegram_alert_payload, save_telegram_alert_payload
-from web_services.process_runner import BidRequest, bid_error_message, run_bid_scheduler, run_telegram_alert
+from web_services.process_runner import BidRequest, run_bid_scheduler, run_telegram_alert
 from web_services.sales_excel import (
     excel_path_for_rarity,
     execute_sales,
@@ -25,7 +28,7 @@ from web_services.sales_excel import (
 )
 
 from .forms import BatchBidForm, BidScheduleForm, ExportCardsForm, InlineBidForm, TelegramSettingsForm
-from .models import FavoritePlayer
+from .models import BidBatchItem, BidBatchJob, FavoritePlayer
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PATHS = SorarePaths(repo_root=REPO_ROOT)
@@ -464,38 +467,6 @@ def auctions_list(request):
             return redirect(request.get_full_path())
         messages.error(request, "No se envió la puja: revisa el importe y la confirmación.")
 
-    if request.method == "POST" and request.POST.get("action") == "place_batch_bids":
-        batch_form = BatchBidForm(request.POST)
-        if batch_form.is_valid():
-            successful = 0
-            failures = []
-            cached_market = listar_subastas.load_auction_cache() or {}
-            player_by_auction = {
-                row.get("auction_id"): row.get("player", "Jugador desconocido")
-                for row in cached_market.get("auctions", [])
-            }
-            for index, data in enumerate(batch_form.cleaned_data["bids"], start=1):
-                result = run_bid_scheduler(
-                    PATHS,
-                    BidRequest(
-                        identifier=data["auction_id"], euros=str(data["euros"]), hora="",
-                        now=True, sniper=False, background=False,
-                        use_credit=bool(data["use_credit"]),
-                    ),
-                )
-                if result.exit_code == 0:
-                    successful += 1
-                else:
-                    player = player_by_auction.get(data["auction_id"], f"Puja {index}")
-                    failures.append(f"{player}: {bid_error_message(result)}")
-            if successful:
-                messages.success(request, f"Se enviaron correctamente {successful} pujas.")
-            if failures:
-                for failure in failures:
-                    messages.error(request, failure)
-            return redirect(request.get_full_path())
-        messages.error(request, "No se envió ninguna puja: revisa el resumen y vuelve a confirmar.")
-
     try:
         if request.method == "POST" and request.POST.get("action") == "refresh_market":
             listar_subastas.refresh_auction_cache(force_full=True)
@@ -613,6 +584,49 @@ def auctions_list(request):
             "last_new_cards_count": cache_metadata.get('new_cards_count', 0),
         },
     )
+
+
+@require_POST
+def enqueue_batch_bids(request):
+    """Guarda un lote para que el worker lo procese sin bloquear el navegador."""
+    import listar_subastas
+
+    form = BatchBidForm(request.POST)
+    if not form.is_valid():
+        return JsonResponse({"error": "Revisa los identificadores y los importes antes de confirmar."}, status=400)
+    try:
+        request_key = uuid.UUID(request.POST.get("request_key", ""))
+    except (TypeError, ValueError, AttributeError):
+        return JsonResponse({"error": "La solicitud de puja no es válida."}, status=400)
+    existing = BidBatchJob.objects.filter(user=request.user, request_key=request_key).first()
+    if existing:
+        return JsonResponse({"job_id": existing.id, "status": existing.status, "total": existing.total_count}, status=202)
+    cached_market = listar_subastas.load_auction_cache() or {}
+    player_by_auction = {row.get("auction_id"): row.get("player", "Jugador desconocido") for row in cached_market.get("auctions", [])}
+    bids = form.cleaned_data["bids"]
+    with transaction.atomic():
+        job = BidBatchJob.objects.create(user=request.user, request_key=request_key, total_count=len(bids))
+        BidBatchItem.objects.bulk_create([
+            BidBatchItem(job=job, position=index, auction_id=data["auction_id"],
+                         player_name=player_by_auction.get(data["auction_id"], f"Puja {index}"),
+                         euros=data["euros"], use_credit=bool(data["use_credit"]))
+            for index, data in enumerate(bids, start=1)
+        ])
+    return JsonResponse({"job_id": job.id, "status": job.status, "total": job.total_count}, status=202)
+
+
+@require_GET
+def bid_jobs_status(request):
+    try:
+        job_ids = list(dict.fromkeys(int(value) for value in request.GET.get("ids", "").split(",") if value.strip()))[:30]
+    except ValueError:
+        return JsonResponse({"error": "Identificadores no válidos."}, status=400)
+    jobs = BidBatchJob.objects.filter(user=request.user, id__in=job_ids).prefetch_related("items")
+    return JsonResponse({"jobs": [{
+        "id": job.id, "status": job.status, "total": job.total_count,
+        "successes": job.success_count, "failures": job.failure_count,
+        "items": [{"player": item.player_name, "status": item.status, "error": item.error} for item in job.items.all()],
+    } for job in jobs]})
 
 
 def toggle_favorite_player(request):
