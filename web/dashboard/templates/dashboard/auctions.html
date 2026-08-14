@@ -275,6 +275,12 @@ document.addEventListener('DOMContentLoaded', function () {
   if (currentFilterQuery) currentFilterQuery.value = window.location.search;
   var filtersForm = document.querySelector('.auction-filters');
   if (filtersForm) {
+    var saveFilterForm = document.querySelector('.save-filter-form');
+    if (saveFilterForm) saveFilterForm.addEventListener('submit', function () {
+      var params = new URLSearchParams(new FormData(filtersForm));
+      params.delete('page');
+      currentFilterQuery.value = params.toString();
+    });
     var searchTimer;
     filtersForm.querySelectorAll('select, input[type="checkbox"]').forEach(function (control) {
       control.addEventListener('change', function () {
@@ -289,6 +295,7 @@ document.addEventListener('DOMContentLoaded', function () {
           var selectedCount = multiselect.querySelectorAll('input[name="' + group + '"]:checked').length;
           var emptyLabel = group === 'positions' ? 'Todas' : 'Todos';
           multiselect.querySelector('summary').textContent = selectedCount ? selectedCount + (group === 'positions' ? ' seleccionadas' : ' seleccionados') : emptyLabel;
+          multiselect.dataset.dirty = 'true';
           return;
         }
         filtersForm.submit();
@@ -298,6 +305,19 @@ document.addEventListener('DOMContentLoaded', function () {
     playerSearch.addEventListener('input', function () {
       window.clearTimeout(searchTimer);
       searchTimer = window.setTimeout(function () { filtersForm.submit(); }, 450);
+    });
+    document.querySelectorAll('.filter-multiselect details').forEach(function (details) {
+      details.addEventListener('toggle', function () {
+        if (!details.open && details.closest('.filter-multiselect').dataset.dirty === 'true') filtersForm.requestSubmit();
+      });
+    });
+    document.addEventListener('click', function (event) {
+      document.querySelectorAll('.filter-multiselect details[open]').forEach(function (details) {
+        if (!details.contains(event.target)) {
+          if (event.target.closest('.save-filter-form')) details.closest('.filter-multiselect').dataset.dirty = 'false';
+          details.open = false;
+        }
+      });
     });
   }
 

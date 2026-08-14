@@ -27,7 +27,6 @@ from sorare_utils import graphql_request, build_headers
 LA_LIGA_COMPETITION_SLUG = "primera-division-es"
 DEFAULT_SEASON_YEAR = 2026
 CACHE_PATH = Path(__file__).resolve().parents[1] / "output" / "la_liga_rare_2026_auctions.json"
-FULL_REFRESH_HOURS = 24
 REQUEST_INTERVAL_SECONDS = 1.1
 
 LA_LIGA_TEAMS_QUERY = '''
@@ -279,63 +278,16 @@ def load_auction_cache():
 
 
 def refresh_auction_cache(force_full=False):
-    """Sincroniza el mercado completo; después solo procesa cambios recientes."""
+    """Reconstruye la caché desde todas las subastas disponibles para la cuenta."""
     headers = build_headers()
     teams = fetch_la_liga_teams(headers, season_year=DEFAULT_SEASON_YEAR)
     previous = load_auction_cache()
     previous_auctions = previous.get('auctions', []) if previous else []
     previous_keys = {(row['auction_id'], row['asset_id']) for row in previous_auctions}
     now = datetime.now(timezone.utc)
-    full_refreshed_at = None
-    if previous and previous.get('full_refreshed_at'):
-        full_refreshed_at = datetime.fromisoformat(previous['full_refreshed_at'])
-    full = force_full or not previous or not full_refreshed_at or now - full_refreshed_at >= timedelta(hours=FULL_REFRESH_HOURS)
-    updated_after = None
-    if not full:
-        last_update = datetime.fromisoformat(previous['updated_at'])
-        updated_after = (last_update - timedelta(minutes=2)).isoformat()
-
-    cursor = None
-    page = 0
-    scanned = 0
-    changed_nodes = []
-    my_nickname = previous.get('my_nickname', '') if previous else ''
-    while True:
-        for attempt in range(3):
-            try:
-                data = graphql_request(
-                    LIVE_AUCTIONS_QUERY,
-                    {'after': cursor, 'updatedAfter': updated_after},
-                    headers=headers,
-                )
-                break
-            except Exception as exc:
-                if '429' not in str(exc) or attempt == 2:
-                    raise
-                time.sleep(65)
-        my_nickname = ((data.get('currentUser') or {}).get('nickname') or my_nickname).strip()
-        connection = data['tokens']['liveAuctions']
-        nodes = connection['nodes']
-        changed_nodes.extend(nodes)
-        scanned += len(nodes)
-        page += 1
-        print(f"Página {page}: {scanned}/{connection['totalCount']} subastas revisadas", flush=True)
-        if not connection['pageInfo']['hasNextPage']:
-            break
-        cursor = connection['pageInfo']['endCursor']
-        time.sleep(REQUEST_INTERVAL_SECONDS)
-
-    fresh_rows = _rows_from_live_auctions(changed_nodes, set(teams), my_nickname)
-    if full:
-        merged = fresh_rows
-        full_timestamp = now.isoformat()
-    else:
-        changed_ids = {node['id'] for node in changed_nodes}
-        merged = [row for row in previous_auctions if row['auction_id'] not in changed_ids]
-        merged.extend(fresh_rows)
-        full_timestamp = previous['full_refreshed_at']
-
-    merged = [row for row in merged if datetime.fromisoformat(row['end_date'].replace('Z', '+00:00')) > now]
+    merged, _pages, scanned = fetch_all_live_auctions(
+        headers, rarity="rare", team_slugs=set(teams), season_year=DEFAULT_SEASON_YEAR
+    )
     unique = {(row['auction_id'], row['asset_id']): row for row in merged}
     merged = list(unique.values())
     current_keys = set(unique)
@@ -344,17 +296,12 @@ def refresh_auction_cache(force_full=False):
         now.isoformat() if new_cards_count
         else (previous or {}).get('last_new_cards_at')
     )
-    outbid = [row for row in merged if row['is_outbid']]
-    positions = fetch_bid_positions(headers, outbid, my_nickname)
-    for row in merged:
-        if row['is_outbid']:
-            row['bid_position'] = positions.get(row['auction_id'])
     merged.sort(key=lambda row: row['end_date'])
 
     payload = {
         'updated_at': now.isoformat(),
-        'full_refreshed_at': full_timestamp,
-        'my_nickname': my_nickname,
+        'full_refreshed_at': now.isoformat(),
+        'my_nickname': (previous or {}).get('my_nickname', ''),
         'scanned_count': scanned,
         'new_cards_count': new_cards_count,
         'last_new_cards_at': last_new_cards_at,
