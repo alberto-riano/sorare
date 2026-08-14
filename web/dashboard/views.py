@@ -459,6 +459,7 @@ def auctions_list(request):
                     sniper=False,
                     background=False,
                     use_credit=bool(data["use_credit"]),
+                    currency=data["currency"],
                 ),
             )
             if result.exit_code == 0:
@@ -706,6 +707,31 @@ def toggle_favorite_player(request):
     return JsonResponse({"favorite": created})
 
 
+def _classify_token_price_deal(deal):
+    """Devuelve la presentación del origen de una venta registrada por Sorare."""
+    deal = deal or {}
+    typename = deal.get("__typename")
+    offer_type = deal.get("type")
+    sender_cards = (deal.get("senderSide") or {}).get("anyCards") or []
+    receiver_cards = (deal.get("receiverSide") or {}).get("anyCards") or []
+
+    if typename == "TokenAuction":
+        return "auction", "fa-gavel", "Subasta"
+    if typename == "TokenPrimaryOffer":
+        return "instant", "fa-bolt", "Compra instantánea"
+    if typename == "TokenOffer" and sender_cards and receiver_cards:
+        return "trade", "fa-right-left", "Intercambio entre managers"
+    if typename == "TokenOffer" and offer_type == "SINGLE_BUY_OFFER":
+        return "public", "fa-bullhorn", "Oferta pública"
+    if typename == "TokenOffer" and offer_type == "SINGLE_SALE_OFFER":
+        return "instant", "fa-bolt", "Compra instantánea"
+    if typename == "TokenOffer" and offer_type == "DIRECT_OFFER":
+        return "direct", "fa-handshake", "Oferta directa"
+    if typename == "TokenOffer":
+        return "direct", "fa-handshake", "Oferta entre managers"
+    return "trade", "fa-right-left", "Operación entre managers"
+
+
 def auction_price_history(request):
     """Últimas cinco ventas Rare 2026 del jugador solicitado."""
     import re
@@ -729,18 +755,7 @@ def auction_price_history(request):
     sales = []
     for price in prices[:5]:
         deal = price.get("deal") or {}
-        typename = deal.get("__typename")
-        offer_type = deal.get("type")
-        if typename == "TokenAuction":
-            kind, icon, label = "auction", "fa-gavel", "Subasta"
-        elif typename == "TokenOffer" and (deal.get("senderSide") or {}).get("anyCards") and (deal.get("receiverSide") or {}).get("anyCards"):
-            kind, icon, label = "trade", "fa-right-left", "Intercambio entre managers"
-        elif typename == "TokenPrimaryOffer" or offer_type in {"SINGLE_SALE_OFFER", "SINGLE_BUY_OFFER"}:
-            kind, icon, label = "instant", "fa-bolt", "Compra instantánea"
-        elif typename == "TokenOffer":
-            kind, icon, label = "instant", "fa-handshake", "Compra a otro manager"
-        else:
-            kind, icon, label = "trade", "fa-right-left", "Operación entre managers"
+        kind, icon, label = _classify_token_price_deal(deal)
         eur_cents = (price.get("amounts") or {}).get("eurCents")
         sales.append(
             {
@@ -752,6 +767,61 @@ def auction_price_history(request):
             }
         )
     return JsonResponse({"sales": sales, "season": "2026-2027", "rarity": "Rare"})
+
+
+@require_POST
+def auction_bid_comparisons(request):
+    """Última venta comparable para los jugadores incluidos en un resumen."""
+    import json
+    import re
+    from sorare_utils import build_headers, get_latest_prices
+
+    try:
+        body = json.loads(request.body)
+        raw_slugs = body.get("player_slugs", [])
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({"error": "La solicitud de comparación no es válida."}, status=400)
+    if not isinstance(raw_slugs, list):
+        return JsonResponse({"error": "La lista de jugadores no es válida."}, status=400)
+
+    player_slugs = list(dict.fromkeys(str(slug).strip() for slug in raw_slugs))
+    if not 1 <= len(player_slugs) <= 20 or any(
+        not re.fullmatch(r"[a-z0-9-]{1,160}", slug) for slug in player_slugs
+    ):
+        return JsonResponse({"error": "Selecciona entre 1 y 20 jugadores válidos."}, status=400)
+
+    cache_keys = {slug: f"auction-last-price:rare:2026:{slug}" for slug in player_slugs}
+    cached = cache.get_many(cache_keys.values())
+    missing = [slug for slug in player_slugs if cache_keys[slug] not in cached]
+    if missing:
+        try:
+            latest = get_latest_prices(
+                missing,
+                rarity="rare",
+                season=2026,
+                headers=build_headers(),
+            )
+        except Exception as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
+        new_cache_values = {
+            cache_keys[slug]: (latest.get(slug) or {})
+            for slug in missing
+        }
+        cache.set_many(new_cache_values, timeout=300)
+        cached.update(new_cache_values)
+
+    comparisons = {}
+    for slug in player_slugs:
+        price = cached.get(cache_keys[slug]) or {}
+        eur_cents = (price.get("amounts") or {}).get("eurCents")
+        kind, _icon, label = _classify_token_price_deal(price.get("deal"))
+        comparisons[slug] = {
+            "eur": eur_cents / 100 if eur_cents is not None else None,
+            "date": price.get("date"),
+            "kind": kind if price else None,
+            "label": label if price else None,
+        }
+    return JsonResponse({"comparisons": comparisons})
 
 
 def offers_received(request):

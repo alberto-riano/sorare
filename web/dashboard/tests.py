@@ -15,6 +15,7 @@ from dashboard.forms import BatchBidForm, InlineBidForm
 from dashboard.management.commands.process_bid_queue import process_next_job
 from dashboard.models import AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer
 from dashboard.views import auction_price_history, auctions_list
+from sorare_utils import get_latest_prices
 from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler
 
 
@@ -116,6 +117,23 @@ class LaLigaAuctionTests(TestCase):
         self.assertFalse(rows[0]["is_winning"])
         self.assertFalse(rows[0]["is_outbid"])
 
+    def test_winning_market_row_keeps_my_maximum_bid(self):
+        card = self._card("winning-card", "rare", 2026, "real-madrid-madrid")
+        auction = self._auction(card)
+        auction["bestBid"] = {
+            "amounts": {"eurCents": 1250},
+            "userBidder": {"nickname": "BURGuis"},
+        }
+        auction["myLastBid"] = {
+            "amounts": {"eurCents": 1250},
+            "maximumAmounts": {"eurCents": 2500},
+        }
+        rows = listar_subastas._rows_from_live_auctions(
+            [auction], {"real-madrid-madrid"}, "burguis", season_year=2026
+        )
+        self.assertTrue(rows[0]["is_winning"])
+        self.assertEqual(rows[0]["my_bid_eur"], 25.0)
+
     @staticmethod
     def _card(asset_id, rarity, season, team_slug):
         card = {
@@ -175,7 +193,7 @@ class AuctionActionsTests(TestCase):
         user = get_user_model().objects.create_user(username="bid-error-user")
         self.client.force_login(user)
         load_cache.return_value = {"auctions": [{"auction_id": "EnglishAuction:test", "player": "Oyarzabal"}]}
-        bids = json.dumps([{"auction_id": "EnglishAuction:test", "euros": "12.50", "use_credit": True}])
+        bids = json.dumps([{"auction_id": "EnglishAuction:test", "euros": "12.50", "use_credit": True, "currency": "ETH"}])
 
         response = self.client.post(reverse("enqueue_batch_bids"), {
             "bids": bids, "confirm": "on", "request_key": "39ed4b7a-28cd-44d4-8e45-a009ac9db384",
@@ -186,12 +204,16 @@ class AuctionActionsTests(TestCase):
         job = BidBatchJob.objects.get(id=response.json()["job_id"])
         self.assertEqual(job.status, BidBatchJob.Status.QUEUED)
         self.assertEqual(job.items.get().player_name, "Oyarzabal")
+        self.assertEqual(job.items.get().currency, "ETH")
 
     @patch("dashboard.management.commands.process_bid_queue.run_bid_scheduler")
     def test_worker_preserves_detailed_bid_failure(self, run_bid):
         user = get_user_model().objects.create_user(username="worker-user")
         job = BidBatchJob.objects.create(user=user, total_count=1)
-        BidBatchItem.objects.create(job=job, position=1, auction_id="EnglishAuction:test", player_name="Oyarzabal", euros="12.50")
+        BidBatchItem.objects.create(
+            job=job, position=1, auction_id="EnglishAuction:test",
+            player_name="Oyarzabal", euros="12.50", currency="ETH",
+        )
         run_bid.return_value = ScriptResult("mock", 2, "", "❌ La puja mínima es 15,00 €")
 
         process_next_job()
@@ -200,6 +222,7 @@ class AuctionActionsTests(TestCase):
         item = job.items.get()
         self.assertEqual(job.status, BidBatchJob.Status.FAILED)
         self.assertEqual(item.error, "La puja mínima es 15,00 €")
+        self.assertEqual(run_bid.call_args.args[1].currency, "ETH")
 
     def test_bid_status_does_not_expose_another_users_jobs(self):
         owner = get_user_model().objects.create_user(username="job-owner")
@@ -328,12 +351,38 @@ class AuctionActionsTests(TestCase):
         self.assertEqual(command[-2:], ["--currency", "EUR"])
         self.assertEqual(command[2:4], ["EnglishAuction:test", "12.50"])
 
+        run_bid_scheduler(
+            self._paths(),
+            BidRequest("EnglishAuction:test", "12.50", "", True, False, False, False, "ETH"),
+        )
+        eth_command = run_command.call_args.args[0]
+        self.assertNotIn("--use-credit", eth_command)
+        self.assertEqual(eth_command[-2:], ["--currency", "ETH"])
+
     @patch("sorare_utils.build_headers", return_value={})
     @patch("sorare_utils.get_recent_prices")
     def test_history_classifies_sale_types(self, get_prices, _headers):
         get_prices.return_value = [
             {"amounts": {"eurCents": 1234}, "date": "2026-08-01T10:00:00Z", "deal": {"__typename": "TokenAuction"}},
             {"amounts": {"eurCents": 1500}, "date": "2026-08-02T10:00:00Z", "deal": {"__typename": "TokenPrimaryOffer"}},
+            {
+                "amounts": {"eurCents": 361},
+                "date": "2026-08-02T11:00:00Z",
+                "deal": {
+                    "__typename": "TokenOffer", "type": "SINGLE_BUY_OFFER",
+                    "senderSide": {"anyCards": []},
+                    "receiverSide": {"anyCards": [{"assetId": "oriol-rey-card"}]},
+                },
+            },
+            {
+                "amounts": {"eurCents": 750},
+                "date": "2026-08-02T12:00:00Z",
+                "deal": {
+                    "__typename": "TokenOffer", "type": "DIRECT_OFFER",
+                    "senderSide": {"anyCards": [{"assetId": "a"}]},
+                    "receiverSide": {"anyCards": []},
+                },
+            },
             {
                 "amounts": {"eurCents": 900},
                 "date": "2026-08-03T10:00:00Z",
@@ -347,7 +396,52 @@ class AuctionActionsTests(TestCase):
         ]
         response = auction_price_history(RequestFactory().get("/", {"player_slug": "test-player"}))
         payload = json.loads(response.content)
-        self.assertEqual([sale["kind"] for sale in payload["sales"]], ["auction", "instant", "trade"])
+        self.assertEqual(
+            [sale["kind"] for sale in payload["sales"]],
+            ["auction", "instant", "public", "direct", "trade"],
+        )
+        self.assertEqual(payload["sales"][2]["label"], "Oferta pública")
+
+    @patch("sorare_utils.build_headers", return_value={})
+    @patch("sorare_utils.get_latest_prices")
+    def test_bid_review_comparisons_return_latest_sale_for_each_player(self, get_latest, _headers):
+        user = get_user_model().objects.create_user(username="comparison-user")
+        self.client.force_login(user)
+        get_latest.return_value = {
+            "oriol-rey-erenas": {
+                "amounts": {"eurCents": 718},
+                "date": "2026-08-14T06:19:48Z",
+                "deal": {"__typename": "TokenAuction"},
+            }
+        }
+        response = self.client.post(
+            reverse("auction_bid_comparisons"),
+            data=json.dumps({"player_slugs": ["oriol-rey-erenas"]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        comparison = response.json()["comparisons"]["oriol-rey-erenas"]
+        self.assertEqual(comparison["eur"], 7.18)
+        self.assertEqual(comparison["label"], "Subasta")
+
+    @patch("sorare_utils.graphql_request")
+    def test_latest_prices_are_batched_in_one_graphql_request(self, graphql_request):
+        graphql_request.return_value = {
+            "tokens": {
+                "p0": [{"amounts": {"eurCents": 718}}],
+                "p1": [{"amounts": {"eurCents": 1234}}],
+            }
+        }
+        prices = get_latest_prices(
+            ["oriol-rey-erenas", "otro-jugador"],
+            rarity="rare", season=2026, headers={},
+        )
+        self.assertEqual(graphql_request.call_count, 1)
+        self.assertEqual(prices["oriol-rey-erenas"]["amounts"]["eurCents"], 718)
+        query, variables = graphql_request.call_args.args[:2]
+        self.assertIn("p0: tokenPrices", query)
+        self.assertIn("p1: tokenPrices", query)
+        self.assertEqual(variables["playerSlug1"], "otro-jugador")
 
     @staticmethod
     def _paths():

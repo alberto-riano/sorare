@@ -8,6 +8,7 @@ obtención de precios, conversión de divisas, etc.
 import requests
 import sys
 import os
+import re
 
 SORARE_API_URL = "https://api.sorare.com/graphql"
 DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'config.txt')
@@ -285,6 +286,49 @@ def get_recent_prices(player_slug, rarity, season=None, headers=None, first=10):
         variables['season'] = season
     data = graphql_request(query, variables, headers=headers)
     return data['tokens']['tokenPrices']
+
+
+def get_latest_prices(player_slugs, rarity, season=None, headers=None):
+    """Obtiene la última venta comparable de varios jugadores en una petición.
+
+    La consulta por alias evita lanzar una petición GraphQL por cada jugador al
+    abrir el resumen de pujas.
+    """
+    clean_slugs = list(dict.fromkeys(str(slug).strip() for slug in player_slugs))
+    if not 1 <= len(clean_slugs) <= 20:
+        raise ValueError("Selecciona entre 1 y 20 jugadores.")
+    if any(not re.fullmatch(r"[a-z0-9-]{1,160}", slug) for slug in clean_slugs):
+        raise ValueError("Hay un jugador no válido.")
+
+    definitions = ["$rarity: Rarity!", "$season: Int"]
+    fields = []
+    variables = {"rarity": rarity, "season": season}
+    for index, slug in enumerate(clean_slugs):
+        variable = f"playerSlug{index}"
+        definitions.append(f"${variable}: String!")
+        variables[variable] = slug
+        fields.append(f'''
+          p{index}: tokenPrices(playerSlug: ${variable}, rarity: $rarity, season: $season, first: 1) {{
+            amounts {{ eurCents wei }}
+            date
+            deal {{
+              __typename
+              ... on TokenOffer {{
+                type
+                senderSide {{ anyCards {{ assetId }} }}
+                receiverSide {{ anyCards {{ assetId }} }}
+              }}
+            }}
+          }}
+        ''')
+
+    query = "query GetLatestTokenPrices(" + ", ".join(definitions) + ") { tokens {" + "".join(fields) + "} }"
+    data = graphql_request(query, variables, headers=headers)
+    token_prices = data["tokens"]
+    return {
+        slug: (token_prices.get(f"p{index}") or [None])[0]
+        for index, slug in enumerate(clean_slugs)
+    }
 
 
 # ---------------------------------------------------------------------------

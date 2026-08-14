@@ -11,6 +11,7 @@ urlpatterns = [
     path("ventas/download/", views.sales_download_excel, name="sales_download_excel"),
     path("ofertas/", views.auctions_list, name="auctions_list"),
     path("ofertas/historial/", views.auction_price_history, name="auction_price_history"),
+    path("ofertas/comparaciones/", views.auction_bid_comparisons, name="auction_bid_comparisons"),
     path("ofertas/favorito/", views.toggle_favorite_player, name="toggle_favorite_player"),
     path("ofertas/pujas/encolar/", views.enqueue_batch_bids, name="enqueue_batch_bids"),
     path("ofertas/pujas/estado/", views.bid_jobs_status, name="bid_jobs_status"),

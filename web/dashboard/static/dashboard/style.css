@@ -730,6 +730,19 @@ textarea {
   font-weight: 700;
 }
 
+.max-bid-badge {
+  display: block;
+  width: max-content;
+  margin-top: 0.25rem;
+  padding: 0.18rem 0.4rem;
+  border: 1px solid #16a34a;
+  border-radius: 999px;
+  color: #15803d;
+  background: #f0fdf4;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
 .outbid-badge {
   display: block;
   width: max-content;
@@ -834,6 +847,13 @@ textarea {
 .modal-balances strong { font-family: 'IBM Plex Mono', monospace; font-size: .84rem; }
 .bid-review-item { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: .8rem; padding: .7rem; border: 1px solid var(--line); border-radius: 10px; }
 .bid-review-item small { color: var(--muted); }
+.bid-review-details { display: grid; min-width: 0; gap: .18rem; }
+.bid-review-details strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bid-review-comparison { font-size: .72rem; font-weight: 700; }
+.bid-review-comparison.is-loading { font-weight: 500; }
+.bid-review-comparison.is-above { color: #dc2626; }
+.bid-review-comparison.is-below { color: #15803d; }
+.bid-review-comparison.is-equal { color: var(--muted); }
 .bid-review-visuals { position: relative; display: block; width: 46px; height: 40px; }
 .bid-review-player, .bid-review-team { display: grid; place-items: center; overflow: hidden; background: #eef2f1; color: var(--muted); }
 .bid-review-player { width: 38px; height: 38px; border-radius: 50%; }
@@ -867,6 +887,7 @@ textarea {
   .batch-bid-bar { align-items: stretch; flex-direction: column; }
   .bid-review-item { grid-template-columns: auto 1fr auto; }
   .bid-review-item small { grid-column: 2 / -1; }
+  .bid-review-item .review-credit { grid-column: 2 / -1; }
   .bid-modal-actions { align-items: stretch; flex-direction: column-reverse; }
 }
 
@@ -905,6 +926,8 @@ textarea {
 
 .history-instant i { color: var(--accent-2); }
 .history-trade i { color: #6366f1; }
+.history-public i { color: #d97706; }
+.history-direct i { color: #2563eb; }
 
 .auction-warning {
   margin: 1rem 0 0;

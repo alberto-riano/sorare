@@ -124,7 +124,10 @@
             {% else %}
               <span style="color: var(--muted);">Sin pujas</span>
             {% endif %}
-            {% if auction.is_winning %}<span class="winning-badge"><i class="fas fa-trophy"></i> Vas ganando</span>{% endif %}
+            {% if auction.is_winning %}
+              <span class="winning-badge"><i class="fas fa-trophy"></i> Vas ganando</span>
+              {% if auction.my_bid_eur is not None %}<span class="max-bid-badge"><i class="fas fa-shield-halved"></i> Tu máx. {{ auction.my_bid_eur|floatformat:2 }}€</span>{% endif %}
+            {% endif %}
             {% if auction.is_outbid %}
               <span class="outbid-badge"><i class="fas fa-arrow-trend-down"></i> Te han superado{% if auction.bid_position %} · {{ auction.bid_position }}.º{% endif %}</span>
             {% endif %}
@@ -142,6 +145,7 @@
           <td>
             <div class="inline-bid-form" onclick="event.stopPropagation()"
                  data-auction-id="{{ auction.auction_id }}" data-player="{{ auction.player }}"
+                 data-player-slug="{{ auction.player_slug }}"
                  data-player-image="{{ auction.player_picture_url|default:'' }}"
                  data-team-image="{{ auction.team_picture_url|default:'' }}">
               <div class="inline-bid-amount">
@@ -352,12 +356,14 @@ document.addEventListener('DOMContentLoaded', function () {
   var creditAll = document.getElementById('review-credit-all');
   var currencyControls = Array.from(document.querySelectorAll('input[name="review-currency"]'));
   var currencyHelp = document.getElementById('payment-currency-help');
+  var submitAllButton = document.getElementById('submit-all-bids');
 
   function bidFromControl(control) {
       var input = control.querySelector('.batch-bid-euros');
       var normalized = input.value.trim().replace(',', '.');
       if (!/^\d+(\.\d{1,2})?$/.test(normalized) || Number(normalized) <= 0) return null;
       return {auction_id: control.dataset.auctionId, player: control.dataset.player,
+        player_slug: control.dataset.playerSlug,
         player_image: control.dataset.playerImage, team_image: control.dataset.teamImage,
         euros: Number(normalized).toFixed(2), use_credit: true, currency: 'EUR'};
   }
@@ -377,6 +383,55 @@ document.addEventListener('DOMContentLoaded', function () {
     control.querySelector('.batch-bid-euros').addEventListener('input', updateBidCount);
   });
 
+  function syncReviewCurrency(currency) {
+    var selected = currency === 'ETH' ? 'ETH' : 'EUR';
+    reviewedBids.forEach(function (bid) { bid.currency = selected; });
+    currencyHelp.textContent = selected === 'ETH'
+      ? 'Los importes siguen expresados en EUR; la puja se preparará y pagará con el equivalente en Ethereum.'
+      : 'Los importes se muestran en EUR y se descontarán de tu saldo en euros.';
+    submitAllButton.innerHTML = '<i class="fas fa-gavel"></i> Confirmar y enviar todas · ' + selected;
+  }
+
+  function comparisonText(bidAmount, lastAmount) {
+    var difference = ((Number(bidAmount) - Number(lastAmount)) / Number(lastAmount)) * 100;
+    var rounded = Math.abs(difference) < 0.05 ? 0 : difference;
+    return {
+      text: 'Última ' + Number(lastAmount).toFixed(2) + ' € · ' + (rounded > 0 ? '+' : '') + rounded.toFixed(1) + '%',
+      kind: rounded > 0 ? 'is-above' : rounded < 0 ? 'is-below' : 'is-equal'
+    };
+  }
+
+  async function loadBidComparisons(bids, rows) {
+    try {
+      var response = await fetch('{% url "auction_bid_comparisons" %}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}', 'X-Requested-With': 'XMLHttpRequest'},
+        body: JSON.stringify({player_slugs: bids.map(function (bid) { return bid.player_slug; })})
+      });
+      var payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'No se pudo obtener la última venta');
+      rows.forEach(function (row, index) {
+        var comparison = row.querySelector('.bid-review-comparison');
+        var latest = payload.comparisons[bids[index].player_slug];
+        comparison.classList.remove('is-loading');
+        if (!latest || latest.eur === null || Number(latest.eur) <= 0) {
+          comparison.textContent = 'Sin venta comparable';
+          return;
+        }
+        var result = comparisonText(bids[index].euros, latest.eur);
+        comparison.textContent = result.text;
+        comparison.classList.add(result.kind);
+        comparison.title = latest.label ? 'Última operación: ' + latest.label : '';
+      });
+    } catch (_error) {
+      rows.forEach(function (row) {
+        var comparison = row.querySelector('.bid-review-comparison');
+        comparison.classList.remove('is-loading');
+        comparison.textContent = 'Comparación no disponible';
+      });
+    }
+  }
+
   function openBidReview(bids) {
     reviewedBids = bids;
     var list = document.getElementById('bid-review-list');
@@ -384,7 +439,7 @@ document.addEventListener('DOMContentLoaded', function () {
     bids.forEach(function (bid) {
       var row = document.createElement('div');
       row.className = 'bid-review-item';
-      row.innerHTML = '<span class="bid-review-visuals"><span class="bid-review-player"></span><span class="bid-review-team"></span></span><strong></strong><span class="bid-review-price"></span><label class="review-credit"><input type="checkbox" checked> <span>Usar créditos</span></label>';
+      row.innerHTML = '<span class="bid-review-visuals"><span class="bid-review-player"></span><span class="bid-review-team"></span></span><span class="bid-review-details"><strong></strong><small class="bid-review-comparison is-loading">Calculando comparación…</small></span><span class="bid-review-price"></span><label class="review-credit"><input type="checkbox" checked> <span>Usar créditos</span></label>';
       var playerImage = row.querySelector('.bid-review-player');
       var teamImage = row.querySelector('.bid-review-team');
       if (bid.player_image) playerImage.innerHTML = '<img alt="" loading="lazy">';
@@ -406,13 +461,13 @@ document.addEventListener('DOMContentLoaded', function () {
     creditAll.checked = bids.every(function (bid) { return bid.use_credit; });
     creditAll.indeterminate = bids.some(function (bid) { return bid.use_credit; }) && !creditAll.checked;
     currencyControls.forEach(function (control) { control.checked = control.value === 'EUR'; });
-    currencyHelp.textContent = 'Los importes se muestran en EUR y se descontarán de tu saldo en euros.';
-    bids.forEach(function (bid) { bid.currency = 'EUR'; });
+    syncReviewCurrency('EUR');
     document.getElementById('batch-bids-payload').value = JSON.stringify(bids.map(function (bid) {
       return {auction_id: bid.auction_id, euros: bid.euros, use_credit: bid.use_credit, currency: bid.currency};
     }));
     modal.hidden = false;
     document.body.classList.add('modal-open');
+    loadBidComparisons(bids, Array.from(list.querySelectorAll('.bid-review-item')));
   }
 
   creditAll.addEventListener('change', function () {
@@ -424,10 +479,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   currencyControls.forEach(function (control) {
     control.addEventListener('change', function () {
-      reviewedBids.forEach(function (bid) { bid.currency = control.value; });
-      currencyHelp.textContent = control.value === 'ETH'
-        ? 'Los importes siguen expresados en EUR; Sorare calculará el equivalente en ETH al enviar.'
-        : 'Los importes se muestran en EUR y se descontarán de tu saldo en euros.';
+      if (control.checked) syncReviewCurrency(control.value);
     });
   });
 
@@ -464,6 +516,8 @@ document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.bid-review-item .review-credit input').forEach(function (checkbox, index) {
       if (reviewedBids[index]) reviewedBids[index].use_credit = checkbox.checked;
     });
+    var selectedCurrencyControl = currencyControls.find(function (control) { return control.checked; });
+    syncReviewCurrency(selectedCurrencyControl ? selectedCurrencyControl.value : 'EUR');
     document.getElementById('batch-bids-payload').value = JSON.stringify(reviewedBids.map(function (bid) {
       return {auction_id: bid.auction_id, euros: bid.euros, use_credit: bid.use_credit, currency: bid.currency};
     }));

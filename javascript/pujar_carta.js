@@ -364,6 +364,7 @@ async function bidOnAuction(auctionId, bidAmountCents) {
   console.log("=" .repeat(70));
   console.log(`  Auction ID: ${auctionId}`);
   console.log(`  Puja: ${(bidAmountCents / 100).toFixed(2)}€ (${bidAmountCents} céntimos)`);
+  console.log(`  Pago seleccionado: ${PAYMENT_CURRENCY === "ETH" ? "Ethereum" : "EUR"}`);
   console.log("");
 
   // 1. Obtener info de la subasta

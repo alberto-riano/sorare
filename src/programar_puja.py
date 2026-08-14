@@ -466,11 +466,15 @@ def monitor_auction(auction_id, headers, my_nickname, poll_interval=15):
 
 def execute_bid(auction_id, bid_cents, use_credit=True, currency='EUR'):
     """Ejecuta la puja llamando al script de Node.js."""
+    currency = str(currency).upper()
+    if currency not in {'EUR', 'ETH'}:
+        raise ValueError("La moneda de pago debe ser EUR o ETH")
     cmd = ['node', JS_SCRIPT, auction_id, str(bid_cents)]
     if use_credit:
         cmd.append('--use-credit')
     cmd.extend(['--currency', currency])
-    log(f"Comando: node pujar_carta.js {auction_id} {bid_cents}{' --use-credit' if use_credit else ''}")
+    log(f"Preparando pago con {currency}")
+    log(f"Comando: node pujar_carta.js {auction_id} {bid_cents}{' --use-credit' if use_credit else ''} --currency {currency}")
     print()
 
     result = subprocess.run(cmd, cwd=os.path.dirname(JS_SCRIPT), capture_output=False, check=False)
