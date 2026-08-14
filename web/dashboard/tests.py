@@ -17,6 +17,21 @@ from web_services.process_runner import BidRequest, ScriptResult, bid_error_mess
 
 
 class LaLigaAuctionTests(TestCase):
+    def test_complete_card_scan_keeps_older_open_auctions(self):
+        card = self._card("older-open", "rare", 2026, "real-madrid-madrid")
+        card["latestEnglishAuction"] = self._auction(card)
+        card["latestEnglishAuction"]["myLastBid"] = None
+        response = {
+            "currentUser": {"nickname": "burguis"},
+            "football": {"allCards": {"totalCount": 1, "nodes": [card], "pageInfo": {"hasNextPage": False, "endCursor": None}}},
+        }
+        with patch.object(listar_subastas, "graphql_request", return_value=response):
+            rows, pages, total, nickname = listar_subastas.fetch_all_team_card_auctions(
+                {}, {"real-madrid-madrid"}, 2026
+            )
+        self.assertEqual([row["asset_id"] for row in rows], ["older-open"])
+        self.assertEqual((pages, total, nickname), (1, 1, "burguis"))
+
     def test_fetch_la_liga_teams_uses_season_contestants(self):
         response = {
             "football": {

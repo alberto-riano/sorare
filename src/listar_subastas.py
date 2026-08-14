@@ -95,6 +95,29 @@ query GetAllLiveFootballAuctions($after: String, $updatedAfter: ISO8601DateTime)
 }
 '''
 
+LA_LIGA_CARDS_WITH_AUCTIONS_QUERY = '''
+query GetLaLigaCardsWithAuctions($after: String, $teamSlugs: [String!]!, $seasonYears: [Int!]!) {
+  currentUser { nickname }
+  football {
+    allCards(first: 50, after: $after, rarities: [rare], seasonStartYears: $seasonYears, teamSlugs: $teamSlugs) {
+      totalCount
+      nodes {
+        assetId rarityTyped seasonYear serialNumber
+        anyPlayer { displayName slug squaredPictureUrl }
+        anyTeam { name slug pictureUrl }
+        anyPositions
+        latestEnglishAuction {
+          id open endDate
+          bestBid { amounts { eurCents } userBidder { nickname } }
+          myLastBid { amounts { eurCents } maximumAmounts { eurCents } }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+'''
+
 
 def fetch_la_liga_teams(headers, season_year=DEFAULT_SEASON_YEAR):
     """Obtiene de Sorare los clubes que disputan LaLiga en la temporada indicada."""
@@ -268,6 +291,48 @@ def _rows_from_live_auctions(nodes, team_slugs, my_nickname, season_year=DEFAULT
     return rows
 
 
+def fetch_all_team_card_auctions(headers, team_slugs, season_year=DEFAULT_SEASON_YEAR):
+    """Escanea todas las cartas de los clubes; es más lento pero no tiene la ventana de 10 días de liveAuctions."""
+    cursor = None
+    page = 0
+    total = 0
+    rows = []
+    my_nickname = ""
+    while True:
+        for attempt in range(3):
+            try:
+                data = graphql_request(
+                    LA_LIGA_CARDS_WITH_AUCTIONS_QUERY,
+                    {"after": cursor, "teamSlugs": sorted(team_slugs), "seasonYears": [season_year]},
+                    headers=headers,
+                )
+                break
+            except Exception as exc:
+                if attempt == 2:
+                    raise
+                time.sleep(65 if "429" in str(exc) else 5)
+        my_nickname = ((data.get("currentUser") or {}).get("nickname") or my_nickname).strip()
+        connection = data["football"]["allCards"]
+        total = connection["totalCount"]
+        page += 1
+        for card in connection["nodes"]:
+            auction = card.get("latestEnglishAuction")
+            if auction and auction.get("open"):
+                auction = dict(auction)
+                auction["anyCards"] = [{key: value for key, value in card.items() if key != "latestEnglishAuction"}]
+                rows.extend(_rows_from_live_auctions([auction], set(team_slugs), my_nickname, season_year))
+        print(f"Página {page}/{(total + 49) // 50}: {page * 50 if page * 50 < total else total}/{total} cartas, {len(rows)} subastas", flush=True)
+        if not connection["pageInfo"]["hasNextPage"]:
+            break
+        cursor = connection["pageInfo"]["endCursor"]
+        time.sleep(REQUEST_INTERVAL_SECONDS)
+    outbid = [row for row in rows if row["is_outbid"]]
+    positions = fetch_bid_positions(headers, outbid, my_nickname)
+    for row in outbid:
+        row["bid_position"] = positions.get(row["auction_id"])
+    return rows, page, total, my_nickname
+
+
 def load_auction_cache():
     if not CACHE_PATH.exists():
         return None
@@ -285,9 +350,7 @@ def refresh_auction_cache(force_full=False):
     previous_auctions = previous.get('auctions', []) if previous else []
     previous_keys = {(row['auction_id'], row['asset_id']) for row in previous_auctions}
     now = datetime.now(timezone.utc)
-    merged, _pages, scanned = fetch_all_live_auctions(
-        headers, rarity="rare", team_slugs=set(teams), season_year=DEFAULT_SEASON_YEAR
-    )
+    merged, _pages, scanned, my_nickname = fetch_all_team_card_auctions(headers, set(teams), DEFAULT_SEASON_YEAR)
     unique = {(row['auction_id'], row['asset_id']): row for row in merged}
     merged = list(unique.values())
     current_keys = set(unique)
@@ -301,7 +364,7 @@ def refresh_auction_cache(force_full=False):
     payload = {
         'updated_at': now.isoformat(),
         'full_refreshed_at': now.isoformat(),
-        'my_nickname': (previous or {}).get('my_nickname', ''),
+        'my_nickname': my_nickname,
         'scanned_count': scanned,
         'new_cards_count': new_cards_count,
         'last_new_cards_at': last_new_cards_at,
