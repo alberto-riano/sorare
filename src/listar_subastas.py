@@ -28,6 +28,7 @@ LA_LIGA_COMPETITION_SLUG = "primera-division-es"
 DEFAULT_SEASON_YEAR = 2026
 CACHE_PATH = Path(__file__).resolve().parents[1] / "output" / "la_liga_rare_2026_auctions.json"
 REQUEST_INTERVAL_SECONDS = 1.1
+CARD_SCAN_PAGE_SIZE = 200
 
 LA_LIGA_TEAMS_QUERY = '''
 query GetLaLigaTeams($competition: String!, $seasonYear: Int!) {
@@ -96,10 +97,10 @@ query GetAllLiveFootballAuctions($after: String, $updatedAfter: ISO8601DateTime)
 '''
 
 LA_LIGA_CARDS_WITH_AUCTIONS_QUERY = '''
-query GetLaLigaCardsWithAuctions($after: String, $teamSlugs: [String!]!, $seasonYears: [Int!]!) {
+query GetLaLigaCardsWithAuctions($after: String, $first: Int!, $teamSlugs: [String!]!, $seasonYears: [Int!]!) {
   currentUser { nickname }
   football {
-    allCards(first: 50, after: $after, rarities: [rare], seasonStartYears: $seasonYears, teamSlugs: $teamSlugs) {
+    allCards(first: $first, after: $after, rarities: [rare], seasonStartYears: $seasonYears, teamSlugs: $teamSlugs) {
       totalCount
       nodes {
         assetId rarityTyped seasonYear serialNumber
@@ -303,7 +304,7 @@ def fetch_all_team_card_auctions(headers, team_slugs, season_year=DEFAULT_SEASON
             try:
                 data = graphql_request(
                     LA_LIGA_CARDS_WITH_AUCTIONS_QUERY,
-                    {"after": cursor, "teamSlugs": sorted(team_slugs), "seasonYears": [season_year]},
+                    {"after": cursor, "first": CARD_SCAN_PAGE_SIZE, "teamSlugs": sorted(team_slugs), "seasonYears": [season_year]},
                     headers=headers,
                 )
                 break
@@ -321,7 +322,9 @@ def fetch_all_team_card_auctions(headers, team_slugs, season_year=DEFAULT_SEASON
                 auction = dict(auction)
                 auction["anyCards"] = [{key: value for key, value in card.items() if key != "latestEnglishAuction"}]
                 rows.extend(_rows_from_live_auctions([auction], set(team_slugs), my_nickname, season_year))
-        print(f"Página {page}/{(total + 49) // 50}: {page * 50 if page * 50 < total else total}/{total} cartas, {len(rows)} subastas", flush=True)
+        pages_total = (total + CARD_SCAN_PAGE_SIZE - 1) // CARD_SCAN_PAGE_SIZE
+        scanned = min(page * CARD_SCAN_PAGE_SIZE, total)
+        print(f"Página {page}/{pages_total}: {scanned}/{total} cartas, {len(rows)} subastas", flush=True)
         if not connection["pageInfo"]["hasNextPage"]:
             break
         cursor = connection["pageInfo"]["endCursor"]
