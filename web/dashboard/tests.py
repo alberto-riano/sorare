@@ -1,5 +1,7 @@
 import json
+import tempfile
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -17,20 +19,29 @@ from web_services.process_runner import BidRequest, ScriptResult, bid_error_mess
 
 
 class LaLigaAuctionTests(TestCase):
-    def test_complete_card_scan_keeps_older_open_auctions(self):
-        card = self._card("older-open", "rare", 2026, "real-madrid-madrid")
-        card["latestEnglishAuction"] = self._auction(card)
-        card["latestEnglishAuction"]["myLastBid"] = None
+    @patch.object(listar_subastas, "fetch_bid_positions", return_value={})
+    @patch.object(listar_subastas, "fetch_la_liga_teams", return_value={"real-madrid-madrid": "Real Madrid"})
+    @patch.object(listar_subastas, "build_headers", return_value={})
+    def test_cache_refresh_always_rebuilds_full_public_feed(self, _headers, _teams, _positions):
+        card = self._card("new-market-card", "rare", 2026, "real-madrid-madrid")
+        auction = self._auction(card)
+        auction["endDate"] = "2026-08-20T12:00:00Z"
         response = {
             "currentUser": {"nickname": "burguis"},
-            "football": {"allCards": {"totalCount": 1, "nodes": [card], "pageInfo": {"hasNextPage": False, "endCursor": None}}},
+            "tokens": {"liveAuctions": {
+                "totalCount": 1, "nodes": [auction],
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+            }},
         }
-        with patch.object(listar_subastas, "graphql_request", return_value=response):
-            rows, pages, total, nickname = listar_subastas.fetch_all_team_card_auctions(
-                {}, {"real-madrid-madrid"}, 2026
-            )
-        self.assertEqual([row["asset_id"] for row in rows], ["older-open"])
-        self.assertEqual((pages, total, nickname), (1, 1, "burguis"))
+        old_cache = {"updated_at": "2026-08-13T00:00:00+00:00", "auctions": [{"auction_id": "EnglishAuction:old", "asset_id": "old"}]}
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(listar_subastas, "CACHE_PATH", Path(directory) / "market.json"), \
+             patch.object(listar_subastas, "load_auction_cache", return_value=old_cache), \
+             patch.object(listar_subastas, "graphql_request", return_value=response) as request:
+            payload = listar_subastas.refresh_auction_cache()
+
+        self.assertEqual([row["asset_id"] for row in payload["auctions"]], ["new-market-card"])
+        self.assertIsNone(request.call_args.args[1]["updatedAfter"])
 
     def test_fetch_la_liga_teams_uses_season_contestants(self):
         response = {

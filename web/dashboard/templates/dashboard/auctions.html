@@ -308,7 +308,8 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     document.querySelectorAll('.filter-multiselect details').forEach(function (details) {
       details.addEventListener('toggle', function () {
-        if (!details.open && details.closest('.filter-multiselect').dataset.dirty === 'true') filtersForm.requestSubmit();
+        var multiselect = details.closest('.filter-multiselect');
+        if (!details.open && multiselect.dataset.dirty === 'true') filtersForm.requestSubmit();
       });
     });
     document.addEventListener('click', function (event) {

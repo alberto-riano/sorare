@@ -16,7 +16,7 @@ Uso:
 import sys
 import os
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import time
@@ -28,7 +28,6 @@ LA_LIGA_COMPETITION_SLUG = "primera-division-es"
 DEFAULT_SEASON_YEAR = 2026
 CACHE_PATH = Path(__file__).resolve().parents[1] / "output" / "la_liga_rare_2026_auctions.json"
 REQUEST_INTERVAL_SECONDS = 1.1
-CARD_SCAN_PAGE_SIZE = 200
 
 LA_LIGA_TEAMS_QUERY = '''
 query GetLaLigaTeams($competition: String!, $seasonYear: Int!) {
@@ -88,29 +87,6 @@ query GetAllLiveFootballAuctions($after: String, $updatedAfter: ISO8601DateTime)
           anyPlayer { displayName slug squaredPictureUrl }
           anyTeam { name slug pictureUrl }
           anyPositions
-        }
-      }
-      pageInfo { hasNextPage endCursor }
-    }
-  }
-}
-'''
-
-LA_LIGA_CARDS_WITH_AUCTIONS_QUERY = '''
-query GetLaLigaCardsWithAuctions($after: String, $first: Int!, $teamSlugs: [String!]!, $seasonYears: [Int!]!) {
-  currentUser { nickname }
-  football {
-    allCards(first: $first, after: $after, rarities: [rare], seasonStartYears: $seasonYears, teamSlugs: $teamSlugs) {
-      totalCount
-      nodes {
-        assetId rarityTyped seasonYear serialNumber
-        anyPlayer { displayName slug squaredPictureUrl }
-        anyTeam { name slug pictureUrl }
-        anyPositions
-        latestEnglishAuction {
-          id open endDate
-          bestBid { amounts { eurCents } userBidder { nickname } }
-          myLastBid { amounts { eurCents } maximumAmounts { eurCents } }
         }
       }
       pageInfo { hasNextPage endCursor }
@@ -292,50 +268,6 @@ def _rows_from_live_auctions(nodes, team_slugs, my_nickname, season_year=DEFAULT
     return rows
 
 
-def fetch_all_team_card_auctions(headers, team_slugs, season_year=DEFAULT_SEASON_YEAR):
-    """Escanea todas las cartas de los clubes; es más lento pero no tiene la ventana de 10 días de liveAuctions."""
-    cursor = None
-    page = 0
-    total = 0
-    rows = []
-    my_nickname = ""
-    while True:
-        for attempt in range(3):
-            try:
-                data = graphql_request(
-                    LA_LIGA_CARDS_WITH_AUCTIONS_QUERY,
-                    {"after": cursor, "first": CARD_SCAN_PAGE_SIZE, "teamSlugs": sorted(team_slugs), "seasonYears": [season_year]},
-                    headers=headers,
-                )
-                break
-            except Exception as exc:
-                if attempt == 2:
-                    raise
-                time.sleep(65 if "429" in str(exc) else 5)
-        my_nickname = ((data.get("currentUser") or {}).get("nickname") or my_nickname).strip()
-        connection = data["football"]["allCards"]
-        total = connection["totalCount"]
-        page += 1
-        for card in connection["nodes"]:
-            auction = card.get("latestEnglishAuction")
-            if auction and auction.get("open"):
-                auction = dict(auction)
-                auction["anyCards"] = [{key: value for key, value in card.items() if key != "latestEnglishAuction"}]
-                rows.extend(_rows_from_live_auctions([auction], set(team_slugs), my_nickname, season_year))
-        pages_total = (total + CARD_SCAN_PAGE_SIZE - 1) // CARD_SCAN_PAGE_SIZE
-        scanned = min(page * CARD_SCAN_PAGE_SIZE, total)
-        print(f"Página {page}/{pages_total}: {scanned}/{total} cartas, {len(rows)} subastas", flush=True)
-        if not connection["pageInfo"]["hasNextPage"]:
-            break
-        cursor = connection["pageInfo"]["endCursor"]
-        time.sleep(REQUEST_INTERVAL_SECONDS)
-    outbid = [row for row in rows if row["is_outbid"]]
-    positions = fetch_bid_positions(headers, outbid, my_nickname)
-    for row in outbid:
-        row["bid_position"] = positions.get(row["auction_id"])
-    return rows, page, total, my_nickname
-
-
 def load_auction_cache():
     if not CACHE_PATH.exists():
         return None
@@ -346,14 +278,45 @@ def load_auction_cache():
 
 
 def refresh_auction_cache(force_full=False):
-    """Reconstruye la caché desde todas las subastas disponibles para la cuenta."""
+    """Reconstruye siempre el mercado completo para no perder subastas nuevas."""
     headers = build_headers()
     teams = fetch_la_liga_teams(headers, season_year=DEFAULT_SEASON_YEAR)
     previous = load_auction_cache()
     previous_auctions = previous.get('auctions', []) if previous else []
     previous_keys = {(row['auction_id'], row['asset_id']) for row in previous_auctions}
     now = datetime.now(timezone.utc)
-    merged, _pages, scanned, my_nickname = fetch_all_team_card_auctions(headers, set(teams), DEFAULT_SEASON_YEAR)
+    cursor = None
+    page = 0
+    scanned = 0
+    changed_nodes = []
+    my_nickname = previous.get('my_nickname', '') if previous else ''
+    while True:
+        for attempt in range(3):
+            try:
+                data = graphql_request(
+                    LIVE_AUCTIONS_QUERY,
+                    {'after': cursor, 'updatedAfter': None},
+                    headers=headers,
+                )
+                break
+            except Exception as exc:
+                if '429' not in str(exc) or attempt == 2:
+                    raise
+                time.sleep(65)
+        my_nickname = ((data.get('currentUser') or {}).get('nickname') or my_nickname).strip()
+        connection = data['tokens']['liveAuctions']
+        nodes = connection['nodes']
+        changed_nodes.extend(nodes)
+        scanned += len(nodes)
+        page += 1
+        print(f"Página {page}: {scanned}/{connection['totalCount']} subastas revisadas", flush=True)
+        if not connection['pageInfo']['hasNextPage']:
+            break
+        cursor = connection['pageInfo']['endCursor']
+        time.sleep(REQUEST_INTERVAL_SECONDS)
+
+    merged = _rows_from_live_auctions(changed_nodes, set(teams), my_nickname)
+    merged = [row for row in merged if datetime.fromisoformat(row['end_date'].replace('Z', '+00:00')) > now]
     unique = {(row['auction_id'], row['asset_id']): row for row in merged}
     merged = list(unique.values())
     current_keys = set(unique)
@@ -362,6 +325,11 @@ def refresh_auction_cache(force_full=False):
         now.isoformat() if new_cards_count
         else (previous or {}).get('last_new_cards_at')
     )
+    outbid = [row for row in merged if row['is_outbid']]
+    positions = fetch_bid_positions(headers, outbid, my_nickname)
+    for row in merged:
+        if row['is_outbid']:
+            row['bid_position'] = positions.get(row['auction_id'])
     merged.sort(key=lambda row: row['end_date'])
 
     payload = {
