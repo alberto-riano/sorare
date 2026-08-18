@@ -248,12 +248,31 @@ def get_live_single_sale_offers(player_slug, headers=None):
     return all_offers
 
 
-def get_recent_prices(player_slug, rarity, season=None, headers=None, first=10):
+def get_recent_prices(
+    player_slug,
+    rarity,
+    season=None,
+    headers=None,
+    first=10,
+    season_eligibility=None,
+):
     """Obtiene precios recientes de ventas realizadas para un jugador y rareza."""
     query = '''
-    query GetTokenPrices($playerSlug: String!, $rarity: Rarity!, $season: Int, $first: Int!) {
+    query GetTokenPrices(
+      $playerSlug: String!
+      $rarity: Rarity!
+      $season: Int
+      $seasonEligibility: SeasonEligibility
+      $first: Int!
+    ) {
       tokens {
-        tokenPrices(playerSlug: $playerSlug, rarity: $rarity, season: $season, first: $first) {
+        tokenPrices(
+          playerSlug: $playerSlug
+          rarity: $rarity
+          season: $season
+          seasonEligibility: $seasonEligibility
+          first: $first
+        ) {
           amounts {
             eurCents
             wei
@@ -264,6 +283,7 @@ def get_recent_prices(player_slug, rarity, season=None, headers=None, first=10):
             serialNumber
             seasonYear
             grade
+            inSeasonEligible
           }
           deal {
             __typename
@@ -284,6 +304,8 @@ def get_recent_prices(player_slug, rarity, season=None, headers=None, first=10):
     }
     if season is not None:
         variables['season'] = season
+    if season_eligibility is not None:
+        variables['seasonEligibility'] = season_eligibility
     data = graphql_request(query, variables, headers=headers)
     return data['tokens']['tokenPrices']
 

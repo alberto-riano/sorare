@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Callable
 
@@ -18,6 +19,16 @@ def _season_label(value) -> str:
     except (TypeError, ValueError):
         return "-"
     return f"{year}-{str(year + 1)[-2:]}"
+
+
+def collection_display_name(value: str) -> str:
+    """Quita del nombre de colección la rareza y temporada redundantes."""
+    return re.sub(
+        r"\s+(?:Limited|Rare|Super Rare|Unique)\s+\d{4}(?:-\d{2,4})?$",
+        "",
+        str(value or "-"),
+        flags=re.IGNORECASE,
+    ).strip()
 
 
 def collect_sales_inventory(
@@ -112,6 +123,7 @@ def collect_sales_inventory(
             "grade": card.get("grade") or 0,
             "in_season": bool(card.get("inSeasonEligible")),
             "collection_name": collection_name,
+            "collection_display_name": collection_display_name(collection_name),
             "collection_rays": collection_rays.get(collection_name, 0),
             "card_rays": card_rays,
             "rays_after_sale": rays_after_sale,

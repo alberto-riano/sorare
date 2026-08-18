@@ -78,14 +78,14 @@
         <thead><tr><th><span class="sr-only">Seleccionar</span></th><th>Jugador</th><th>Equipo</th><th>Temporada</th><th>Posición</th><th>Liga / nivel</th><th>Rayos</th><th>Tras venta</th><th>Mín. classic</th><th>Mín. in-season</th><th>Media ventas</th><th>Precio</th></tr></thead>
         <tbody>
           {% for card in page_obj %}
-          <tr class="sales-card-row {% if card.in_season %}in-season-row{% endif %} {% if card.blocked %}is-blocked{% endif %}" data-asset-id="{{ card.asset_id }}" data-player="{{ card.player }}" data-player-picture="{{ card.player_picture_url }}" data-team-picture="{{ card.team_picture_url }}" data-average="{{ card.avg_price|default_if_none:'' }}">
+          <tr class="sales-card-row {% if card.in_season %}in-season-row{% endif %} {% if card.blocked %}is-blocked{% endif %}" data-asset-id="{{ card.asset_id }}" data-player="{{ card.player }}" data-player-slug="{{ card.player_slug }}" data-rarity="{{ card.rarity }}" data-season-year="{{ card.season_year }}" data-history-mode="{% if card.in_season %}in_season{% else %}classic{% endif %}" data-history-target="sales-history-{{ forloop.counter }}" data-player-picture="{{ card.player_picture_url }}" data-team-picture="{{ card.team_picture_url }}" data-average="{{ card.avg_price|default_if_none:'' }}" tabindex="0">
             <td><input class="sale-select" type="checkbox" aria-label="Seleccionar {{ card.player }}" {% if card.blocked %}disabled{% endif %}></td>
-            <td><div class="sales-player">{% if card.player_picture_url %}<img src="{{ card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="sales-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong>{{ card.player }}</strong><small>#{{ card.serial_number|default:'-' }}</small></div></div></td>
+            <td><div class="sales-player">{% if card.player_picture_url %}<img src="{{ card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="sales-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong>{{ card.player }} <i class="fas fa-chart-line sales-history-cue" title="Ver últimas ventas"></i></strong><small>#{{ card.serial_number|default:'-' }}</small></div></div></td>
             <td><div class="sales-team">{% if card.team_picture_url %}<img src="{{ card.team_picture_url }}" alt="" loading="lazy">{% endif %}<span>{{ card.team }}</span></div></td>
             <td>{{ card.season }}{% if card.in_season %}<small class="sales-pill">In season</small>{% endif %}</td>
             <td>{{ card.position }}</td>
             <td>{{ card.league }}<small>Nivel {{ card.grade|floatformat:0 }}</small></td>
-            <td><strong>{{ card.card_rays|floatformat:0 }}</strong><small title="{{ card.collection_name }}">{{ card.collection_rays|floatformat:0 }} colección · {{ card.collection_name }}</small></td>
+            <td><strong><i class="fas fa-bolt sales-ray-icon"></i> {{ card.card_rays|floatformat:0 }}</strong><small title="{{ card.collection_name }}">{{ card.collection_rays|floatformat:0 }} colección · {{ card.collection_display_name }}</small></td>
             <td>{{ card.rays_after_sale|floatformat:0 }}</td>
             <td>{% if card.min_price_classic != None %}{{ card.min_price_classic|floatformat:2 }} €{% else %}—{% endif %}</td>
             <td>{% if card.min_price_inseason != None %}{{ card.min_price_inseason|floatformat:2 }} €{% else %}—{% endif %}</td>
@@ -95,6 +95,7 @@
               {% else %}<div class="sales-price-control"><span>€</span><input class="sale-price" inputmode="decimal" type="text" placeholder="0,00"><button type="button" class="sale-one" title="Revisar solo esta carta"><i class="fas fa-tag"></i></button></div>{% endif %}
             </td>
           </tr>
+          <tr id="sales-history-{{ forloop.counter }}" class="history-row sales-history-row" hidden><td colspan="12"><div class="history-content" aria-live="polite">Pulsa el jugador para cargar las ventas comparables.</div></td></tr>
           {% empty %}<tr><td colspan="12" class="sales-empty">No hay cartas que coincidan con los filtros.</td></tr>{% endfor %}
         </tbody>
       </table>
@@ -172,7 +173,7 @@
     var list = document.getElementById('salesReviewList'); list.innerHTML = '';
     rows.forEach(function (row) {
       var item = document.createElement('article'); item.className = 'sales-review-item'; item.dataset.assetId = row.dataset.assetId;
-      item.innerHTML = '<div class="sales-review-player">' + (row.dataset.playerPicture ? '<img src="' + row.dataset.playerPicture + '" alt="">' : '') + (row.dataset.teamPicture ? '<img class="team" src="' + row.dataset.teamPicture + '" alt="">' : '') + '<strong></strong></div><label><span>Precio</span><div class="sales-review-input"><span>€</span><input class="review-price" inputmode="decimal"></div></label><label><span>Días</span><input class="review-days" type="number" min="1" max="30" value="2"></label>';
+      item.innerHTML = '<div class="sales-review-player">' + (row.dataset.playerPicture ? '<img src="' + row.dataset.playerPicture + '" alt="">' : '') + (row.dataset.teamPicture ? '<img class="team" src="' + row.dataset.teamPicture + '" alt="">' : '') + '<strong></strong></div><label><span>Precio</span><div class="sales-review-input"><span>€</span><input class="review-price" inputmode="decimal"></div></label><label><span>Días</span><input class="review-days" type="number" min="1" max="30" value="7"></label>';
       item.querySelector('strong').textContent = row.dataset.player; item.querySelector('.review-price').value = row.querySelector('.sale-price').value; list.appendChild(item);
     }); modal.hidden = false; document.body.classList.add('modal-open');
   }
@@ -199,6 +200,50 @@
     }).catch(function (error) { showToast('error', 'No se pudo iniciar el envío', error.message); }).finally(function () { confirm.disabled = false; confirm.innerHTML = '<i class="fas fa-tags"></i> Confirmar y enviar'; });
   });
   function pollJobs(jobId, toast) { fetch('{% url "sales_jobs_status" %}?ids=' + jobId, { credentials: 'same-origin' }).then(parseJson).then(function (body) { var job = body.jobs[0]; if (!job) return; if (job.status === 'queued' || job.status === 'running') { setTimeout(function () { pollJobs(jobId, toast); }, 3000); return; } forgetJob(jobId); toast.className = 'sales-toast ' + (job.failure ? 'is-error' : 'is-success'); toast.querySelector('i').className = 'fas ' + (job.failure ? 'fa-circle-exclamation' : 'fa-circle-check'); toast.querySelector('strong').textContent = job.failure ? (job.success + ' ventas correctas · ' + job.failure + ' con error') : 'Ventas creadas correctamente'; toast.querySelector('p').textContent = job.items.filter(function (item) { return item.error; }).map(function (item) { return item.player + ': ' + item.error; }).join(' · '); }).catch(function () { setTimeout(function () { pollJobs(jobId, toast); }, 5000); }); }
+
+  function relativeSaleDate(value) {
+    if (!value) return '';
+    var minutes = Math.max(0, Math.floor((new Date() - new Date(value)) / 60000));
+    if (minutes < 1) return 'Hace un momento';
+    if (minutes < 60) return 'Hace ' + minutes + (minutes === 1 ? ' minuto' : ' minutos');
+    var hours = Math.floor(minutes / 60);
+    if (hours < 24) return 'Hace ' + hours + (hours === 1 ? ' hora' : ' horas');
+    var days = Math.floor(hours / 24);
+    return 'Hace ' + days + (days === 1 ? ' día' : ' días');
+  }
+  function toggleSalesHistory(row) {
+    var historyRow = document.getElementById(row.dataset.historyTarget);
+    historyRow.hidden = !historyRow.hidden;
+    if (!historyRow.hidden && historyRow.dataset.loaded !== 'true') loadSalesHistory(row, historyRow);
+  }
+  async function loadSalesHistory(row, historyRow) {
+    var content = historyRow.querySelector('.history-content');
+    content.textContent = 'Cargando últimas ventas ' + (row.dataset.historyMode === 'in_season' ? 'in season' : 'classic') + '…';
+    try {
+      var params = new URLSearchParams({player_slug: row.dataset.playerSlug, rarity: row.dataset.rarity, mode: row.dataset.historyMode, season_year: row.dataset.seasonYear});
+      var response = await fetch('{% url "sales_price_history" %}?' + params.toString(), {headers: {'X-Requested-With': 'XMLHttpRequest'}});
+      var payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'No se pudo cargar el historial');
+      content.textContent = '';
+      if (!payload.sales.length) { content.textContent = 'No hay ventas comparables ' + payload.rarity + ' ' + payload.mode + '.'; }
+      else {
+        var list = document.createElement('div'); list.className = 'history-sales';
+        payload.sales.forEach(function (sale) {
+          var item = document.createElement('div'); item.className = 'history-sale history-' + sale.kind;
+          var icon = document.createElement('i'); icon.className = 'fas ' + sale.icon;
+          var price = document.createElement('strong'); price.textContent = sale.eur === null ? '—' : Number(sale.eur).toFixed(2) + ' €';
+          var label = document.createElement('span'); label.textContent = sale.label;
+          var date = document.createElement('small'); date.textContent = relativeSaleDate(sale.date);
+          item.append(icon, price, label, date); list.appendChild(item);
+        }); content.appendChild(list);
+      }
+      historyRow.dataset.loaded = 'true';
+    } catch (error) { content.textContent = error.message; }
+  }
+  document.querySelectorAll('.sales-card-row').forEach(function (row) {
+    row.addEventListener('click', function (event) { if (!event.target.closest('input, button, a, label')) toggleSalesHistory(row); });
+    row.addEventListener('keydown', function (event) { if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('input, button')) { event.preventDefault(); toggleSalesHistory(row); } });
+  });
 
   var refresh = document.getElementById('refreshSales');
   var refreshToast = null;

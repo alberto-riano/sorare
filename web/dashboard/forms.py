@@ -116,7 +116,7 @@ class BatchSaleForm(forms.Form):
                 euros = forms.DecimalField(min_value=0.01, max_digits=8, decimal_places=2).clean(
                     str(raw_sale.get("euros") or "").replace(",", ".")
                 )
-                duration_days = forms.IntegerField(min_value=1, max_value=30).clean(raw_sale.get("duration_days", 2))
+                duration_days = forms.IntegerField(min_value=1, max_value=30).clean(raw_sale.get("duration_days", 7))
             except forms.ValidationError as exc:
                 raise forms.ValidationError("Revisa el precio y los días de las ventas.") from exc
             if not asset_id or len(asset_id) > 200:

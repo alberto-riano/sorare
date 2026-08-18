@@ -37,7 +37,7 @@ if (!ASSET_ID || !PRICE_CENTS) {
   console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias_en_venta] [min_receive_centimos]");
   process.exit(1);
 }
-const DURATION_DAYS = parseInt(DAYS || "2", 10);
+const DURATION_DAYS = parseInt(DAYS || "7", 10);
 if (!Number.isInteger(DURATION_DAYS) || DURATION_DAYS < 1 || DURATION_DAYS > 30) {
   console.error("La duración debe estar entre 1 y 30 días.");
   process.exit(1);

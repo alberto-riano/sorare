@@ -12,6 +12,7 @@ urlpatterns = [
     path("ventas/actualizar/", views.enqueue_sales_refresh, name="enqueue_sales_refresh"),
     path("ventas/encolar/", views.enqueue_batch_sales, name="enqueue_batch_sales"),
     path("ventas/estado/", views.sales_jobs_status, name="sales_jobs_status"),
+    path("ventas/historial/", views.sales_price_history, name="sales_price_history"),
     path("ofertas/", views.auctions_list, name="auctions_list"),
     path("ofertas/historial/", views.auction_price_history, name="auction_price_history"),
     path("ofertas/comparaciones/", views.auction_bid_comparisons, name="auction_bid_comparisons"),

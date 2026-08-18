@@ -21,6 +21,7 @@ from dashboard.models import (
 from dashboard.views import auction_price_history, auctions_list
 from sorare_utils import get_latest_prices
 from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler
+from web_services.sales_inventory import collection_display_name
 
 
 class LaLigaAuctionTests(TestCase):
@@ -487,6 +488,43 @@ class SalesWorkbenchTests(TestCase):
         item = SaleBatchItem.objects.get(job_id=response.json()["job_id"])
         self.assertEqual(item.duration_days, 5)
         self.assertEqual(str(item.euros), "4.50")
+
+    def test_sale_form_defaults_to_seven_days(self):
+        form = BatchSaleForm({
+            "sales": json.dumps([{"asset_id": "available", "euros": "4.50"}]),
+            "confirm": "on",
+        })
+        self.assertTrue(form.is_valid())
+        self.assertEqual(form.cleaned_data["sales"][0]["duration_days"], 7)
+
+    def test_collection_label_hides_redundant_rarity_and_season(self):
+        self.assertEqual(
+            collection_display_name("Real Club Celta de Vigo Super Rare 2021-22"),
+            "Real Club Celta de Vigo",
+        )
+
+    @patch("sorare_utils.build_headers", return_value={})
+    @patch("sorare_utils.get_recent_prices")
+    def test_sales_history_filters_classic_and_in_season(self, get_prices, _headers):
+        get_prices.return_value = [
+            {"amounts": {"eurCents": 1000}, "date": "2026-08-17T10:00:00Z", "card": {"seasonYear": 2026, "inSeasonEligible": True}},
+            {"amounts": {"eurCents": 800}, "date": "2026-08-16T10:00:00Z", "card": {"seasonYear": 2021, "inSeasonEligible": False}},
+        ]
+        classic = self.client.get(reverse("sales_price_history"), {
+            "player_slug": "denis-suarez", "rarity": "super_rare",
+            "mode": "classic", "season_year": 2021,
+        })
+        self.assertEqual([sale["eur"] for sale in classic.json()["sales"]], [8.0])
+        self.assertIsNone(get_prices.call_args.kwargs["season"])
+        self.assertEqual(get_prices.call_args.kwargs["season_eligibility"], "CLASSIC")
+
+        in_season = self.client.get(reverse("sales_price_history"), {
+            "player_slug": "denis-suarez", "rarity": "super_rare",
+            "mode": "in_season", "season_year": 2026,
+        })
+        self.assertEqual([sale["eur"] for sale in in_season.json()["sales"]], [10.0])
+        self.assertEqual(get_prices.call_args.kwargs["season"], 2026)
+        self.assertEqual(get_prices.call_args.kwargs["season_eligibility"], "IN_SEASON")
 
     @patch("dashboard.management.commands.process_sales_queue.run_card_sale")
     def test_sale_worker_uses_duration_and_marks_cached_card_as_listed(self, run_sale):

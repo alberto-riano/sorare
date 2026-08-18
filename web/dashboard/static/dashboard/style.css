@@ -1210,11 +1210,16 @@ pre {
 .sales-table-wrap { max-height: none; overflow: auto; }
 .sales-table { min-width: 1400px; }
 .sales-table th, .sales-table td { vertical-align: middle; }
+.sales-card-row { cursor: pointer; }
+.sales-card-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .sales-table td small { display: block; color: var(--muted); font-size: .72rem; margin-top: .15rem; }
 .sales-table tr.is-blocked { opacity: .68; background: #f5f4f0; }
 .sales-player { gap: .6rem; min-width: 190px; }
 .sales-player img, .sales-avatar { width: 43px; height: 43px; border-radius: 50%; object-fit: cover; background: #ecfdf5; flex: 0 0 auto; }
 .sales-avatar { display: grid; place-items: center; color: var(--muted); }
+.sales-history-cue { margin-left: .25rem; color: var(--accent); font-size: .72rem; }
+.sales-ray-icon { color: #eab308; font-size: .82rem; }
+.sales-history-row .history-content { padding: .15rem 0; }
 .sales-team { gap: .45rem; min-width: 135px; }
 .sales-team img { width: 27px; height: 27px; object-fit: contain; flex: 0 0 auto; }
 .sales-pill { width: max-content; border-radius: 999px; color: var(--good) !important; background: #dcfce7; padding: .15rem .38rem; }

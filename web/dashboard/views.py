@@ -20,6 +20,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from web_services.config_files import SorarePaths, load_telegram_alert_payload, save_telegram_alert_payload
 from web_services.process_runner import BidRequest, run_bid_scheduler, run_telegram_alert
+from web_services.sales_inventory import collection_display_name
 from .forms import BatchBidForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
 from .models import (
     AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer,
@@ -227,6 +228,8 @@ def sales_workbench(request):
     request.session[SALES_SELECTED_RARITY_SESSION_KEY] = selected_rarity
     inventory = SalesInventory.objects.filter(rarity=selected_rarity).first()
     all_cards = list(inventory.cards if inventory else [])
+    for card in all_cards:
+        card["collection_display_name"] = collection_display_name(card.get("collection_name"))
     available_teams = sorted({card.get("team", "-") for card in all_cards})
     available_positions = sorted({card.get("position", "-") for card in all_cards})
     available_seasons = sorted(
@@ -756,6 +759,66 @@ def auction_price_history(request):
             }
         )
     return JsonResponse({"sales": sales, "season": "2026-2027", "rarity": "Rare"})
+
+
+@require_GET
+def sales_price_history(request):
+    """Últimas ventas comparables para una carta del inventario de Ventas."""
+    import re
+    from sorare_utils import build_headers, get_recent_prices
+
+    player_slug = request.GET.get("player_slug", "").strip()
+    rarity = request.GET.get("rarity", "").strip().lower()
+    mode = request.GET.get("mode", "").strip().lower()
+    try:
+        season_year = int(request.GET.get("season_year", ""))
+    except ValueError:
+        season_year = 0
+    if not re.fullmatch(r"[a-z0-9-]{1,160}", player_slug):
+        return JsonResponse({"error": "Jugador no válido"}, status=400)
+    if rarity not in {"limited", "rare", "super_rare"} or mode not in {"in_season", "classic"}:
+        return JsonResponse({"error": "Comparación no válida"}, status=400)
+    if mode == "in_season" and not 2000 <= season_year <= 2100:
+        return JsonResponse({"error": "Temporada no válida"}, status=400)
+
+    try:
+        prices = get_recent_prices(
+            player_slug,
+            rarity=rarity,
+            season=season_year if mode == "in_season" else None,
+            first=5,
+            season_eligibility="IN_SEASON" if mode == "in_season" else "CLASSIC",
+            headers=build_headers(),
+        )
+    except Exception as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+
+    comparable = []
+    for price in prices:
+        sold_card = price.get("card") or {}
+        sold_in_season = bool(sold_card.get("inSeasonEligible"))
+        if (mode == "in_season") != sold_in_season:
+            continue
+        deal = price.get("deal") or {}
+        kind, icon, label = _classify_token_price_deal(deal)
+        eur_cents = (price.get("amounts") or {}).get("eurCents")
+        comparable.append({
+            "date": price.get("date"),
+            "eur": eur_cents / 100 if eur_cents is not None else None,
+            "kind": kind,
+            "icon": icon,
+            "label": label,
+            "season_year": sold_card.get("seasonYear"),
+        })
+        if len(comparable) == 5:
+            break
+
+    rarity_label = {"limited": "Limited", "rare": "Rare", "super_rare": "Super Rare"}[rarity]
+    return JsonResponse({
+        "sales": comparable,
+        "rarity": rarity_label,
+        "mode": "In season" if mode == "in_season" else "Classic",
+    })
 
 
 @require_POST
