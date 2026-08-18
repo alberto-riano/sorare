@@ -1182,7 +1182,7 @@ pre {
 .sales-market-head p:last-child { margin: .3rem 0 0; color: var(--muted); }
 .sales-sync-box { min-width: 220px; display: grid; gap: .15rem; padding: .75rem 1rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.72); }
 .sales-sync-box span, .sales-sync-box small { color: var(--muted); font-size: .78rem; }
-.sales-toolbar { justify-content: space-between; gap: 1rem; }
+.sales-toolbar { justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .sales-rarity-tabs { gap: .55rem; flex-wrap: wrap; }
 .sales-rarity { text-decoration: none; color: var(--ink); border: 1px solid var(--line); border-radius: 999px; padding: .58rem .85rem; font-weight: 700; opacity: .65; background: #fff; }
 .sales-rarity.is-active { opacity: 1; box-shadow: 0 4px 14px rgba(15,23,42,.12); transform: translateY(-1px); }
@@ -1259,6 +1259,12 @@ pre {
 .sales-toast strong { display: block; }
 .sales-toast p { margin: .15rem 0 0; color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
 .sales-toast button { border: 0; background: transparent; cursor: pointer; font-size: 1.2rem; }
+.sales-refresh-progress { flex: 1 0 100%; display: grid; gap: .35rem; }
+.sales-refresh-progress[hidden] { display: none; }
+.sales-refresh-progress > div:first-child { display: flex; justify-content: space-between; gap: .7rem; color: var(--muted); font-size: .8rem; }
+.sales-refresh-progress strong { color: var(--accent); }
+.sales-progress-track { height: 8px; overflow: hidden; border-radius: 999px; background: #e4e1d7; }
+.sales-progress-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), #2dd4bf); transition: width .3s ease; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 body.modal-open { overflow: hidden; }
 

@@ -416,6 +416,11 @@ def sales_jobs_status(request):
             "rarity": job.rarity,
             "status": job.status,
             "card_count": job.card_count,
+            "processed_count": job.processed_count,
+            "total_count": job.total_count,
+            "percent": round(job.processed_count * 100 / job.total_count) if job.total_count else 0,
+            "progress_label": job.progress_label,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
             "error": job.error,
         } for job in refreshes],
     })

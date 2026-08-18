@@ -18,21 +18,36 @@ def process_next_refresh():
             return None
         job.status = SalesRefreshJob.Status.RUNNING
         job.started_at = timezone.now()
-        job.save(update_fields=("status", "started_at"))
+        job.progress_label = "Descargando cartas de Sorare"
+        job.save(update_fields=("status", "started_at", "progress_label"))
 
     try:
-        cards = collect_sales_inventory(job.rarity)
+        def save_progress(processed, total, label):
+            SalesRefreshJob.objects.filter(pk=job.pk).update(
+                processed_count=processed,
+                total_count=total,
+                progress_label=label,
+            )
+
+        cards = collect_sales_inventory(job.rarity, progress=save_progress)
         SalesInventory.objects.update_or_create(
             rarity=job.rarity,
             defaults={"cards": cards, "refreshed_at": timezone.now()},
         )
         job.card_count = len(cards)
+        job.processed_count = len(cards)
+        job.total_count = len(cards)
+        job.progress_label = "Inventario actualizado"
         job.status = SalesRefreshJob.Status.SUCCEEDED
     except Exception as exc:
         job.status = SalesRefreshJob.Status.FAILED
+        job.progress_label = "Actualización interrumpida"
         job.error = f"No se pudo actualizar el inventario: {exc}"[:2000]
     job.finished_at = timezone.now()
-    job.save(update_fields=("status", "card_count", "error", "finished_at"))
+    job.save(update_fields=(
+        "status", "card_count", "processed_count", "total_count",
+        "progress_label", "error", "finished_at",
+    ))
     return job
 
 

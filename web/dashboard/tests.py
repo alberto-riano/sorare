@@ -519,6 +519,17 @@ class SalesWorkbenchTests(TestCase):
         self.assertEqual(job.card_count, 1)
         self.assertEqual(SalesInventory.objects.get(rarity="rare").cards[0]["asset_id"], "fresh")
 
+    def test_refresh_status_returns_real_percentage(self):
+        job = SalesRefreshJob.objects.create(
+            user=self.user, rarity="rare", status=SalesRefreshJob.Status.RUNNING,
+            processed_count=3, total_count=12, progress_label="Oriol Rey",
+        )
+        response = self.client.get(reverse("sales_jobs_status"))
+        progress = next(item for item in response.json()["refreshes"] if item["id"] == job.id)
+        self.assertEqual(progress["percent"], 25)
+        self.assertEqual(progress["processed_count"], 3)
+        self.assertEqual(progress["progress_label"], "Oriol Rey")
+
     @staticmethod
     def _card(asset_id, player, *, in_lineup=False):
         blocked = in_lineup

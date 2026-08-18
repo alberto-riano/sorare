@@ -35,6 +35,8 @@ def collect_sales_inventory(
     minimum_cache: dict = {}
     rows: list[dict] = []
     total = len(all_cards)
+    if progress:
+        progress(0, total, "Preparando precios")
 
     for index, card in enumerate(all_cards, start=1):
         player = card.get("anyPlayer") or {}

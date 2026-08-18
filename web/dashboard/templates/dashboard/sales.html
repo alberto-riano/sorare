@@ -35,6 +35,10 @@
         <span>{% if active_refresh %}Actualizando…{% else %}Actualizar {{ selected_rarity_label }}{% endif %}</span>
       </button>
     </div>
+    <div class="sales-refresh-progress" id="salesRefreshProgress" {% if not active_refresh %}hidden{% endif %}>
+      <div><strong id="salesRefreshPercent">0%</strong><span id="salesRefreshText">Preparando actualización…</span></div>
+      <div class="sales-progress-track"><span id="salesProgressBar" style="width:0%"></span></div>
+    </div>
   </section>
 
   {% if inventory %}
@@ -197,8 +201,16 @@
   function pollJobs(jobId, toast) { fetch('{% url "sales_jobs_status" %}?ids=' + jobId, { credentials: 'same-origin' }).then(parseJson).then(function (body) { var job = body.jobs[0]; if (!job) return; if (job.status === 'queued' || job.status === 'running') { setTimeout(function () { pollJobs(jobId, toast); }, 3000); return; } forgetJob(jobId); toast.className = 'sales-toast ' + (job.failure ? 'is-error' : 'is-success'); toast.querySelector('i').className = 'fas ' + (job.failure ? 'fa-circle-exclamation' : 'fa-circle-check'); toast.querySelector('strong').textContent = job.failure ? (job.success + ' ventas correctas · ' + job.failure + ' con error') : 'Ventas creadas correctamente'; toast.querySelector('p').textContent = job.items.filter(function (item) { return item.error; }).map(function (item) { return item.player + ': ' + item.error; }).join(' · '); }).catch(function () { setTimeout(function () { pollJobs(jobId, toast); }, 5000); }); }
 
   var refresh = document.getElementById('refreshSales');
-  if (refresh) refresh.addEventListener('click', function () { refresh.disabled = true; refresh.querySelector('i').classList.add('fa-spin'); refresh.querySelector('span').textContent = 'Actualizando…'; var data = new FormData(); data.append('csrfmiddlewaretoken', csrf); data.append('rarity', refresh.dataset.rarity); fetch('{% url "enqueue_sales_refresh" %}', { method: 'POST', body: data, credentials: 'same-origin' }).then(parseJson).then(function (body) { showToast('pending', 'Actualizando cartas', 'Puedes seguir navegando; te avisaré al terminar.'); pollRefresh(body.job_id); }).catch(function (error) { showToast('error', 'No se pudo actualizar', error.message); refresh.disabled = false; }); });
-  function pollRefresh(jobId) { fetch('{% url "sales_jobs_status" %}', { credentials: 'same-origin' }).then(parseJson).then(function (body) { var job = body.refreshes.find(function (item) { return item.id === jobId; }); if (!job) return; if (job.status === 'queued' || job.status === 'running') { setTimeout(function () { pollRefresh(jobId); }, 4000); return; } if (job.status === 'succeeded') { sessionStorage.setItem('sorare.sales.refreshDone', job.card_count + ' cartas actualizadas'); location.reload(); } else { showToast('error', 'Falló la actualización', job.error); refresh.disabled = false; refresh.querySelector('i').classList.remove('fa-spin'); } }).catch(function () { setTimeout(function () { pollRefresh(jobId); }, 6000); }); }
+  var refreshToast = null;
+  function updateRefreshProgress(job) {
+    var box = document.getElementById('salesRefreshProgress'), percent = job.percent || 0;
+    box.hidden = false; document.getElementById('salesRefreshPercent').textContent = percent + '%';
+    document.getElementById('salesProgressBar').style.width = percent + '%';
+    document.getElementById('salesRefreshText').textContent = job.total_count ? (job.processed_count + ' de ' + job.total_count + ' · ' + (job.progress_label || 'Consultando precios')) : (job.progress_label || 'Descargando cartas…');
+    if (refreshToast) refreshToast.querySelector('p').textContent = document.getElementById('salesRefreshText').textContent;
+  }
+  if (refresh) refresh.addEventListener('click', function () { refresh.disabled = true; refresh.querySelector('i').classList.add('fa-spin'); refresh.querySelector('span').textContent = 'Actualizando…'; document.getElementById('salesRefreshProgress').hidden = false; var data = new FormData(); data.append('csrfmiddlewaretoken', csrf); data.append('rarity', refresh.dataset.rarity); fetch('{% url "enqueue_sales_refresh" %}', { method: 'POST', body: data, credentials: 'same-origin' }).then(parseJson).then(function (body) { refreshToast = showToast('pending', 'Actualizando cartas', 'Descargando cartas de Sorare…'); pollRefresh(body.job_id); }).catch(function (error) { showToast('error', 'No se pudo actualizar', error.message); refresh.disabled = false; }); });
+  function pollRefresh(jobId) { fetch('{% url "sales_jobs_status" %}', { credentials: 'same-origin' }).then(parseJson).then(function (body) { var job = body.refreshes.find(function (item) { return item.id === jobId; }); if (!job) return; updateRefreshProgress(job); if (job.status === 'queued' || job.status === 'running') { setTimeout(function () { pollRefresh(jobId); }, 2000); return; } if (job.status === 'succeeded') { sessionStorage.setItem('sorare.sales.refreshDone', job.card_count + ' cartas actualizadas'); location.reload(); } else { showToast('error', 'Falló la actualización', job.error); refresh.disabled = false; refresh.querySelector('i').classList.remove('fa-spin'); } }).catch(function () { setTimeout(function () { pollRefresh(jobId); }, 5000); }); }
   var refreshDone = sessionStorage.getItem('sorare.sales.refreshDone'); if (refreshDone) { sessionStorage.removeItem('sorare.sales.refreshDone'); showToast('success', refreshDone); }
   pendingJobs().forEach(function (jobId) { pollJobs(jobId, showToast('pending', 'Comprobando una venta pendiente', 'Puedes seguir usando el inventario.')); });
   {% if active_refresh %}pollRefresh({{ active_refresh.id }});{% endif %}
