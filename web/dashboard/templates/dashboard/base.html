@@ -72,5 +72,55 @@
 
     {% block content %}{% endblock %}
   </main>
+
+  <aside class="global-sales-progress" id="globalSalesProgress" hidden aria-live="polite">
+    <i class="fas fa-arrows-rotate fa-spin"></i>
+    <div>
+      <strong id="globalSalesProgressTitle">Actualizando cartas</strong>
+      <span id="globalSalesProgressText">Conectando con el worker…</span>
+      <div class="global-sales-progress-track"><span id="globalSalesProgressBar" style="width:0%"></span></div>
+    </div>
+  </aside>
+
+  <script>
+  (function () {
+    var storageKey = 'sorare.sales.refreshJob';
+    var box = document.getElementById('globalSalesProgress');
+    var knownJobId = Number(localStorage.getItem(storageKey) || 0);
+
+    function schedule() { window.setTimeout(checkProgress, 2500); }
+    function checkProgress() {
+      fetch('{% url "sales_jobs_status" %}', { credentials: 'same-origin' })
+        .then(function (response) { return response.ok ? response.json() : Promise.reject(); })
+        .then(function (payload) {
+          var refreshes = payload.refreshes || [];
+          var job = knownJobId ? refreshes.find(function (item) { return item.id === knownJobId; }) : null;
+          if (!job) job = refreshes.find(function (item) { return item.status === 'queued' || item.status === 'running'; });
+          if (!job) { box.hidden = true; return; }
+
+          knownJobId = job.id;
+          localStorage.setItem(storageKey, String(job.id));
+          box.hidden = false;
+          var percent = job.percent || 0;
+          document.getElementById('globalSalesProgressBar').style.width = percent + '%';
+          document.getElementById('globalSalesProgressTitle').textContent = 'Actualizando ' + job.rarity + ' · ' + percent + '%';
+          document.getElementById('globalSalesProgressText').textContent = job.total_count
+            ? job.processed_count + ' de ' + job.total_count + ' · ' + (job.progress_label || 'Consultando precios')
+            : (job.progress_label || 'Descargando cartas de Sorare');
+
+          if (job.status === 'queued' || job.status === 'running') { schedule(); return; }
+          localStorage.removeItem(storageKey);
+          knownJobId = 0;
+          box.classList.add(job.status === 'succeeded' ? 'is-complete' : 'is-error');
+          box.querySelector('i').className = 'fas ' + (job.status === 'succeeded' ? 'fa-circle-check' : 'fa-circle-exclamation');
+          document.getElementById('globalSalesProgressTitle').textContent = job.status === 'succeeded' ? 'Inventario actualizado' : 'Falló la actualización';
+          document.getElementById('globalSalesProgressText').textContent = job.status === 'succeeded' ? job.card_count + ' cartas cargadas' : (job.error || 'Revisa el servicio de ventas');
+          window.setTimeout(function () { box.hidden = true; }, 8000);
+        })
+        .catch(function () { if (knownJobId) schedule(); });
+    }
+    checkProgress();
+  })();
+  </script>
 </body>
 </html>

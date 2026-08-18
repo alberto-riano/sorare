@@ -530,6 +530,16 @@ class SalesWorkbenchTests(TestCase):
         self.assertEqual(progress["processed_count"], 3)
         self.assertEqual(progress["progress_label"], "Oriol Rey")
 
+    def test_navigating_to_another_page_does_not_cancel_refresh(self):
+        job = SalesRefreshJob.objects.create(
+            user=self.user, rarity="super_rare", status=SalesRefreshJob.Status.RUNNING,
+            processed_count=2, total_count=8,
+        )
+        response = self.client.get(reverse("index"))
+        self.assertContains(response, "globalSalesProgress")
+        job.refresh_from_db()
+        self.assertEqual(job.status, SalesRefreshJob.Status.RUNNING)
+
     @staticmethod
     def _card(asset_id, player, *, in_lineup=False):
         blocked = in_lineup
