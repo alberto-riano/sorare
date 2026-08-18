@@ -11,9 +11,13 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
 import listar_subastas
-from dashboard.forms import BatchBidForm, InlineBidForm
+from dashboard.forms import BatchBidForm, BatchSaleForm, InlineBidForm
 from dashboard.management.commands.process_bid_queue import process_next_job
-from dashboard.models import AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer
+from dashboard.management.commands.process_sales_queue import process_next_refresh, process_next_sale
+from dashboard.models import (
+    AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer,
+    SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob,
+)
 from dashboard.views import auction_price_history, auctions_list
 from sorare_utils import get_latest_prices
 from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler
@@ -449,3 +453,83 @@ class AuctionActionsTests(TestCase):
         from web_services.config_files import SorarePaths
 
         return SorarePaths(repo_root=Path(__file__).resolve().parents[2])
+
+
+class SalesWorkbenchTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username="sales-user")
+        self.client.force_login(self.user)
+        self.available = self._card("available", "Jugador disponible")
+        self.blocked = self._card("blocked", "Jugador en lineup", in_lineup=True)
+        SalesInventory.objects.create(rarity="rare", cards=[self.available, self.blocked])
+
+    def test_sales_page_hides_blocked_cards_until_requested(self):
+        response = self.client.get(reverse("sales_workbench"), {"rarity": "rare"})
+        self.assertContains(response, "Jugador disponible")
+        self.assertNotContains(response, "Jugador en lineup")
+
+        response = self.client.get(reverse("sales_workbench"), {"rarity": "rare", "show_blocked": "1"})
+        self.assertContains(response, "Jugador en lineup")
+        self.assertContains(response, "En lineup")
+
+    def test_batch_sale_is_queued_and_rejects_blocked_cards(self):
+        blocked = json.dumps([{"asset_id": "blocked", "euros": "4,50", "duration_days": 5}])
+        response = self.client.post(reverse("enqueue_batch_sales"), {
+            "sales": blocked, "confirm": "on", "request_key": "e5701b64-7728-4f0e-8afb-2209c8785f59",
+        })
+        self.assertEqual(response.status_code, 409)
+
+        valid = json.dumps([{"asset_id": "available", "euros": "4.50", "duration_days": 5}])
+        response = self.client.post(reverse("enqueue_batch_sales"), {
+            "sales": valid, "confirm": "on", "request_key": "68df42b8-9703-437d-9d83-904ca8d2d3ad",
+        })
+        self.assertEqual(response.status_code, 202)
+        item = SaleBatchItem.objects.get(job_id=response.json()["job_id"])
+        self.assertEqual(item.duration_days, 5)
+        self.assertEqual(str(item.euros), "4.50")
+
+    @patch("dashboard.management.commands.process_sales_queue.run_card_sale")
+    def test_sale_worker_uses_duration_and_marks_cached_card_as_listed(self, run_sale):
+        run_sale.return_value = ScriptResult("mock", 0, "Oferta creada", "")
+        job = SaleBatchJob.objects.create(user=self.user, total_count=1)
+        SaleBatchItem.objects.create(
+            job=job, position=1, asset_id="available", player_name="Jugador disponible",
+            rarity="rare", euros="4.50", duration_days=7,
+        )
+
+        process_next_sale()
+
+        run_sale.assert_called_once()
+        self.assertEqual(run_sale.call_args.kwargs["duration_days"], 7)
+        job.refresh_from_db()
+        self.assertEqual(job.status, SaleBatchJob.Status.SUCCEEDED)
+        cached = SalesInventory.objects.get(rarity="rare").cards[0]
+        self.assertTrue(cached["active_listing"])
+        self.assertTrue(cached["blocked"])
+
+    @patch("dashboard.management.commands.process_sales_queue.collect_sales_inventory")
+    def test_refresh_replaces_only_the_selected_rarity_inventory(self, collect):
+        collect.return_value = [self._card("fresh", "Carta nueva")]
+        job = SalesRefreshJob.objects.create(user=self.user, rarity="rare")
+
+        process_next_refresh()
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, SalesRefreshJob.Status.SUCCEEDED)
+        self.assertEqual(job.card_count, 1)
+        self.assertEqual(SalesInventory.objects.get(rarity="rare").cards[0]["asset_id"], "fresh")
+
+    @staticmethod
+    def _card(asset_id, player, *, in_lineup=False):
+        blocked = in_lineup
+        return {
+            "asset_id": asset_id, "player": player, "player_slug": player.lower().replace(" ", "-"),
+            "player_picture_url": "", "team": "Equipo", "team_picture_url": "",
+            "rarity": "rare", "season": "2026-27", "position": "Defender", "league": "LaLiga",
+            "grade": 2, "in_season": True, "collection_name": "Colección",
+            "collection_rays": 100, "card_rays": 10, "rays_after_sale": 90,
+            "avg_price": 5.0, "recent_sales_count": 5, "min_price_classic": 4.0,
+            "min_price_inseason": 6.0, "in_lineup": in_lineup, "in_vault": False,
+            "active_listing": False, "blocked": blocked,
+            "blocked_reason": "En lineup" if blocked else "",
+        }

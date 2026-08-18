@@ -37,10 +37,15 @@ if (!ASSET_ID || !PRICE_CENTS) {
   console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias_en_venta] [min_receive_centimos]");
   process.exit(1);
 }
-const DURATION_DAYS = 2;
+const DURATION_DAYS = parseInt(DAYS || "2", 10);
+if (!Number.isInteger(DURATION_DAYS) || DURATION_DAYS < 1 || DURATION_DAYS > 30) {
+  console.error("La duración debe estar entre 1 y 30 días.");
+  process.exit(1);
+}
 const MIN_RECEIVE_AMOUNT_CENTS = Number.isFinite(parseInt(MIN_RECEIVE_CENTS, 10))
   ? parseInt(MIN_RECEIVE_CENTS, 10)
   : 0;
+const NO_RELIST = process.argv.includes("--no-relist");
 const RELIST_RETRY_COUNT = 3;
 const RELIST_RETRY_DELAY_MS = 1500;
 
@@ -480,6 +485,8 @@ async function sellCard(assetId, priceCents, durationDays, minReceiveCents, reli
       amount: priceCents.toString(),
       currency: CURRENCY,
     },
+    // La API de Sorare recibe la duración de la oferta en segundos.
+    duration: durationDays * 24 * 60 * 60,
     clientMutationId: crypto.randomBytes(8).toString("hex"),
   };
 
@@ -496,6 +503,10 @@ async function sellCard(assetId, priceCents, durationDays, minReceiveCents, reli
     createData.createSingleSaleOffer;
 
   if (createErrors && createErrors.length > 0) {
+    if (NO_RELIST && isActiveOfferError(createErrors)) {
+      console.error("La carta ya tiene una oferta pública activa. Actualiza el inventario antes de volver a intentarlo.");
+      process.exit(2);
+    }
     if (relistRetriesLeft > 0 && isActiveOfferError(createErrors)) {
       const existingOffer = await getExistingLiveOffer(assetId);
       if (!existingOffer) {

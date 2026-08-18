@@ -3,272 +3,205 @@
 {% block title %}Ventas | Sorare{% endblock %}
 
 {% block content %}
-<section class="panel reveal">
-  <p class="kicker">Modulo activo</p>
-  <h1>Exportar, editar y procesar ventas</h1>
-  <p>Exporta el Excel por rareza, ajusta precios directamente en la web y confirma qué cartas vender antes de ejecutar.</p>
-</section>
+<div class="sales-page">
+  <section class="panel sales-market-head reveal">
+    <div>
+      <p class="kicker">Mis cartas</p>
+      <h1><i class="fas fa-tags"></i> Mercado de ventas</h1>
+      <p>Actualiza una rareza, filtra tu inventario y prepara las cartas que quieras poner a la venta.</p>
+    </div>
+    <div class="sales-sync-box">
+      {% if inventory %}
+        <span>Última actualización</span>
+        <strong>{{ inventory.refreshed_at|date:'d/m/Y H:i' }}</strong>
+        <small>{{ total_cards }} cartas · {{ blocked_cards }} no vendibles</small>
+      {% else %}
+        <span>Sin inventario cargado</span>
+        <small>Actualiza la rareza seleccionada para empezar.</small>
+      {% endif %}
+    </div>
+  </section>
 
-<form method="post" class="panel form-panel reveal" style="animation-delay: 100ms;">
-  {% csrf_token %}
-  <div class="field-grid">
-    <label class="span-2">
-      <span>Rareza</span>
-      <div class="rarity-chips">
-        <label class="rarity-chip rarity-limited">
-          <input type="radio" name="rarity" value="limited" {% if selected_rarity == 'limited' %}checked{% endif %}>
-          <span>Amarillas · limited</span>
-        </label>
-        <label class="rarity-chip rarity-rare">
-          <input type="radio" name="rarity" value="rare" {% if selected_rarity == 'rare' %}checked{% endif %}>
-          <span>Rojas · rare</span>
-        </label>
-        <label class="rarity-chip rarity-super">
-          <input type="radio" name="rarity" value="super_rare" {% if selected_rarity == 'super_rare' %}checked{% endif %}>
-          <span>Azules · super_rare</span>
-        </label>
-      </div>
-    </label>
-    <label>
-      <span>Máximo de cartas (más nuevas primero)</span>
-      {{ export_form.max_cards }}
-    </label>
-  </div>
-  <div class="btn-row">
-    <button class="btn" type="submit" name="action" value="load_existing">Cargar Excel existente</button>
-    <button class="btn btn-accent js-export-trigger" type="submit" name="action" value="export">Generar nuevo Excel</button>
-    {% if excel_exists %}
-      <a class="btn btn-secondary" href="{% url 'sales_download_excel' %}">Descargar Excel actual</a>
-    {% endif %}
-  </div>
-</form>
+  <section class="panel sales-toolbar reveal">
+    <div class="sales-rarity-tabs" aria-label="Rareza">
+      <a href="?rarity=limited" class="sales-rarity rarity-limited {% if selected_rarity == 'limited' %}is-active{% endif %}"><i class="fas fa-gem"></i> Amarillas</a>
+      <a href="?rarity=rare" class="sales-rarity rarity-rare {% if selected_rarity == 'rare' %}is-active{% endif %}"><i class="fas fa-gem"></i> Rojas</a>
+      <a href="?rarity=super_rare" class="sales-rarity rarity-super {% if selected_rarity == 'super_rare' %}is-active{% endif %}"><i class="fas fa-gem"></i> Azules</a>
+    </div>
+    <div class="btn-row sales-toolbar-actions">
+      {% if inventory %}<a class="btn btn-secondary" href="{% url 'sales_download_excel' %}"><i class="fas fa-file-excel"></i> Excel</a>{% endif %}
+      <button class="btn btn-accent" type="button" id="refreshSales" data-rarity="{{ selected_rarity }}" {% if active_refresh %}disabled{% endif %}>
+        <i class="fas fa-arrows-rotate {% if active_refresh %}fa-spin{% endif %}"></i>
+        <span>{% if active_refresh %}Actualizando…{% else %}Actualizar {{ selected_rarity_label }}{% endif %}</span>
+      </button>
+    </div>
+  </section>
 
-<div class="processing-indicator" id="processingIndicator" aria-hidden="true">
-  <div class="processing-dot"></div>
-  <div>
-    <strong>Generando Excel...</strong>
-    <p>Extrayendo datos de Sorare. Esto puede tardar unos minutos según el número de cartas.</p>
-  </div>
-</div>
+  {% if inventory %}
+  <section class="panel sales-results reveal">
+    <div class="table-head">
+      <div><p class="kicker">Inventario disponible</p><h2><i class="fas fa-list"></i> {{ page_obj.paginator.count }} cartas</h2></div>
+      <p class="sales-help">Las cartas en lineup, vault o ya listadas se muestran solo si lo solicitas y no se pueden seleccionar.</p>
+    </div>
 
-{% if export_result %}
-<section class="panel reveal" style="animation-delay: 130ms;">
-  <h2>Resultado exportación</h2>
-  <p><strong>Exit code:</strong> {{ export_result.exit_code }}</p>
-  <p><strong>Command:</strong> {{ export_result.command }}</p>
-  <div class="log-grid">
-    <article>
-      <h3>stdout</h3>
-      <pre>{{ export_result.stdout|default:'(empty)' }}</pre>
-    </article>
-    <article>
-      <h3>stderr</h3>
-      <pre>{{ export_result.stderr|default:'(empty)' }}</pre>
-    </article>
-  </div>
-</section>
-{% endif %}
+    <form method="get" id="salesFilters" class="sales-filters">
+      <input type="hidden" name="rarity" value="{{ selected_rarity }}">
+      <label><span>Buscar jugador</span><input type="search" name="player" value="{{ request.GET.player }}" placeholder="Nombre" autocomplete="off"></label>
 
-{% if rows %}
-<form method="post" class="panel reveal sales-edit-panel" id="salesEditPanel" style="animation-delay: 160ms;">
-  {% csrf_token %}
-  <input type="hidden" name="rarity" value="{{ selected_rarity }}">
-  <div class="table-head">
-    <h2>Tabla editable ({{ rows|length }} cartas)</h2>
-  </div>
+      <details class="sales-multi-filter">
+        <summary>Equipos <b>{% if selected_teams %}({{ selected_teams|length }}){% else %}Todos{% endif %}</b></summary>
+        <div class="sales-multi-menu">
+          {% for team in available_teams %}<label><input type="checkbox" name="teams" value="{{ team }}" {% if team in selected_teams %}checked{% endif %}> <span>{{ team }}</span></label>{% endfor %}
+        </div>
+      </details>
 
-  <div class="table-wrap">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Jugador</th>
-          <th>Equipo</th>
-          <th>Temporada</th>
-          <th>Liga</th>
-          <th>Rayos carta</th>
-          <th>Rayos tras venta</th>
-          <th>Min classic</th>
-          <th>Min in-season</th>
-          <th>Media ventas</th>
-          <th>
-            <div class="price-head-actions">
-              <button class="btn btn-secondary btn-compact" type="submit" name="action" value="reset_prices">Reset precios</button>
-              <span>Precio venta</span>
-            </div>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in rows %}
-          <tr class="{% if row.in_season %}in-season-row{% endif %}">
-            <td>{{ row.jugador }}</td>
-            <td>{{ row.equipo|default:'-' }}</td>
-            <td>{{ row.temporada|default:'-' }}</td>
-            <td>{{ row.liga|default:'-' }}</td>
-            <td>{{ row.rayos_carta }}</td>
-            <td>{{ row.rayos_tras_venta|default_if_none:'-' }}</td>
-            <td>{% if row.precio_min_classic %}{{ row.precio_min_classic|floatformat:2 }} €{% else %}-{% endif %}</td>
-            <td>{% if row.precio_min_inseason %}{{ row.precio_min_inseason|floatformat:2 }} €{% else %}-{% endif %}</td>
-            <td>{% if row.precio_medio %}{{ row.precio_medio|floatformat:2 }} €{% else %}-{% endif %}</td>
-            <td>
-              <input type="text" name="price_row_{{ row.row }}" value="{% if row.precio_venta %}{{ row.precio_venta|floatformat:2 }}{% endif %}" placeholder="ej 12.50">
+      <details class="sales-multi-filter">
+        <summary>Posiciones <b>{% if selected_positions %}({{ selected_positions|length }}){% else %}Todas{% endif %}</b></summary>
+        <div class="sales-multi-menu">
+          {% for position in available_positions %}<label><input type="checkbox" name="positions" value="{{ position }}" {% if position in selected_positions %}checked{% endif %}> <span>{{ position }}</span></label>{% endfor %}
+        </div>
+      </details>
+
+      <label><span>Temporada</span><select name="season"><option value="">Todas</option>{% for value in available_seasons %}<option value="{{ value }}" {% if value == selected_season %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+      <label><span>Tipo</span><select name="in_season"><option value="">Todas</option><option value="yes" {% if selected_in_season == 'yes' %}selected{% endif %}>In season</option><option value="no" {% if selected_in_season == 'no' %}selected{% endif %}>Classic</option></select></label>
+      <label class="sales-check-filter"><input type="checkbox" name="show_blocked" value="1" {% if show_blocked %}checked{% endif %}><span>Ver no vendibles ({{ blocked_cards }})</span></label>
+      <label><span>Por página</span><select name="per_page"><option value="20" {% if per_page == 20 %}selected{% endif %}>20</option><option value="50" {% if per_page == 50 %}selected{% endif %}>50</option><option value="100" {% if per_page == 100 %}selected{% endif %}>100</option></select></label>
+      <a class="btn btn-secondary sales-clear" href="?rarity={{ selected_rarity }}">Limpiar</a>
+    </form>
+
+    <div class="table-wrap sales-table-wrap">
+      <table class="data-table sales-table">
+        <thead><tr><th><span class="sr-only">Seleccionar</span></th><th>Jugador</th><th>Equipo</th><th>Temporada</th><th>Posición</th><th>Liga / nivel</th><th>Rayos</th><th>Tras venta</th><th>Mín. classic</th><th>Mín. in-season</th><th>Media ventas</th><th>Precio</th></tr></thead>
+        <tbody>
+          {% for card in page_obj %}
+          <tr class="sales-card-row {% if card.in_season %}in-season-row{% endif %} {% if card.blocked %}is-blocked{% endif %}" data-asset-id="{{ card.asset_id }}" data-player="{{ card.player }}" data-player-picture="{{ card.player_picture_url }}" data-team-picture="{{ card.team_picture_url }}" data-average="{{ card.avg_price|default_if_none:'' }}">
+            <td><input class="sale-select" type="checkbox" aria-label="Seleccionar {{ card.player }}" {% if card.blocked %}disabled{% endif %}></td>
+            <td><div class="sales-player">{% if card.player_picture_url %}<img src="{{ card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="sales-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong>{{ card.player }}</strong><small>#{{ card.serial_number|default:'-' }}</small></div></div></td>
+            <td><div class="sales-team">{% if card.team_picture_url %}<img src="{{ card.team_picture_url }}" alt="" loading="lazy">{% endif %}<span>{{ card.team }}</span></div></td>
+            <td>{{ card.season }}{% if card.in_season %}<small class="sales-pill">In season</small>{% endif %}</td>
+            <td>{{ card.position }}</td>
+            <td>{{ card.league }}<small>Nivel {{ card.grade|floatformat:0 }}</small></td>
+            <td><strong>{{ card.card_rays|floatformat:0 }}</strong><small title="{{ card.collection_name }}">{{ card.collection_rays|floatformat:0 }} colección · {{ card.collection_name }}</small></td>
+            <td>{{ card.rays_after_sale|floatformat:0 }}</td>
+            <td>{% if card.min_price_classic != None %}{{ card.min_price_classic|floatformat:2 }} €{% else %}—{% endif %}</td>
+            <td>{% if card.min_price_inseason != None %}{{ card.min_price_inseason|floatformat:2 }} €{% else %}—{% endif %}</td>
+            <td>{% if card.avg_price != None %}{{ card.avg_price|floatformat:2 }} €<small>{{ card.recent_sales_count }} ventas</small>{% else %}—{% endif %}</td>
+            <td class="sales-price-cell">
+              {% if card.blocked %}<span class="sales-blocked"><i class="fas fa-lock"></i> {{ card.blocked_reason }}</span>{% if card.active_offer_eur %}<small>{{ card.active_offer_eur|floatformat:2 }} €</small>{% endif %}
+              {% else %}<div class="sales-price-control"><span>€</span><input class="sale-price" inputmode="decimal" type="text" placeholder="0,00"><button type="button" class="sale-one" title="Revisar solo esta carta"><i class="fas fa-tag"></i></button></div>{% endif %}
             </td>
           </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="btn-row" style="margin-top: 0.75rem;">
-    <button class="btn" type="submit" name="action" value="save_prices">Guardar precios en Excel</button>
-    <button class="btn btn-accent" type="submit" name="action" value="start_confirm_inline">Procesar ventas</button>
-  </div>
-</form>
-{% endif %}
-
-{% if confirmation_item %}
-<form method="post" class="panel reveal" style="animation-delay: 205ms;">
-  {% csrf_token %}
-  <input type="hidden" name="rarity" value="{{ selected_rarity }}">
-  <h2>Confirmación manual {{ confirmation_progress }}</h2>
-  <article class="confirm-card">
-    <div class="confirm-card-head">
-      <div>
-        <p class="confirm-card-kicker">Lista para vender</p>
-        <h3>{{ confirmation_item.jugador }}</h3>
-      </div>
-      <div class="confirm-chip-row">
-        {% if confirmation_item.in_season %}<span class="confirm-chip confirm-chip-good">In season</span>{% endif %}
-        {% if confirmation_item.temporada %}<span class="confirm-chip">{{ confirmation_item.temporada }}</span>{% endif %}
-        {% if confirmation_item.posicion %}<span class="confirm-chip">{{ confirmation_item.posicion }}</span>{% endif %}
-      </div>
+          {% empty %}<tr><td colspan="12" class="sales-empty">No hay cartas que coincidan con los filtros.</td></tr>{% endfor %}
+        </tbody>
+      </table>
     </div>
 
-    <div class="confirm-stat-grid">
-      <div class="confirm-stat">
-        <span>Equipo</span>
-        <strong>{{ confirmation_item.equipo|default:'-' }}</strong>
-      </div>
-      <div class="confirm-stat">
-        <span>Liga</span>
-        <strong>{{ confirmation_item.liga|default:'-' }}</strong>
-      </div>
-      <div class="confirm-stat">
-        <span>Nivel</span>
-        <strong>{{ confirmation_item.nivel|default:'-' }}</strong>
-      </div>
-      <div class="confirm-stat">
-        <span>Colección</span>
-        <strong>{{ confirmation_item.coleccion|default:'-' }}</strong>
-      </div>
-    </div>
+    {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="sales-pagination" aria-label="Paginación">
+      <button type="button" data-page="1" {% if not page_obj.has_previous %}disabled{% endif %}><i class="fas fa-angles-left"></i></button>
+      <button type="button" data-page="{% if page_obj.has_previous %}{{ page_obj.previous_page_number }}{% else %}1{% endif %}" {% if not page_obj.has_previous %}disabled{% endif %}><i class="fas fa-angle-left"></i></button>
+      <span>Página</span><input id="salesGoPage" type="number" min="1" max="{{ page_obj.paginator.num_pages }}" value="{{ page_obj.number }}"><span>de {{ page_obj.paginator.num_pages }}</span><button type="button" id="salesGoButton">Ir</button>
+      <button type="button" data-page="{% if page_obj.has_next %}{{ page_obj.next_page_number }}{% else %}{{ page_obj.paginator.num_pages }}{% endif %}" {% if not page_obj.has_next %}disabled{% endif %}><i class="fas fa-angle-right"></i></button>
+      <button type="button" data-page="{{ page_obj.paginator.num_pages }}" {% if not page_obj.has_next %}disabled{% endif %}><i class="fas fa-angles-right"></i></button>
+    </nav>{% endif %}
+  </section>
 
-    <div class="confirm-rays-row">
-      <div class="confirm-rays-card">
-        <span>Rayos colección</span>
-        <strong>{{ confirmation_item.rayos_coleccion|default_if_none:'-' }}</strong>
-      </div>
-      <div class="confirm-rays-card">
-        <span>Rayos carta</span>
-        <strong>{{ confirmation_item.rayos_carta }}</strong>
-      </div>
-      <div class="confirm-rays-card confirm-rays-card-accent">
-        <span>Rayos tras venta</span>
-        <strong>{{ confirmation_item.rayos_tras_venta|default_if_none:'-' }}</strong>
-      </div>
-    </div>
+  <div class="sales-basket" id="salesBasket" hidden><span><strong id="salesSelectedCount">0</strong> ventas preparadas</span><button class="btn btn-accent" type="button" id="reviewSales"><i class="fas fa-list-check"></i> Revisar ventas</button></div>
+  {% else %}
+  <section class="panel sales-empty-state reveal"><i class="fas fa-box-open"></i><h2>Aún no hay cartas cargadas</h2><p>Pulsa “Actualizar” para traer todas tus cartas {{ selected_rarity }}. La tarea seguirá en segundo plano aunque cambies de pantalla.</p></section>
+  {% endif %}
+</div>
 
-    <div class="confirm-price-grid">
-      <div class="confirm-price-box">
-        <span>Min classic</span>
-        <strong>{% if confirmation_item.precio_min_classic %}{{ confirmation_item.precio_min_classic|floatformat:2 }} €{% else %}-{% endif %}</strong>
-      </div>
-      <div class="confirm-price-box">
-        <span>Min in-season</span>
-        <strong>{% if confirmation_item.precio_min_inseason %}{{ confirmation_item.precio_min_inseason|floatformat:2 }} €{% else %}-{% endif %}</strong>
-      </div>
-      <div class="confirm-price-box">
-        <span>Media ventas</span>
-        <strong>{% if confirmation_item.precio_medio %}{{ confirmation_item.precio_medio|floatformat:2 }} €{% else %}-{% endif %}</strong>
-      </div>
-      <div class="confirm-price-box confirm-price-box-sale">
-        <span>Precio venta</span>
-        <strong>{% if confirmation_item.precio_venta %}{{ confirmation_item.precio_venta|floatformat:2 }} €{% else %}-{% endif %}</strong>
-      </div>
-    </div>
-  </article>
-
-  <div class="btn-row">
-    <button class="btn btn-accent" type="submit" name="action" value="confirm_step_sell">Confirmar y vender</button>
-    <button class="btn" type="submit" name="action" value="confirm_step_skip">Saltar esta carta</button>
-    <button class="btn btn-secondary" type="submit" name="action" value="confirm_step_cancel">Cancelar confirmación</button>
-  </div>
-</form>
-{% elif confirmation_done %}
-<form method="post" class="panel reveal" style="animation-delay: 205ms;">
-  {% csrf_token %}
-  <input type="hidden" name="rarity" value="{{ selected_rarity }}">
-  <h2>Confirmación paso a paso completada</h2>
-  <div class="btn-row">
-    <button class="btn btn-secondary" type="submit" name="action" value="confirm_step_finish">Cerrar resumen</button>
-  </div>
-</form>
-{% endif %}
-
-{% if execution_result %}
-<section class="panel reveal" style="animation-delay: 220ms;">
-  <h2>Resultado de ventas</h2>
-  <p><strong>OK:</strong> {{ execution_result.ok }} | <strong>Errores:</strong> {{ execution_result.fail }} | <strong>Saltadas:</strong> {{ execution_result.skip }}</p>
-  <div class="table-wrap compact-table">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Jugador</th>
-          <th>Estado</th>
-          <th>Detalle</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in execution_result.items %}
-          <tr>
-            <td>{{ item.jugador }}</td>
-            <td>{{ item.status }}</td>
-            <td><pre>{{ item.message }}</pre></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
+<div class="sales-modal" id="salesModal" hidden>
+  <div class="sales-modal-backdrop" data-close-modal></div>
+  <section class="sales-modal-card" role="dialog" aria-modal="true" aria-labelledby="salesModalTitle">
+    <button class="sales-modal-close" type="button" data-close-modal aria-label="Cerrar">×</button>
+    <h2 id="salesModalTitle"><i class="fas fa-shield-halved"></i> Confirmar ventas</h2><p>Revisa el precio y el número de días. Las ventas se enviarán en segundo plano.</p>
+    <div id="salesReviewList" class="sales-review-list"></div>
+    <div class="btn-row sales-modal-actions"><button class="btn btn-secondary" type="button" data-close-modal>Volver</button><button class="btn btn-accent" type="button" id="confirmSales"><i class="fas fa-tags"></i> Confirmar y enviar</button></div>
+  </section>
+</div>
+<div class="sales-toasts" id="salesToasts" aria-live="polite"></div>
 
 <script>
-  (function () {
-    var exportBtn = document.querySelector('.js-export-trigger');
-    var indicator = document.getElementById('processingIndicator');
-    var salesEditPanel = document.getElementById('salesEditPanel');
-    if (exportBtn && indicator) {
-      exportBtn.addEventListener('click', function () {
-        indicator.classList.add('is-visible');
-        indicator.setAttribute('aria-hidden', 'false');
-        document.body.classList.add('sales-export-pending');
-        if (salesEditPanel) {
-          salesEditPanel.setAttribute('aria-hidden', 'true');
-        }
-      });
-    }
+(function () {
+  var csrf = '{{ csrf_token }}';
+  var filterForm = document.getElementById('salesFilters');
+  var draftKey = 'sorare.sales.draft';
+  var pendingSaleKey = 'sorare.sales.pendingJobs';
+  var drafts = {};
+  try { drafts = JSON.parse(sessionStorage.getItem(draftKey) || '{}'); } catch (_) {}
 
-    var forms = document.querySelectorAll('form');
-    forms.forEach(function (form) {
-      form.addEventListener('submit', function () {
-        sessionStorage.setItem('sales.scrollY', String(window.scrollY || 0));
-      });
+  function submitFilters() { if (!filterForm) return; filterForm.submit(); }
+  if (filterForm) {
+    var timer, search = filterForm.querySelector('[name="player"]');
+    if (search) search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(submitFilters, 450); });
+    filterForm.querySelectorAll('select, input[name="show_blocked"]').forEach(function (input) { input.addEventListener('change', submitFilters); });
+    filterForm.querySelectorAll('.sales-multi-filter').forEach(function (details) {
+      var dirty = false;
+      details.querySelectorAll('input').forEach(function (input) { input.addEventListener('change', function () { dirty = true; }); });
+      details.addEventListener('toggle', function () { if (!details.open && dirty) submitFilters(); });
     });
+    document.addEventListener('click', function (event) { filterForm.querySelectorAll('.sales-multi-filter[open]').forEach(function (details) { if (!details.contains(event.target)) details.open = false; }); });
+  }
 
-    var savedY = sessionStorage.getItem('sales.scrollY');
-    if (savedY !== null) {
-      window.scrollTo(0, Number(savedY));
-    }
-  })();
+  function pageTo(number) { var params = new URLSearchParams(location.search); params.set('page', number); location.href = location.pathname + '?' + params.toString(); }
+  document.querySelectorAll('[data-page]').forEach(function (button) { button.addEventListener('click', function () { pageTo(button.dataset.page); }); });
+  var go = document.getElementById('salesGoButton'); if (go) go.addEventListener('click', function () { pageTo(document.getElementById('salesGoPage').value); });
+
+  function persistDraft(assetId, price, selected) { if (!price && !selected) delete drafts[assetId]; else drafts[assetId] = { price: price, selected: selected }; sessionStorage.setItem(draftKey, JSON.stringify(drafts)); }
+  function updateBasket() { var selected = document.querySelectorAll('.sale-select:checked').length, basket = document.getElementById('salesBasket'); if (basket) basket.hidden = !selected; var count = document.getElementById('salesSelectedCount'); if (count) count.textContent = selected; }
+  document.querySelectorAll('.sales-card-row').forEach(function (row) {
+    var assetId = row.dataset.assetId, checkbox = row.querySelector('.sale-select'), price = row.querySelector('.sale-price'); if (!checkbox || !price) return;
+    if (drafts[assetId]) { price.value = drafts[assetId].price || ''; checkbox.checked = !!drafts[assetId].selected; }
+    price.addEventListener('input', function () { price.value = price.value.replace(/[^0-9.,]/g, ''); if (price.value) checkbox.checked = true; persistDraft(assetId, price.value, checkbox.checked); updateBasket(); });
+    checkbox.addEventListener('change', function () { persistDraft(assetId, price.value, checkbox.checked); updateBasket(); });
+    row.querySelector('.sale-one').addEventListener('click', function () { if (!validPrice(price.value)) { showToast('error', 'Indica un precio válido para ' + row.dataset.player); price.focus(); return; } document.querySelectorAll('.sale-select').forEach(function (item) { item.checked = false; }); checkbox.checked = true; persistDraft(assetId, price.value, true); updateBasket(); openReview(); });
+  }); updateBasket();
+
+  function validPrice(value) { return Number(String(value).replace(',', '.')) > 0; }
+  var modal = document.getElementById('salesModal');
+  function selectedRows() { return Array.from(document.querySelectorAll('.sale-select:checked')).map(function (input) { return input.closest('.sales-card-row'); }); }
+  function openReview() {
+    var rows = selectedRows(), invalid = rows.find(function (row) { return !validPrice(row.querySelector('.sale-price').value); });
+    if (invalid) { showToast('error', 'Revisa el precio de ' + invalid.dataset.player); invalid.querySelector('.sale-price').focus(); return; }
+    var list = document.getElementById('salesReviewList'); list.innerHTML = '';
+    rows.forEach(function (row) {
+      var item = document.createElement('article'); item.className = 'sales-review-item'; item.dataset.assetId = row.dataset.assetId;
+      item.innerHTML = '<div class="sales-review-player">' + (row.dataset.playerPicture ? '<img src="' + row.dataset.playerPicture + '" alt="">' : '') + (row.dataset.teamPicture ? '<img class="team" src="' + row.dataset.teamPicture + '" alt="">' : '') + '<strong></strong></div><label><span>Precio</span><div class="sales-review-input"><span>€</span><input class="review-price" inputmode="decimal"></div></label><label><span>Días</span><input class="review-days" type="number" min="1" max="30" value="2"></label>';
+      item.querySelector('strong').textContent = row.dataset.player; item.querySelector('.review-price').value = row.querySelector('.sale-price').value; list.appendChild(item);
+    }); modal.hidden = false; document.body.classList.add('modal-open');
+  }
+  var review = document.getElementById('reviewSales'); if (review) review.addEventListener('click', openReview);
+  document.querySelectorAll('[data-close-modal]').forEach(function (button) { button.addEventListener('click', function () { modal.hidden = true; document.body.classList.remove('modal-open'); }); });
+
+  function showToast(kind, title, detail) { var toast = document.createElement('article'); toast.className = 'sales-toast is-' + kind; toast.innerHTML = '<i class="fas ' + (kind === 'error' ? 'fa-circle-exclamation' : kind === 'success' ? 'fa-circle-check' : 'fa-spinner fa-spin') + '"></i><div><strong></strong><p></p></div><button>×</button>'; toast.querySelector('strong').textContent = title; toast.querySelector('p').textContent = detail || ''; toast.querySelector('button').onclick = function () { toast.remove(); }; document.getElementById('salesToasts').appendChild(toast); return toast; }
+  function parseJson(response) { return response.text().then(function (text) { try { return JSON.parse(text); } catch (_) { throw new Error('El servidor no devolvió una respuesta válida.'); } }); }
+  function pendingJobs() { try { return JSON.parse(localStorage.getItem(pendingSaleKey) || '[]'); } catch (_) { return []; } }
+  function rememberJob(jobId) { var ids = pendingJobs(); if (!ids.includes(jobId)) ids.push(jobId); localStorage.setItem(pendingSaleKey, JSON.stringify(ids)); }
+  function forgetJob(jobId) { localStorage.setItem(pendingSaleKey, JSON.stringify(pendingJobs().filter(function (id) { return id !== jobId; }))); }
+
+  var confirm = document.getElementById('confirmSales');
+  if (confirm) confirm.addEventListener('click', function () {
+    var items = Array.from(document.querySelectorAll('.sales-review-item')).map(function (item) { return { asset_id: item.dataset.assetId, euros: item.querySelector('.review-price').value.replace(',', '.'), duration_days: item.querySelector('.review-days').value }; });
+    if (items.some(function (item) { return !validPrice(item.euros) || item.duration_days < 1 || item.duration_days > 30; })) { showToast('error', 'Revisa los precios y los días'); return; }
+    confirm.disabled = true; confirm.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Encolando…';
+    var requestKey = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (character) { var random = crypto.getRandomValues(new Uint8Array(1))[0] % 16; return (character === 'x' ? random : (random & 3) | 8).toString(16); }));
+    var data = new FormData(); data.append('csrfmiddlewaretoken', csrf); data.append('confirm', 'on'); data.append('sales', JSON.stringify(items)); data.append('request_key', requestKey);
+    fetch('{% url "enqueue_batch_sales" %}', { method: 'POST', body: data, credentials: 'same-origin' }).then(function (response) { return parseJson(response).then(function (body) { if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : 'No se pudo iniciar el envío.'); return body; }); }).then(function (body) {
+      modal.hidden = true; document.body.classList.remove('modal-open');
+      items.forEach(function (item) { delete drafts[item.asset_id]; var row = document.querySelector('[data-asset-id="' + CSS.escape(item.asset_id) + '"]'); if (row) { row.querySelector('.sale-select').checked = false; row.querySelector('.sale-price').value = ''; } }); sessionStorage.setItem(draftKey, JSON.stringify(drafts)); updateBasket();
+      rememberJob(body.job_id); var toast = showToast('pending', 'Enviando ' + items.length + ' ventas', 'Puedes seguir preparando otras cartas.'); pollJobs(body.job_id, toast);
+    }).catch(function (error) { showToast('error', 'No se pudo iniciar el envío', error.message); }).finally(function () { confirm.disabled = false; confirm.innerHTML = '<i class="fas fa-tags"></i> Confirmar y enviar'; });
+  });
+  function pollJobs(jobId, toast) { fetch('{% url "sales_jobs_status" %}?ids=' + jobId, { credentials: 'same-origin' }).then(parseJson).then(function (body) { var job = body.jobs[0]; if (!job) return; if (job.status === 'queued' || job.status === 'running') { setTimeout(function () { pollJobs(jobId, toast); }, 3000); return; } forgetJob(jobId); toast.className = 'sales-toast ' + (job.failure ? 'is-error' : 'is-success'); toast.querySelector('i').className = 'fas ' + (job.failure ? 'fa-circle-exclamation' : 'fa-circle-check'); toast.querySelector('strong').textContent = job.failure ? (job.success + ' ventas correctas · ' + job.failure + ' con error') : 'Ventas creadas correctamente'; toast.querySelector('p').textContent = job.items.filter(function (item) { return item.error; }).map(function (item) { return item.player + ': ' + item.error; }).join(' · '); }).catch(function () { setTimeout(function () { pollJobs(jobId, toast); }, 5000); }); }
+
+  var refresh = document.getElementById('refreshSales');
+  if (refresh) refresh.addEventListener('click', function () { refresh.disabled = true; refresh.querySelector('i').classList.add('fa-spin'); refresh.querySelector('span').textContent = 'Actualizando…'; var data = new FormData(); data.append('csrfmiddlewaretoken', csrf); data.append('rarity', refresh.dataset.rarity); fetch('{% url "enqueue_sales_refresh" %}', { method: 'POST', body: data, credentials: 'same-origin' }).then(parseJson).then(function (body) { showToast('pending', 'Actualizando cartas', 'Puedes seguir navegando; te avisaré al terminar.'); pollRefresh(body.job_id); }).catch(function (error) { showToast('error', 'No se pudo actualizar', error.message); refresh.disabled = false; }); });
+  function pollRefresh(jobId) { fetch('{% url "sales_jobs_status" %}', { credentials: 'same-origin' }).then(parseJson).then(function (body) { var job = body.refreshes.find(function (item) { return item.id === jobId; }); if (!job) return; if (job.status === 'queued' || job.status === 'running') { setTimeout(function () { pollRefresh(jobId); }, 4000); return; } if (job.status === 'succeeded') { sessionStorage.setItem('sorare.sales.refreshDone', job.card_count + ' cartas actualizadas'); location.reload(); } else { showToast('error', 'Falló la actualización', job.error); refresh.disabled = false; refresh.querySelector('i').classList.remove('fa-spin'); } }).catch(function () { setTimeout(function () { pollRefresh(jobId); }, 6000); }); }
+  var refreshDone = sessionStorage.getItem('sorare.sales.refreshDone'); if (refreshDone) { sessionStorage.removeItem('sorare.sales.refreshDone'); showToast('success', refreshDone); }
+  pendingJobs().forEach(function (jobId) { pollJobs(jobId, showToast('pending', 'Comprobando una venta pendiente', 'Puedes seguir usando el inventario.')); });
+  {% if active_refresh %}pollRefresh({{ active_refresh.id }});{% endif %}
+})();
 </script>
 {% endblock %}

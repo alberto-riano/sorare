@@ -95,13 +95,31 @@ class BatchBidForm(forms.Form):
         return bids
 
 
-class ExportCardsForm(forms.Form):
-    rarity = forms.ChoiceField(
-        choices=[
-            ("limited", "Amarillas (limited)"),
-            ("rare", "Rojas (rare)"),
-            ("super_rare", "Azules (super_rare)"),
-        ],
-        initial="super_rare",
-    )
-    max_cards = forms.IntegerField(min_value=1, max_value=5000, initial=10)
+class BatchSaleForm(forms.Form):
+    sales = forms.CharField(widget=forms.HiddenInput)
+    confirm = forms.BooleanField(required=True)
+
+    def clean_sales(self):
+        try:
+            raw_sales = json.loads(self.cleaned_data["sales"])
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise forms.ValidationError("El resumen de ventas no es válido.") from exc
+        if not isinstance(raw_sales, list) or not 1 <= len(raw_sales) <= 50:
+            raise forms.ValidationError("Selecciona entre 1 y 50 cartas.")
+
+        sales = []
+        for raw_sale in raw_sales:
+            if not isinstance(raw_sale, dict):
+                raise forms.ValidationError("Hay una venta no válida.")
+            asset_id = str(raw_sale.get("asset_id") or "").strip()
+            try:
+                euros = forms.DecimalField(min_value=0.01, max_digits=8, decimal_places=2).clean(
+                    str(raw_sale.get("euros") or "").replace(",", ".")
+                )
+                duration_days = forms.IntegerField(min_value=1, max_value=30).clean(raw_sale.get("duration_days", 2))
+            except forms.ValidationError as exc:
+                raise forms.ValidationError("Revisa el precio y los días de las ventas.") from exc
+            if not asset_id or len(asset_id) > 200:
+                raise forms.ValidationError("Hay una carta sin identificador válido.")
+            sales.append({"asset_id": asset_id, "euros": euros, "duration_days": duration_days})
+        return sales

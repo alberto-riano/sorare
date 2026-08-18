@@ -55,7 +55,8 @@ cd /ruta/al/repo
 
 El script hace `git pull --ff-only`, instala dependencias Python y Node,
 comprueba Django y migraciones pendientes, migra, recopila estáticos, reinicia
-Gunicorn y comprueba `/healthz/` directamente sobre el socket. Si encuentra
+Gunicorn, mantiene activos los workers de pujas y ventas y comprueba `/healthz/`
+directamente sobre el socket. Si encuentra
 cambios locales inesperados, se detiene antes del pull.
 
 ## Datos que deben persistir
@@ -72,6 +73,8 @@ Comandos útiles:
 
 ```bash
 sudo systemctl status sorare-web
+sudo systemctl status sorare-sales-worker
 sudo journalctl -u sorare-web -n 100 --no-pager
+sudo journalctl -u sorare-sales-worker -n 100 --no-pager
 sudo nginx -t
 ```

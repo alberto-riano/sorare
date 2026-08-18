@@ -50,6 +50,22 @@ def bid_error_message(result: ScriptResult, *, max_length: int = 500) -> str:
     return detail[:max_length]
 
 
+def sale_error_message(result: ScriptResult, *, max_length: int = 500) -> str:
+    """Extrae el mensaje útil de Sorare sin mostrar credenciales ni el comando."""
+    raw = result.stderr or result.stdout or "Sorare no devolvió una descripción del error."
+    raw = re.sub(r"\x1b\[[0-9;]*m", "", raw)
+    lines = [line.strip().lstrip("❌").strip() for line in raw.splitlines() if line.strip()]
+    ignored = ("tipo recibido:", "errores preparando la oferta:", "errores creando la oferta:")
+    useful = [line for line in lines if not line.casefold().startswith(ignored)]
+    detail = " · ".join(useful[-3:] if useful else lines[-1:])
+    detail = re.sub(
+        r"(?i)(authorization|bearer|jwt_token|private_key)(?:\s*[:=]\s*|\s+)\S+",
+        r"\1: [oculto]",
+        detail,
+    )
+    return (detail or "Sorare no devolvió una descripción del error.")[:max_length]
+
+
 def _run_command(cmd: list[str], cwd: Path) -> ScriptResult:
     completed = subprocess.run(
         cmd,
@@ -104,4 +120,18 @@ def run_bid_scheduler(paths: SorarePaths, request: BidRequest) -> ScriptResult:
         cmd.append("--no-credit")
     cmd.extend(("--currency", request.currency.upper()))
 
+    return _run_command(cmd, paths.repo_root)
+
+
+def run_card_sale(paths: SorarePaths, *, asset_id: str, euros: str, duration_days: int) -> ScriptResult:
+    price_cents = int(round(float(euros) * 100))
+    cmd = [
+        "node",
+        str(paths.repo_root / "javascript" / "vender_carta.js"),
+        asset_id.strip(),
+        str(price_cents),
+        str(int(duration_days)),
+        "0",
+        "--no-relist",
+    ]
     return _run_command(cmd, paths.repo_root)

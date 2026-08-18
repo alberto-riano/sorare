@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import uuid
+from io import BytesIO
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -12,31 +13,22 @@ from django.contrib import messages
 from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.http import FileResponse, Http404
+from django.http import FileResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from web_services.config_files import SorarePaths, load_telegram_alert_payload, save_telegram_alert_payload
 from web_services.process_runner import BidRequest, run_bid_scheduler, run_telegram_alert
-from web_services.sales_excel import (
-    excel_path_for_rarity,
-    execute_sales,
-    load_sales_rows,
-    reset_prices,
-    rows_ready_to_sell,
-    run_export_cards,
-    save_prices,
+from .forms import BatchBidForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
+from .models import (
+    AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer,
+    SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob,
 )
-
-from .forms import BatchBidForm, BidScheduleForm, ExportCardsForm, InlineBidForm, TelegramSettingsForm
-from .models import AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PATHS = SorarePaths(repo_root=REPO_ROOT)
 SALES_SELECTED_RARITY_SESSION_KEY = "sales_selected_rarity"
-SALES_CONFIRM_STATE_SESSION_KEY = "sales_confirm_state"
-SALES_DURATION_DAYS = 2
 
 # Añadir el directorio src al path para importar listar_subastas
 sys.path.insert(0, str(REPO_ROOT / 'src'))
@@ -227,214 +219,206 @@ def _normalize_sales_rarity(rarity: str | None) -> str:
     return "super_rare"
 
 
-def _current_sales_excel_path(rarity: str) -> Path | None:
-    path = excel_path_for_rarity(PATHS, rarity)
-    if not path.exists():
-        return None
-    return path
-
-
-def _get_confirm_state(request) -> dict | None:
-    state = request.session.get(SALES_CONFIRM_STATE_SESSION_KEY)
-    if not state:
-        return None
-    if not isinstance(state, dict):
-        return None
-    return state
-
-
-def _clear_confirm_state(request) -> None:
-    request.session.pop(SALES_CONFIRM_STATE_SESSION_KEY, None)
-
-
-def _advance_confirmation_step(request, rows: list[dict], action: str) -> None:
-    state = _get_confirm_state(request)
-    if not state:
-        messages.error(request, "No hay proceso de confirmación activo.")
-        return
-
-    queue = [int(v) for v in state.get("queue", [])]
-    queue_index = int(state.get("index", 0))
-    results = list(state.get("results", []))
-
-    if queue_index >= len(queue):
-        messages.info(request, "La confirmación ya estaba terminada.")
-        return
-
-    row_id = queue[queue_index]
-    by_row = {int(r["row"]): r for r in rows}
-    item = by_row.get(row_id)
-    if not item:
-        results.append({"jugador": f"Fila {row_id}", "status": "skip", "message": "No encontrada en Excel"})
-    elif action == "confirm_step_skip":
-        results.append({"jugador": item["jugador"], "status": "skip", "message": "Saltada por usuario"})
-    else:
-        execution = execute_sales(PATHS, rows=rows, selected_rows=[row_id], days=SALES_DURATION_DAYS)
-        if execution.items:
-            results.extend(execution.items)
-        else:
-            results.append({"jugador": item["jugador"], "status": "fail", "message": "Sin resultado de ejecución"})
-
-    state["index"] = queue_index + 1
-    state["results"] = results
-    request.session[SALES_CONFIRM_STATE_SESSION_KEY] = state
-
-
 def sales_workbench(request):
-    if request.method != "POST":
-        _clear_confirm_state(request)
-
     selected_rarity = _normalize_sales_rarity(
-        request.POST.get("rarity")
-        or request.GET.get("rarity")
+        request.GET.get("rarity")
         or request.session.get(SALES_SELECTED_RARITY_SESSION_KEY)
     )
     request.session[SALES_SELECTED_RARITY_SESSION_KEY] = selected_rarity
+    inventory = SalesInventory.objects.filter(rarity=selected_rarity).first()
+    all_cards = list(inventory.cards if inventory else [])
+    available_teams = sorted({card.get("team", "-") for card in all_cards})
+    available_positions = sorted({card.get("position", "-") for card in all_cards})
+    available_seasons = sorted(
+        {card.get("season", "-") for card in all_cards},
+        reverse=True,
+    )
 
-    export_form = ExportCardsForm(initial={"rarity": selected_rarity, "max_cards": 10})
-    export_result = None
-    execution_result = None
+    player_filter = request.GET.get("player", "").strip().casefold()
+    teams = [value for value in request.GET.getlist("teams") if value]
+    positions = [value for value in request.GET.getlist("positions") if value]
+    season = request.GET.get("season", "").strip()
+    in_season = request.GET.get("in_season", "").strip()
+    show_blocked = request.GET.get("show_blocked") == "1"
 
-    current_excel = _current_sales_excel_path(selected_rarity)
+    cards = []
+    for card in all_cards:
+        if card.get("blocked") and not show_blocked:
+            continue
+        if player_filter and player_filter not in str(card.get("player", "")).casefold():
+            continue
+        if teams and card.get("team") not in teams:
+            continue
+        if positions and card.get("position") not in positions:
+            continue
+        if season and card.get("season") != season:
+            continue
+        if in_season == "yes" and not card.get("in_season"):
+            continue
+        if in_season == "no" and card.get("in_season"):
+            continue
+        cards.append(card)
 
-    if request.method == "POST":
-        action = request.POST.get("action")
-
-        if action in {"load_existing", "export"}:
-            export_form = ExportCardsForm(request.POST)
-            if export_form.is_valid():
-                rarity = _normalize_sales_rarity(export_form.cleaned_data["rarity"])
-                max_cards = int(export_form.cleaned_data["max_cards"])
-                request.session[SALES_SELECTED_RARITY_SESSION_KEY] = rarity
-                selected_rarity = rarity
-                current_excel = _current_sales_excel_path(rarity)
-
-                if action == "load_existing":
-                    if current_excel:
-                        messages.success(request, f"Cargado Excel existente: {current_excel.name}")
-                    else:
-                        messages.info(request, "No existe Excel para esa rareza todavía. Usa 'Generar nuevo Excel'.")
-                    _clear_confirm_state(request)
-                else:
-                    result = run_export_cards(PATHS, rarity=rarity, max_cards=max_cards)
-                    expected_excel = excel_path_for_rarity(PATHS, rarity)
-                    if result.exit_code == 0 and expected_excel.exists():
-                        current_excel = expected_excel
-                        _clear_confirm_state(request)
-                        export_result = None
-                        messages.success(request, f"Excel generado: {expected_excel.name}")
-                    else:
-                        export_result = result
-                        messages.error(request, "La exportación falló. Revisa el log.")
-            else:
-                messages.error(request, "Formulario de exportación inválido.")
-
-        elif action == "save_prices":
-            if not current_excel:
-                messages.error(request, "Primero carga o genera un Excel para la rareza seleccionada.")
-            else:
-                _clear_confirm_state(request)
-                updates = save_prices(current_excel, request.POST)
-                messages.success(request, f"Precios guardados en Excel ({updates} filas actualizadas).")
-
-        elif action == "reset_prices":
-            if not current_excel:
-                messages.error(request, "Primero carga o genera un Excel para la rareza seleccionada.")
-            else:
-                _clear_confirm_state(request)
-                cleared = reset_prices(current_excel)
-                messages.success(request, f"Precios reseteados ({cleared} filas limpiadas).")
-
-        elif action in {"start_confirm", "start_confirm_inline"}:
-            if not current_excel:
-                messages.error(request, "Primero carga o genera un Excel para la rareza seleccionada.")
-            else:
-                save_prices(current_excel, request.POST)
-                rows = load_sales_rows(current_excel)
-                ready_rows = rows_ready_to_sell(rows)
-                selected_rows = [int(v) for v in request.POST.getlist("selected_rows") if str(v).isdigit()]
-                if not selected_rows:
-                    selected_rows = [int(r["row"]) for r in ready_rows]
-
-                if not selected_rows:
-                    messages.error(request, "No hay cartas seleccionadas para confirmar ventas.")
-                else:
-                    request.session[SALES_CONFIRM_STATE_SESSION_KEY] = {
-                        "rarity": selected_rarity,
-                        "queue": selected_rows,
-                        "index": 0,
-                        "results": [],
-                    }
-                    messages.success(request, "Confirmación paso a paso iniciada.")
-
-        elif action in {"confirm_step_sell", "confirm_step_skip"}:
-            if not current_excel:
-                messages.error(request, "No hay Excel cargado para confirmar.")
-            else:
-                rows = load_sales_rows(current_excel)
-                _advance_confirmation_step(request, rows, action)
-
-        elif action in {"confirm_step_cancel", "confirm_step_finish"}:
-            _clear_confirm_state(request)
-            messages.info(request, "Confirmación finalizada.")
-
-    rows = load_sales_rows(current_excel) if current_excel else []
-    ready_rows = rows_ready_to_sell(rows)
-
-    confirm_state = _get_confirm_state(request)
-    confirmation_item = None
-    confirmation_results = []
-    confirmation_progress = None
-    confirmation_done = False
-
-    if confirm_state and confirm_state.get("rarity") == selected_rarity:
-        queue = [int(v) for v in confirm_state.get("queue", [])]
-        queue_index = int(confirm_state.get("index", 0))
-        confirmation_results = list(confirm_state.get("results", []))
-        if queue_index < len(queue):
-            row_map = {int(r["row"]): r for r in rows}
-            confirmation_item = row_map.get(queue[queue_index])
-            confirmation_progress = f"{queue_index + 1}/{len(queue)}"
-        else:
-            confirmation_done = True
-
-        ok = sum(1 for r in confirmation_results if r.get("status") == "ok")
-        fail = sum(1 for r in confirmation_results if r.get("status") == "fail")
-        skip = sum(1 for r in confirmation_results if r.get("status") == "skip")
-        execution_result = {
-            "ok": ok,
-            "fail": fail,
-            "skip": skip,
-            "items": confirmation_results,
-        }
+    try:
+        per_page = int(request.GET.get("per_page", 20))
+    except ValueError:
+        per_page = 20
+    per_page = per_page if per_page in {20, 50, 100} else 20
+    page_obj = Paginator(cards, per_page).get_page(request.GET.get("page", 1))
+    active_refresh = SalesRefreshJob.objects.filter(
+        rarity=selected_rarity,
+        status__in=(SalesRefreshJob.Status.QUEUED, SalesRefreshJob.Status.RUNNING),
+    ).order_by("-created_at").first()
 
     return render(
         request,
         "dashboard/sales.html",
         {
-            "export_form": export_form,
-            "export_result": export_result,
-            "execution_result": execution_result,
-            "rows": rows,
-            "excel_exists": bool(current_excel),
             "selected_rarity": selected_rarity,
-            "confirmation_item": confirmation_item,
-            "confirmation_progress": confirmation_progress,
-            "confirmation_done": confirmation_done,
+            "selected_rarity_label": {
+                "limited": "amarillas", "rare": "rojas", "super_rare": "azules",
+            }[selected_rarity],
+            "inventory": inventory,
+            "total_cards": len(all_cards),
+            "blocked_cards": sum(1 for card in all_cards if card.get("blocked")),
+            "page_obj": page_obj,
+            "available_teams": available_teams,
+            "available_positions": available_positions,
+            "available_seasons": available_seasons,
+            "selected_teams": teams,
+            "selected_positions": positions,
+            "selected_season": season,
+            "selected_in_season": in_season,
+            "show_blocked": show_blocked,
+            "per_page": per_page,
+            "active_refresh": active_refresh,
         },
     )
 
 
 def sales_download_excel(request):
     selected_rarity = _normalize_sales_rarity(request.session.get(SALES_SELECTED_RARITY_SESSION_KEY))
-    current_excel = _current_sales_excel_path(selected_rarity)
-    if not current_excel or not current_excel.exists():
-        raise Http404("No hay Excel exportado todavía")
-    return FileResponse(
-        current_excel.open("rb"),
-        as_attachment=True,
-        filename=current_excel.name,
-    )
+    inventory = SalesInventory.objects.filter(rarity=selected_rarity).first()
+    if not inventory:
+        return HttpResponse("Primero actualiza las cartas de esta rareza.", status=404)
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Mis cartas"
+    sheet.append([
+        "Jugador", "Equipo", "Rareza", "Temporada", "Posición", "Liga", "Nivel",
+        "In season", "Estado", "Colección", "Rayos colección", "Rayos carta",
+        "Rayos tras venta", "Mínimo classic (€)", "Mínimo in-season (€)",
+        "Media ventas (€)", "assetId",
+    ])
+    for card in inventory.cards:
+        sheet.append([
+            card.get("player"), card.get("team"), card.get("rarity"), card.get("season"),
+            card.get("position"), card.get("league"), card.get("grade"),
+            "Sí" if card.get("in_season") else "No", card.get("blocked_reason") or "Disponible",
+            card.get("collection_name"), card.get("collection_rays"), card.get("card_rays"),
+            card.get("rays_after_sale"), card.get("min_price_classic"),
+            card.get("min_price_inseason"), card.get("avg_price"), card.get("asset_id"),
+        ])
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return FileResponse(output, as_attachment=True, filename=f"mis_cartas_{selected_rarity}.xlsx")
+
+
+@require_POST
+def enqueue_sales_refresh(request):
+    rarity = _normalize_sales_rarity(request.POST.get("rarity"))
+    active = SalesRefreshJob.objects.filter(
+        rarity=rarity,
+        status__in=(SalesRefreshJob.Status.QUEUED, SalesRefreshJob.Status.RUNNING),
+    ).first()
+    job = active or SalesRefreshJob.objects.create(user=request.user, rarity=rarity)
+    return JsonResponse({"job_id": job.id, "status": job.status, "rarity": rarity}, status=202)
+
+
+@require_POST
+def enqueue_batch_sales(request):
+    form = BatchSaleForm(request.POST)
+    if not form.is_valid():
+        return JsonResponse({"error": form.errors.get_json_data()}, status=400)
+    try:
+        request_key = uuid.UUID(request.POST.get("request_key", ""))
+    except ValueError:
+        return JsonResponse({"error": "La solicitud de venta no es válida."}, status=400)
+    existing = SaleBatchJob.objects.filter(user=request.user, request_key=request_key).first()
+    if existing:
+        return JsonResponse({"job_id": existing.id, "status": existing.status, "total": existing.total_count}, status=202)
+
+    requested = form.cleaned_data["sales"]
+    inventories = SalesInventory.objects.all()
+    cards_by_asset = {
+        card.get("asset_id"): card
+        for inventory in inventories
+        for card in inventory.cards
+        if card.get("asset_id")
+    }
+    items = []
+    for position, sale in enumerate(requested, start=1):
+        card = cards_by_asset.get(sale["asset_id"])
+        if not card:
+            return JsonResponse({"error": "Una carta ya no está en el inventario actualizado."}, status=409)
+        if card.get("blocked"):
+            return JsonResponse({"error": f"{card.get('player')}: {card.get('blocked_reason') or 'no se puede vender'}."}, status=409)
+        items.append((position, sale, card))
+
+    with transaction.atomic():
+        job = SaleBatchJob.objects.create(
+            user=request.user,
+            request_key=request_key,
+            total_count=len(items),
+        )
+        SaleBatchItem.objects.bulk_create([
+            SaleBatchItem(
+                job=job,
+                position=position,
+                asset_id=sale["asset_id"],
+                player_name=card.get("player") or "Jugador",
+                rarity=card.get("rarity") or "",
+                euros=sale["euros"],
+                duration_days=sale["duration_days"],
+            )
+            for position, sale, card in items
+        ])
+    return JsonResponse({"job_id": job.id, "status": job.status, "total": job.total_count}, status=202)
+
+
+@require_GET
+def sales_jobs_status(request):
+    raw_ids = [value for value in request.GET.get("ids", "").split(",") if value.isdigit()]
+    jobs = SaleBatchJob.objects.filter(user=request.user)
+    if raw_ids:
+        jobs = jobs.filter(id__in=raw_ids)
+    else:
+        jobs = jobs.order_by("-created_at")[:10]
+    refreshes = SalesRefreshJob.objects.order_by("-created_at")[:5]
+    return JsonResponse({
+        "jobs": [{
+            "id": job.id,
+            "status": job.status,
+            "total": job.total_count,
+            "success": job.success_count,
+            "failure": job.failure_count,
+            "items": [{
+                "player": item.player_name,
+                "status": item.status,
+                "error": item.error,
+            } for item in job.items.all()],
+        } for job in jobs],
+        "refreshes": [{
+            "id": job.id,
+            "rarity": job.rarity,
+            "status": job.status,
+            "card_count": job.card_count,
+            "error": job.error,
+        } for job in refreshes],
+    })
 
 
 def auctions_list(request):

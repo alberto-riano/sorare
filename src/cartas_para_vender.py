@@ -54,17 +54,26 @@ def fetch_cards_and_lineups(headers, rarity='rare'):
                 anyPlayer {{
                   slug
                   displayName
+                  squaredPictureUrl
                   activeClub {{
                     domesticLeague {{ name }}
                   }}
                 }}
                 anyTeam {{
                   name
+                  pictureUrl
                 }}
                 grade
                 anyPositions
                 inSeasonEligible
                 tradeableStatus
+                liveSingleSaleOffer {{
+                  id
+                  endDate
+                  receiverSide {{
+                    amounts {{ eurCents }}
+                  }}
+                }}
                 cardCollectionCards {{
                   scoreBreakdown {{
                     total
