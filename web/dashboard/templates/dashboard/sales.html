@@ -122,7 +122,7 @@
   <div class="sales-modal-backdrop" data-close-modal></div>
   <section class="sales-modal-card" role="dialog" aria-modal="true" aria-labelledby="salesModalTitle">
     <button class="sales-modal-close" type="button" data-close-modal aria-label="Cerrar">×</button>
-    <h2 id="salesModalTitle"><i class="fas fa-shield-halved"></i> Confirmar ventas</h2><p>Revisa el precio y los días. La oferta mínima pública es opcional y se configurará antes de poner la carta a la venta.</p>
+    <h2 id="salesModalTitle"><i class="fas fa-shield-halved"></i> Confirmar ventas</h2><p>Revisa el precio y los días. La oferta mínima de intercambio es opcional y se configurará antes de poner la carta a la venta.</p>
     <div id="salesReviewList" class="sales-review-list"></div>
     <div class="btn-row sales-modal-actions"><button class="btn btn-secondary" type="button" data-close-modal>Volver</button><button class="btn btn-accent" type="button" id="confirmSales"><i class="fas fa-tags"></i> Confirmar y enviar</button></div>
   </section>
@@ -175,7 +175,7 @@
     var list = document.getElementById('salesReviewList'); list.innerHTML = '';
     rows.forEach(function (row) {
       var item = document.createElement('article'); item.className = 'sales-review-item'; item.dataset.assetId = row.dataset.assetId;
-      item.innerHTML = '<div class="sales-review-player">' + (row.dataset.playerPicture ? '<img src="' + row.dataset.playerPicture + '" alt="">' : '') + (row.dataset.teamPicture ? '<img class="team" src="' + row.dataset.teamPicture + '" alt="">' : '') + '<strong></strong></div><label><span>Precio</span><div class="sales-review-input"><span>€</span><input class="review-price" inputmode="decimal"></div></label><label><span>Oferta mínima <small>(opcional)</small></span><div class="sales-review-input"><span>€</span><input class="review-minimum" inputmode="decimal" placeholder="Sin mínimo"></div></label><label><span>Días</span><input class="review-days" type="number" min="1" max="30" value="7"></label>';
+      item.innerHTML = '<div class="sales-review-player">' + (row.dataset.playerPicture ? '<img src="' + row.dataset.playerPicture + '" alt="">' : '') + (row.dataset.teamPicture ? '<img class="team" src="' + row.dataset.teamPicture + '" alt="">' : '') + '<strong></strong></div><label><span>Precio de venta</span><div class="sales-review-input"><span>€</span><input class="review-price" inputmode="decimal"></div></label><label><span>Mínimo intercambio <small>(opcional)</small></span><div class="sales-review-input"><span>€</span><input class="review-minimum" inputmode="decimal" placeholder="Sin mínimo"></div></label><label><span>Días</span><input class="review-days" type="number" min="1" max="30" value="7"></label>';
       item.querySelector('strong').textContent = row.dataset.player; item.querySelector('.review-price').value = row.querySelector('.sale-price').value; list.appendChild(item);
     }); modal.hidden = false; document.body.classList.add('modal-open');
   }

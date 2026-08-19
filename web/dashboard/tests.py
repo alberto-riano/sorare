@@ -573,7 +573,7 @@ class SalesWorkbenchTests(TestCase):
         self.assertTrue(cached["blocked"])
 
     @patch("web_services.process_runner._run_command")
-    def test_card_sale_passes_public_minimum_in_cents(self, run_command):
+    def test_card_sale_passes_private_trade_minimum_in_cents(self, run_command):
         from web_services.config_files import SorarePaths
 
         paths = SorarePaths(repo_root=Path(__file__).resolve().parents[2])
@@ -586,6 +586,11 @@ class SalesWorkbenchTests(TestCase):
         )
         command = run_command.call_args.args[0]
         self.assertEqual(command[3:6], ["450", "7", "325"])
+
+    def test_card_sale_uses_private_minimum_mutation(self):
+        script = (Path(__file__).resolve().parents[2] / "javascript" / "vender_carta.js").read_text()
+        self.assertIn("isPrivate: true", script)
+        self.assertIn("privateMinPrices", script)
 
     @patch("dashboard.management.commands.process_sales_queue.collect_sales_inventory")
     def test_refresh_replaces_only_the_selected_rarity_inventory(self, collect):

@@ -32,9 +32,9 @@ function readConfig(filename = CONFIG_PATH) {
 }
 
 // --- Parámetros de entrada ---
-const [, , ASSET_ID, PRICE_CENTS, DAYS, PUBLIC_MINIMUM_CENTS] = process.argv;
+const [, , ASSET_ID, PRICE_CENTS, DAYS, TRADE_MINIMUM_CENTS] = process.argv;
 if (!ASSET_ID || !PRICE_CENTS) {
-  console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias_en_venta] [oferta_minima_publica_centimos]");
+  console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias_en_venta] [minimo_intercambio_centimos]");
   process.exit(1);
 }
 const DURATION_DAYS = parseInt(DAYS || "7", 10);
@@ -42,8 +42,8 @@ if (!Number.isInteger(DURATION_DAYS) || DURATION_DAYS < 1 || DURATION_DAYS > 30)
   console.error("La duración debe estar entre 1 y 30 días.");
   process.exit(1);
 }
-const PUBLIC_MINIMUM_AMOUNT_CENTS = Number.isFinite(parseInt(PUBLIC_MINIMUM_CENTS, 10))
-  ? parseInt(PUBLIC_MINIMUM_CENTS, 10)
+const TRADE_MINIMUM_AMOUNT_CENTS = Number.isFinite(parseInt(TRADE_MINIMUM_CENTS, 10))
+  ? parseInt(TRADE_MINIMUM_CENTS, 10)
   : 0;
 const NO_RELIST = process.argv.includes("--no-relist");
 const RELIST_RETRY_COUNT = 3;
@@ -147,14 +147,18 @@ const CREATE_OFFER_MUTATION = gql`
   }
 `;
 
-const SET_PUBLIC_MINIMUM_MUTATION = gql`
-  mutation SetPublicMinimum($input: createOrUpdateSingleBuyOfferMinPriceInput!) {
+const SET_PRIVATE_MINIMUM_MUTATION = gql`
+  mutation SetPrivateMinimum($input: createOrUpdateSingleBuyOfferMinPriceInput!) {
     createOrUpdateSingleBuyOfferMinPrice(input: $input) {
       card {
         assetId
-        publicMinPrices {
+        privateMinPrices {
           referenceCurrency
           eurCents
+          gbpCents
+          usdCents
+          wei
+          lamport
         }
       }
       errors {
@@ -169,7 +173,7 @@ const CARD_LIVE_OFFER_QUERY = gql`
     tokens {
       anyCard(assetId: $assetId) {
         slug
-        publicMinPrices {
+        privateMinPrices {
           referenceCurrency
           eurCents
           gbpCents
@@ -389,13 +393,8 @@ async function getExistingLiveOffer(assetId) {
   }
 }
 
-async function getCurrentPublicMinimum(assetId) {
-  const data = await client.request(CARD_LIVE_OFFER_QUERY, { assetId });
-  const card = data?.tokens?.anyCard;
-  if (!card) throw new Error("Sorare no devolvió la carta al consultar su oferta mínima actual.");
-  const minimum = card.publicMinPrices;
+function monetaryAmountToInput(minimum) {
   if (!minimum) return null;
-
   const amountByCurrency = {
     EUR: minimum.eurCents,
     GBP: minimum.gbpCents,
@@ -410,11 +409,25 @@ async function getCurrentPublicMinimum(assetId) {
   return { amount: String(amount), currency: minimum.referenceCurrency };
 }
 
-async function setPublicMinimum(assetId, minPrice) {
-  const data = await client.request(SET_PUBLIC_MINIMUM_MUTATION, {
+async function getCurrentPrivateMinimum(assetId) {
+  const data = await client.request(CARD_LIVE_OFFER_QUERY, { assetId });
+  const card = data?.tokens?.anyCard;
+  if (!card) throw new Error("Sorare no devolvió la carta al consultar su oferta mínima actual.");
+  return monetaryAmountToInput(card.privateMinPrices);
+}
+
+function minimumMatches(actual, expected) {
+  if (expected === null) return actual === null;
+  return actual !== null && actual !== undefined &&
+    actual.currency === expected.currency &&
+    actual.amount === String(expected.amount);
+}
+
+async function setPrivateMinimum(assetId, minPrice) {
+  const data = await client.request(SET_PRIVATE_MINIMUM_MUTATION, {
     input: {
       assetId,
-      isPrivate: false,
+      isPrivate: true,
       minPrice,
       clientMutationId: crypto.randomBytes(8).toString("hex"),
     },
@@ -424,6 +437,15 @@ async function setPublicMinimum(assetId, minPrice) {
   if (errors.length) {
     throw new Error(errors.map((error) => error.message).join(" · "));
   }
+  let confirmedMinimum = payload?.card
+    ? monetaryAmountToInput(payload.card.privateMinPrices)
+    : undefined;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (minimumMatches(confirmedMinimum, minPrice)) return;
+    await sleep(500);
+    confirmedMinimum = await getCurrentPrivateMinimum(assetId);
+  }
+  throw new Error("Sorare respondió sin confirmar el importe mínimo de intercambio solicitado.");
 }
 
 async function tryCancelOffer(liveOffer) {
@@ -546,13 +568,14 @@ async function sellCard(assetId, priceCents, durationDays, relistRetriesLeft = R
 async function setMinimumAndSell() {
   let previousMinimum;
   let minimumWasChanged = false;
-  if (PUBLIC_MINIMUM_AMOUNT_CENTS > 0) {
-    previousMinimum = await getCurrentPublicMinimum(ASSET_ID);
-    await setPublicMinimum(ASSET_ID, {
-      amount: String(PUBLIC_MINIMUM_AMOUNT_CENTS),
+  if (TRADE_MINIMUM_AMOUNT_CENTS > 0) {
+    previousMinimum = await getCurrentPrivateMinimum(ASSET_ID);
+    await setPrivateMinimum(ASSET_ID, {
+      amount: String(TRADE_MINIMUM_AMOUNT_CENTS),
       currency: CURRENCY,
     });
     minimumWasChanged = true;
+    console.log(`Oferta mínima de intercambio configurada: ${TRADE_MINIMUM_AMOUNT_CENTS} céntimos.`);
   }
 
   try {
@@ -560,7 +583,7 @@ async function setMinimumAndSell() {
   } catch (saleError) {
     if (minimumWasChanged) {
       try {
-        await setPublicMinimum(ASSET_ID, previousMinimum);
+        await setPrivateMinimum(ASSET_ID, previousMinimum);
       } catch (rollbackError) {
         throw new Error(
           `${formatGraphQLError(saleError)} El mínimo anterior tampoco pudo restaurarse: ${formatGraphQLError(rollbackError)}`
