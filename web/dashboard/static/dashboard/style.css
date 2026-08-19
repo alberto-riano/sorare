@@ -845,7 +845,7 @@ textarea {
 .modal-balances > span { display: grid; gap: .08rem; padding: .55rem .65rem; border-radius: 10px; background: #f8faf9; border: 1px solid var(--line); }
 .modal-balances small { color: var(--muted); font-size: .68rem; font-weight: 700; }
 .modal-balances strong { font-family: 'IBM Plex Mono', monospace; font-size: .84rem; }
-.bid-review-item { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: .8rem; padding: .7rem; border: 1px solid var(--line); border-radius: 10px; }
+.bid-review-item { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: .8rem; padding: .7rem; border: 1px solid var(--line); border-radius: 10px; }
 .bid-review-item small { color: var(--muted); }
 .bid-review-details { display: grid; min-width: 0; gap: .18rem; }
 .bid-review-details strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -863,6 +863,8 @@ textarea {
 .review-credit { display: inline-flex; grid-template-columns: none; align-items: center; gap: .4rem; white-space: nowrap; }
 .review-credit input { width: 1rem; height: 1rem; margin: 0; }
 .review-credit span { color: var(--muted); font-size: .75rem; }
+.review-remove { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid #fecaca; border-radius: 50%; background: #fff; color: #dc2626; cursor: pointer; }
+.review-remove:hover { background: #fef2f2; border-color: #dc2626; }
 .bid-modal-actions { justify-content: flex-end; gap: .6rem; }
 .modal-open { overflow: hidden; }
 .bid-modal.is-submitting .bid-modal-card { cursor: wait; }
@@ -885,9 +887,10 @@ textarea {
 
 @media (max-width: 700px) {
   .batch-bid-bar { align-items: stretch; flex-direction: column; }
-  .bid-review-item { grid-template-columns: auto 1fr auto; }
+  .bid-review-item { grid-template-columns: auto 1fr auto auto; }
   .bid-review-item small { grid-column: 2 / -1; }
-  .bid-review-item .review-credit { grid-column: 2 / -1; }
+  .bid-review-item .review-credit { grid-column: 2 / 4; }
+  .bid-review-item .review-remove { grid-column: 4; grid-row: 1; }
   .bid-modal-actions { align-items: stretch; flex-direction: column-reverse; }
 }
 
@@ -1251,7 +1254,7 @@ pre {
 .sales-modal-card > p { color: var(--muted); }
 .sales-modal-close { position: absolute; right: 1rem; top: .75rem; border: 0; background: transparent; font-size: 2rem; cursor: pointer; }
 .sales-review-list { display: grid; gap: .65rem; }
-.sales-review-item { display: grid; grid-template-columns: minmax(210px,1fr) 155px 175px 85px; gap: .75rem; align-items: end; border: 1px solid var(--line); border-radius: 15px; padding: .75rem; }
+.sales-review-item { display: grid; grid-template-columns: minmax(210px,1fr) 155px 175px 85px auto; gap: .75rem; align-items: end; border: 1px solid var(--line); border-radius: 15px; padding: .75rem; }
 .sales-review-item label > span small { color: var(--muted); font-weight: 400; }
 .sales-review-player { gap: .5rem; min-width: 0; }
 .sales-review-player img { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; }

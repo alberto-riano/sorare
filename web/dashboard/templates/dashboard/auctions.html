@@ -434,12 +434,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function openBidReview(bids) {
     reviewedBids = bids;
+    submitAllButton.disabled = bids.length === 0;
     var list = document.getElementById('bid-review-list');
     list.textContent = '';
     bids.forEach(function (bid) {
       var row = document.createElement('div');
       row.className = 'bid-review-item';
-      row.innerHTML = '<span class="bid-review-visuals"><span class="bid-review-player"></span><span class="bid-review-team"></span></span><span class="bid-review-details"><strong></strong><small class="bid-review-comparison is-loading">Calculando comparación…</small></span><span class="bid-review-price"></span><label class="review-credit"><input type="checkbox" checked> <span>Usar créditos</span></label>';
+      row.dataset.auctionId = bid.auction_id;
+      row.innerHTML = '<span class="bid-review-visuals"><span class="bid-review-player"></span><span class="bid-review-team"></span></span><span class="bid-review-details"><strong></strong><small class="bid-review-comparison is-loading">Calculando comparación…</small></span><span class="bid-review-price"></span><label class="review-credit"><input type="checkbox" checked> <span>Usar créditos</span></label><button type="button" class="review-remove" title="Quitar esta puja" aria-label="Quitar esta puja"><i class="fas fa-trash-can"></i></button>';
       var playerImage = row.querySelector('.bid-review-player');
       var teamImage = row.querySelector('.bid-review-team');
       if (bid.player_image) playerImage.innerHTML = '<img alt="" loading="lazy">';
@@ -455,6 +457,21 @@ document.addEventListener('DOMContentLoaded', function () {
         var values = Array.from(document.querySelectorAll('.bid-review-item .review-credit input')).map(function (input) { return input.checked; });
         creditAll.checked = values.every(Boolean);
         creditAll.indeterminate = values.some(Boolean) && !creditAll.checked;
+      });
+      row.querySelector('.review-remove').addEventListener('click', function () {
+        reviewedBids = reviewedBids.filter(function (candidate) { return candidate.auction_id !== bid.auction_id; });
+        var sourceControl = bidControls.find(function (control) { return control.dataset.auctionId === bid.auction_id; });
+        if (sourceControl) sourceControl.querySelector('.batch-bid-euros').value = '';
+        row.remove();
+        updateBidCount();
+        var remainingCredits = Array.from(list.querySelectorAll('.review-credit input')).map(function (input) { return input.checked; });
+        creditAll.checked = remainingCredits.length > 0 && remainingCredits.every(Boolean);
+        creditAll.indeterminate = remainingCredits.some(Boolean) && !creditAll.checked;
+        submitAllButton.disabled = reviewedBids.length === 0;
+        if (!reviewedBids.length) {
+          modal.hidden = true;
+          document.body.classList.remove('modal-open');
+        }
       });
       list.appendChild(row);
     });

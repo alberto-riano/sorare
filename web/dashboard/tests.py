@@ -592,6 +592,10 @@ class SalesWorkbenchTests(TestCase):
         self.assertIn("isPrivate: true", script)
         self.assertIn("privateMinPrices", script)
 
+    def test_sales_review_allows_removing_an_item(self):
+        response = self.client.get(reverse("sales_workbench"), {"rarity": "rare"})
+        self.assertContains(response, "Quitar esta venta")
+
     @patch("dashboard.management.commands.process_sales_queue.collect_sales_inventory")
     def test_refresh_replaces_only_the_selected_rarity_inventory(self, collect):
         collect.return_value = [self._card("fresh", "Carta nueva")]

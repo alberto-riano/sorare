@@ -160,11 +160,15 @@
   function updateBasket() { var selected = document.querySelectorAll('.sale-select:checked').length, basket = document.getElementById('salesBasket'); if (basket) basket.hidden = !selected; var count = document.getElementById('salesSelectedCount'); if (count) count.textContent = selected; }
   document.querySelectorAll('.sales-card-row').forEach(function (row) {
     var assetId = row.dataset.assetId, checkbox = row.querySelector('.sale-select'), price = row.querySelector('.sale-price'); if (!checkbox || !price) return;
-    if (drafts[assetId]) { price.value = drafts[assetId].price || ''; checkbox.checked = !!drafts[assetId].selected; }
-    price.addEventListener('input', function () { price.value = price.value.replace(/[^0-9.,]/g, ''); if (price.value) checkbox.checked = true; persistDraft(assetId, price.value, checkbox.checked); updateBasket(); });
+    if (drafts[assetId]) {
+      price.value = drafts[assetId].price || '';
+      checkbox.checked = Boolean(price.value) && Boolean(drafts[assetId].selected);
+      if (!price.value) delete drafts[assetId];
+    }
+    price.addEventListener('input', function () { price.value = price.value.replace(/[^0-9.,]/g, ''); checkbox.checked = Boolean(price.value); persistDraft(assetId, price.value, checkbox.checked); updateBasket(); });
     checkbox.addEventListener('change', function () { persistDraft(assetId, price.value, checkbox.checked); updateBasket(); });
-    row.querySelector('.sale-one').addEventListener('click', function () { if (!validPrice(price.value)) { showToast('error', 'Indica un precio válido para ' + row.dataset.player); price.focus(); return; } document.querySelectorAll('.sale-select').forEach(function (item) { item.checked = false; }); checkbox.checked = true; persistDraft(assetId, price.value, true); updateBasket(); openReview(); });
-  }); updateBasket();
+    row.querySelector('.sale-one').addEventListener('click', function () { if (!validPrice(price.value)) { showToast('error', 'Indica un precio válido para ' + row.dataset.player); price.focus(); return; } document.querySelectorAll('.sales-card-row').forEach(function (candidate) { var candidateCheckbox = candidate.querySelector('.sale-select'), candidatePrice = candidate.querySelector('.sale-price'); if (!candidateCheckbox || !candidatePrice) return; candidateCheckbox.checked = false; persistDraft(candidate.dataset.assetId, candidatePrice.value, false); }); checkbox.checked = true; persistDraft(assetId, price.value, true); updateBasket(); openReview(); });
+  }); sessionStorage.setItem(draftKey, JSON.stringify(drafts)); updateBasket();
 
   function validPrice(value) { return Number(String(value).replace(',', '.')) > 0; }
   var modal = document.getElementById('salesModal');
@@ -175,8 +179,23 @@
     var list = document.getElementById('salesReviewList'); list.innerHTML = '';
     rows.forEach(function (row) {
       var item = document.createElement('article'); item.className = 'sales-review-item'; item.dataset.assetId = row.dataset.assetId;
-      item.innerHTML = '<div class="sales-review-player">' + (row.dataset.playerPicture ? '<img src="' + row.dataset.playerPicture + '" alt="">' : '') + (row.dataset.teamPicture ? '<img class="team" src="' + row.dataset.teamPicture + '" alt="">' : '') + '<strong></strong></div><label><span>Precio de venta</span><div class="sales-review-input"><span>€</span><input class="review-price" inputmode="decimal"></div></label><label><span>Mínimo intercambio <small>(opcional)</small></span><div class="sales-review-input"><span>€</span><input class="review-minimum" inputmode="decimal" placeholder="Sin mínimo"></div></label><label><span>Días</span><input class="review-days" type="number" min="1" max="30" value="7"></label>';
+      item.innerHTML = '<div class="sales-review-player">' + (row.dataset.playerPicture ? '<img src="' + row.dataset.playerPicture + '" alt="">' : '') + (row.dataset.teamPicture ? '<img class="team" src="' + row.dataset.teamPicture + '" alt="">' : '') + '<strong></strong></div><label><span>Precio de venta</span><div class="sales-review-input"><span>€</span><input class="review-price" inputmode="decimal"></div></label><label><span>Mínimo intercambio <small>(opcional)</small></span><div class="sales-review-input"><span>€</span><input class="review-minimum" inputmode="decimal" placeholder="Sin mínimo"></div></label><label><span>Días</span><input class="review-days" type="number" min="1" max="30" value="7"></label><button type="button" class="review-remove" title="Quitar esta venta" aria-label="Quitar esta venta"><i class="fas fa-trash-can"></i></button>';
       item.querySelector('strong').textContent = row.dataset.player; item.querySelector('.review-price').value = row.querySelector('.sale-price').value; list.appendChild(item);
+      item.querySelector('.review-remove').addEventListener('click', function () {
+        var sourceRow = document.querySelector('.sales-card-row[data-asset-id="' + CSS.escape(item.dataset.assetId) + '"]');
+        if (sourceRow) {
+          var sourceCheckbox = sourceRow.querySelector('.sale-select');
+          var sourcePrice = sourceRow.querySelector('.sale-price');
+          sourceCheckbox.checked = false;
+          persistDraft(item.dataset.assetId, sourcePrice.value, false);
+        }
+        item.remove();
+        updateBasket();
+        if (!list.querySelector('.sales-review-item')) {
+          modal.hidden = true;
+          document.body.classList.remove('modal-open');
+        }
+      });
     }); modal.hidden = false; document.body.classList.add('modal-open');
   }
   var review = document.getElementById('reviewSales'); if (review) review.addEventListener('click', openReview);
