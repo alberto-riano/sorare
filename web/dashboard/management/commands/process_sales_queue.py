@@ -93,6 +93,7 @@ def process_next_sale():
                 asset_id=item.asset_id,
                 euros=str(item.euros),
                 duration_days=item.duration_days,
+                minimum_offer_eur=(str(item.minimum_offer_eur) if item.minimum_offer_eur is not None else None),
             )
             if result.exit_code == 0:
                 item.status = SaleBatchItem.Status.SUCCEEDED

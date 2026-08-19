@@ -20,7 +20,7 @@ from dashboard.models import (
 )
 from dashboard.views import auction_price_history, auctions_list
 from sorare_utils import get_latest_prices
-from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler
+from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler, run_card_sale
 from web_services.sales_inventory import collection_display_name
 
 
@@ -473,6 +473,18 @@ class SalesWorkbenchTests(TestCase):
         self.assertContains(response, "Jugador en lineup")
         self.assertContains(response, "En lineup")
 
+    def test_sales_page_filters_market_minimum_prices(self):
+        response = self.client.get(reverse("sales_workbench"), {
+            "rarity": "rare", "classic_price_from": "4,01",
+        })
+        self.assertNotContains(response, "Jugador disponible")
+
+        response = self.client.get(reverse("sales_workbench"), {
+            "rarity": "rare", "classic_price_from": "4,00",
+        })
+        self.assertContains(response, "Jugador disponible")
+        self.assertNotContains(response, "Media ventas")
+
     def test_batch_sale_is_queued_and_rejects_blocked_cards(self):
         blocked = json.dumps([{"asset_id": "blocked", "euros": "4,50", "duration_days": 5}])
         response = self.client.post(reverse("enqueue_batch_sales"), {
@@ -480,7 +492,10 @@ class SalesWorkbenchTests(TestCase):
         })
         self.assertEqual(response.status_code, 409)
 
-        valid = json.dumps([{"asset_id": "available", "euros": "4.50", "duration_days": 5}])
+        valid = json.dumps([{
+            "asset_id": "available", "euros": "4.50",
+            "minimum_offer_eur": "3.25", "duration_days": 5,
+        }])
         response = self.client.post(reverse("enqueue_batch_sales"), {
             "sales": valid, "confirm": "on", "request_key": "68df42b8-9703-437d-9d83-904ca8d2d3ad",
         })
@@ -488,6 +503,7 @@ class SalesWorkbenchTests(TestCase):
         item = SaleBatchItem.objects.get(job_id=response.json()["job_id"])
         self.assertEqual(item.duration_days, 5)
         self.assertEqual(str(item.euros), "4.50")
+        self.assertEqual(str(item.minimum_offer_eur), "3.25")
 
     def test_sale_form_defaults_to_seven_days(self):
         form = BatchSaleForm({
@@ -496,6 +512,16 @@ class SalesWorkbenchTests(TestCase):
         })
         self.assertTrue(form.is_valid())
         self.assertEqual(form.cleaned_data["sales"][0]["duration_days"], 7)
+        self.assertIsNone(form.cleaned_data["sales"][0]["minimum_offer_eur"])
+
+    def test_sale_form_rejects_minimum_above_listing_price(self):
+        form = BatchSaleForm({
+            "sales": json.dumps([{
+                "asset_id": "available", "euros": "4.50", "minimum_offer_eur": "5.00",
+            }]),
+            "confirm": "on",
+        })
+        self.assertFalse(form.is_valid())
 
     def test_collection_label_hides_redundant_rarity_and_season(self):
         self.assertEqual(
@@ -532,18 +558,34 @@ class SalesWorkbenchTests(TestCase):
         job = SaleBatchJob.objects.create(user=self.user, total_count=1)
         SaleBatchItem.objects.create(
             job=job, position=1, asset_id="available", player_name="Jugador disponible",
-            rarity="rare", euros="4.50", duration_days=7,
+            rarity="rare", euros="4.50", minimum_offer_eur="3.25", duration_days=7,
         )
 
         process_next_sale()
 
         run_sale.assert_called_once()
         self.assertEqual(run_sale.call_args.kwargs["duration_days"], 7)
+        self.assertEqual(run_sale.call_args.kwargs["minimum_offer_eur"], "3.25")
         job.refresh_from_db()
         self.assertEqual(job.status, SaleBatchJob.Status.SUCCEEDED)
         cached = SalesInventory.objects.get(rarity="rare").cards[0]
         self.assertTrue(cached["active_listing"])
         self.assertTrue(cached["blocked"])
+
+    @patch("web_services.process_runner._run_command")
+    def test_card_sale_passes_public_minimum_in_cents(self, run_command):
+        from web_services.config_files import SorarePaths
+
+        paths = SorarePaths(repo_root=Path(__file__).resolve().parents[2])
+        run_card_sale(
+            paths,
+            asset_id="asset-1",
+            euros="4.50",
+            minimum_offer_eur="3.25",
+            duration_days=7,
+        )
+        command = run_command.call_args.args[0]
+        self.assertEqual(command[3:6], ["450", "7", "325"])
 
     @patch("dashboard.management.commands.process_sales_queue.collect_sales_inventory")
     def test_refresh_replaces_only_the_selected_rarity_inventory(self, collect):

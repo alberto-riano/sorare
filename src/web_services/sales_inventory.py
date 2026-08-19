@@ -7,7 +7,6 @@ from typing import Callable
 from cartas_para_vender import (
     build_collection_data,
     fetch_cards_and_lineups,
-    get_avg_recent_price,
     get_min_price_cached,
 )
 from sorare_utils import build_headers, fetch_exchange_rates
@@ -42,7 +41,6 @@ def collect_sales_inventory(
     all_cards, lineup_slugs = fetch_cards_and_lineups(headers, rarity=rarity)
     collection_rays, collection_player_rays = build_collection_data(all_cards)
 
-    average_cache: dict = {}
     minimum_cache: dict = {}
     rows: list[dict] = []
     total = len(all_cards)
@@ -74,14 +72,6 @@ def collect_sales_inventory(
         best_after = max(remaining) if remaining else 0
         current_best = player_rays[0] if player_rays else card_rays
         rays_after_sale = collection_rays.get(collection_name, 0) - (current_best - best_after)
-
-        avg_key = (player_slug, card_rarity, season_year)
-        avg_was_cached = avg_key in average_cache
-        avg_price, sales_count = get_avg_recent_price(
-            player_slug, card_rarity, season_year, headers, rates, average_cache
-        )
-        if not avg_was_cached:
-            time.sleep(0.15)
 
         min_key = (player_slug, card_rarity)
         min_was_cached = min_key in minimum_cache
@@ -127,8 +117,6 @@ def collect_sales_inventory(
             "collection_rays": collection_rays.get(collection_name, 0),
             "card_rays": card_rays,
             "rays_after_sale": rays_after_sale,
-            "avg_price": avg_price,
-            "recent_sales_count": sales_count,
             "min_price_classic": min_classic,
             "min_price_inseason": min_inseason,
             "in_lineup": in_lineup,

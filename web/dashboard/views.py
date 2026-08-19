@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import uuid
+from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from datetime import datetime
 from pathlib import Path
@@ -220,6 +221,17 @@ def _normalize_sales_rarity(rarity: str | None) -> str:
     return "super_rare"
 
 
+def _sales_price_filter(value: str | None) -> Decimal | None:
+    raw = str(value or "").strip().replace(",", ".")
+    if not raw:
+        return None
+    try:
+        amount = Decimal(raw)
+    except InvalidOperation:
+        return None
+    return amount if amount >= 0 else None
+
+
 def sales_workbench(request):
     selected_rarity = _normalize_sales_rarity(
         request.GET.get("rarity")
@@ -242,6 +254,8 @@ def sales_workbench(request):
     positions = [value for value in request.GET.getlist("positions") if value]
     season = request.GET.get("season", "").strip()
     in_season = request.GET.get("in_season", "").strip()
+    classic_price_from = _sales_price_filter(request.GET.get("classic_price_from"))
+    inseason_price_from = _sales_price_filter(request.GET.get("inseason_price_from"))
     show_blocked = request.GET.get("show_blocked") == "1"
 
     cards = []
@@ -259,6 +273,16 @@ def sales_workbench(request):
         if in_season == "yes" and not card.get("in_season"):
             continue
         if in_season == "no" and card.get("in_season"):
+            continue
+        classic_price = card.get("min_price_classic")
+        if classic_price_from is not None and (
+            classic_price is None or Decimal(str(classic_price)) < classic_price_from
+        ):
+            continue
+        inseason_price = card.get("min_price_inseason")
+        if inseason_price_from is not None and (
+            inseason_price is None or Decimal(str(inseason_price)) < inseason_price_from
+        ):
             continue
         cards.append(card)
 
@@ -292,6 +316,8 @@ def sales_workbench(request):
             "selected_positions": positions,
             "selected_season": season,
             "selected_in_season": in_season,
+            "classic_price_from": request.GET.get("classic_price_from", ""),
+            "inseason_price_from": request.GET.get("inseason_price_from", ""),
             "show_blocked": show_blocked,
             "per_page": per_page,
             "active_refresh": active_refresh,
@@ -312,8 +338,7 @@ def sales_download_excel(request):
     sheet.append([
         "Jugador", "Equipo", "Rareza", "Temporada", "Posición", "Liga", "Nivel",
         "In season", "Estado", "Colección", "Rayos colección", "Rayos carta",
-        "Rayos tras venta", "Mínimo classic (€)", "Mínimo in-season (€)",
-        "Media ventas (€)", "assetId",
+        "Rayos tras venta", "Mínimo classic (€)", "Mínimo in-season (€)", "assetId",
     ])
     for card in inventory.cards:
         sheet.append([
@@ -322,7 +347,7 @@ def sales_download_excel(request):
             "Sí" if card.get("in_season") else "No", card.get("blocked_reason") or "Disponible",
             card.get("collection_name"), card.get("collection_rays"), card.get("card_rays"),
             card.get("rays_after_sale"), card.get("min_price_classic"),
-            card.get("min_price_inseason"), card.get("avg_price"), card.get("asset_id"),
+            card.get("min_price_inseason"), card.get("asset_id"),
         ])
     output = BytesIO()
     workbook.save(output)
@@ -385,6 +410,7 @@ def enqueue_batch_sales(request):
                 player_name=card.get("player") or "Jugador",
                 rarity=card.get("rarity") or "",
                 euros=sale["euros"],
+                minimum_offer_eur=sale["minimum_offer_eur"],
                 duration_days=sale["duration_days"],
             )
             for position, sale, card in items

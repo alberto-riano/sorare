@@ -1191,7 +1191,7 @@ pre {
 .sales-rarity.rarity-super i { color: #2563eb; }
 .sales-results { min-width: 0; }
 .sales-help { color: var(--muted); font-size: .82rem; max-width: 58ch; margin: 0; }
-.sales-filters { display: grid; grid-template-columns: minmax(190px,1.4fr) repeat(4,minmax(140px,1fr)) auto minmax(105px,.6fr) auto; gap: .65rem; align-items: end; margin: .9rem 0; }
+.sales-filters { display: grid; grid-template-columns: repeat(auto-fit,minmax(145px,1fr)); gap: .65rem; align-items: end; margin: .9rem 0; }
 .sales-filters input, .sales-filters select, .sales-multi-filter summary,
 .sales-review-item input { width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; padding: .62rem .72rem; background: #fff; color: var(--ink); font: inherit; }
 .sales-multi-filter { position: relative; }
@@ -1203,6 +1203,9 @@ pre {
 .sales-multi-menu label:hover { background: #f0fdfa; }
 .sales-multi-menu input { width: 18px; min-height: 18px; margin: 0; }
 .sales-multi-menu span { color: var(--ink); white-space: normal; overflow-wrap: anywhere; }
+.sales-filter-price { position: relative; }
+.sales-filter-price > span { position: absolute; z-index: 1; left: .7rem; top: 50%; translate: 0 -50%; color: var(--muted); }
+.sales-filter-price input { padding-left: 1.8rem; }
 .sales-check-filter { display: flex; align-items: center; gap: .5rem; min-height: 44px; padding: 0 .45rem; }
 .sales-check-filter input { width: 18px; min-height: 18px; }
 .sales-check-filter span { color: var(--ink); }
@@ -1248,7 +1251,8 @@ pre {
 .sales-modal-card > p { color: var(--muted); }
 .sales-modal-close { position: absolute; right: 1rem; top: .75rem; border: 0; background: transparent; font-size: 2rem; cursor: pointer; }
 .sales-review-list { display: grid; gap: .65rem; }
-.sales-review-item { display: grid; grid-template-columns: minmax(230px,1fr) 180px 105px; gap: .75rem; align-items: end; border: 1px solid var(--line); border-radius: 15px; padding: .75rem; }
+.sales-review-item { display: grid; grid-template-columns: minmax(210px,1fr) 155px 175px 85px; gap: .75rem; align-items: end; border: 1px solid var(--line); border-radius: 15px; padding: .75rem; }
+.sales-review-item label > span small { color: var(--muted); font-weight: 400; }
 .sales-review-player { gap: .5rem; min-width: 0; }
 .sales-review-player img { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; }
 .sales-review-player img.team { width: 27px; height: 27px; object-fit: contain; margin-left: -16px; margin-top: 18px; background: #fff; padding: 2px; }

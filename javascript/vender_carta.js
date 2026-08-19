@@ -32,9 +32,9 @@ function readConfig(filename = CONFIG_PATH) {
 }
 
 // --- Parámetros de entrada ---
-const [, , ASSET_ID, PRICE_CENTS, DAYS, MIN_RECEIVE_CENTS] = process.argv;
+const [, , ASSET_ID, PRICE_CENTS, DAYS, PUBLIC_MINIMUM_CENTS] = process.argv;
 if (!ASSET_ID || !PRICE_CENTS) {
-  console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias_en_venta] [min_receive_centimos]");
+  console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias_en_venta] [oferta_minima_publica_centimos]");
   process.exit(1);
 }
 const DURATION_DAYS = parseInt(DAYS || "7", 10);
@@ -42,8 +42,8 @@ if (!Number.isInteger(DURATION_DAYS) || DURATION_DAYS < 1 || DURATION_DAYS > 30)
   console.error("La duración debe estar entre 1 y 30 días.");
   process.exit(1);
 }
-const MIN_RECEIVE_AMOUNT_CENTS = Number.isFinite(parseInt(MIN_RECEIVE_CENTS, 10))
-  ? parseInt(MIN_RECEIVE_CENTS, 10)
+const PUBLIC_MINIMUM_AMOUNT_CENTS = Number.isFinite(parseInt(PUBLIC_MINIMUM_CENTS, 10))
+  ? parseInt(PUBLIC_MINIMUM_CENTS, 10)
   : 0;
 const NO_RELIST = process.argv.includes("--no-relist");
 const RELIST_RETRY_COUNT = 3;
@@ -147,11 +147,36 @@ const CREATE_OFFER_MUTATION = gql`
   }
 `;
 
+const SET_PUBLIC_MINIMUM_MUTATION = gql`
+  mutation SetPublicMinimum($input: createOrUpdateSingleBuyOfferMinPriceInput!) {
+    createOrUpdateSingleBuyOfferMinPrice(input: $input) {
+      card {
+        assetId
+        publicMinPrices {
+          referenceCurrency
+          eurCents
+        }
+      }
+      errors {
+        message
+      }
+    }
+  }
+`;
+
 const CARD_LIVE_OFFER_QUERY = gql`
   query CardLiveOffer($assetId: String!) {
     tokens {
       anyCard(assetId: $assetId) {
         slug
+        publicMinPrices {
+          referenceCurrency
+          eurCents
+          gbpCents
+          usdCents
+          wei
+          lamport
+        }
         liveSingleSaleOffer {
           id
           blockchainId
@@ -338,22 +363,6 @@ function isActiveOfferError(errors = []) {
   );
 }
 
-function isMinimumReceiveUnsupportedMessage(message) {
-  return (
-    message.includes("minReceiveAmount") ||
-    message.includes("minimumReceiveAmount") ||
-    message.includes("Unknown argument") ||
-    (message.includes("Field") && message.includes("is not defined")) ||
-    message.includes("was provided invalid value")
-  );
-}
-
-function buildUnsupportedMinimumReceiveError() {
-  return new Error(
-    "Sorare API no permite fijar la oferta minima desde este flujo de venta. Si marcas el 90%, la carta no se listara por API."
-  );
-}
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -377,6 +386,43 @@ async function getExistingLiveOffer(assetId) {
     };
   } catch {
     return null;
+  }
+}
+
+async function getCurrentPublicMinimum(assetId) {
+  const data = await client.request(CARD_LIVE_OFFER_QUERY, { assetId });
+  const card = data?.tokens?.anyCard;
+  if (!card) throw new Error("Sorare no devolvió la carta al consultar su oferta mínima actual.");
+  const minimum = card.publicMinPrices;
+  if (!minimum) return null;
+
+  const amountByCurrency = {
+    EUR: minimum.eurCents,
+    GBP: minimum.gbpCents,
+    USD: minimum.usdCents,
+    WEI: minimum.wei,
+    LAMPORT: minimum.lamport,
+  };
+  const amount = amountByCurrency[minimum.referenceCurrency];
+  if (amount === null || amount === undefined) {
+    throw new Error("No se pudo interpretar la oferta mínima actual de la carta.");
+  }
+  return { amount: String(amount), currency: minimum.referenceCurrency };
+}
+
+async function setPublicMinimum(assetId, minPrice) {
+  const data = await client.request(SET_PUBLIC_MINIMUM_MUTATION, {
+    input: {
+      assetId,
+      isPrivate: false,
+      minPrice,
+      clientMutationId: crypto.randomBytes(8).toString("hex"),
+    },
+  });
+  const payload = data?.createOrUpdateSingleBuyOfferMinPrice;
+  const errors = payload?.errors || [];
+  if (errors.length) {
+    throw new Error(errors.map((error) => error.message).join(" · "));
   }
 }
 
@@ -419,34 +465,7 @@ async function waitUntilOfferIsGone(assetId, expectedOfferId) {
 }
 
 // --- Lógica principal unificada ---
-async function createOfferWithFallback(createOfferInput) {
-  const attempts = [createOfferInput];
-
-  if (createOfferInput.minReceiveAmount) {
-    const alternateInput = { ...createOfferInput, minimumReceiveAmount: createOfferInput.minReceiveAmount };
-    delete alternateInput.minReceiveAmount;
-    attempts.push(alternateInput);
-  }
-
-  let lastUnsupportedError = null;
-
-  for (const input of attempts) {
-    try {
-      return await client.request(CREATE_OFFER_MUTATION, { input });
-    } catch (err) {
-      const message = String(err?.message || "");
-      if (createOfferInput.minReceiveAmount && isMinimumReceiveUnsupportedMessage(message)) {
-        lastUnsupportedError = err;
-        continue;
-      }
-      throw err;
-    }
-  }
-
-  throw buildUnsupportedMinimumReceiveError();
-}
-
-async function sellCard(assetId, priceCents, durationDays, minReceiveCents, relistRetriesLeft = RELIST_RETRY_COUNT) {
+async function sellCard(assetId, priceCents, durationDays, relistRetriesLeft = RELIST_RETRY_COUNT) {
   const prepareOfferInput = {
     sendAssetIds: [assetId],
     receiveAssetIds: [],
@@ -464,9 +483,7 @@ async function sellCard(assetId, priceCents, durationDays, minReceiveCents, reli
 
   const prepareOffer = prepareData.prepareOffer;
   if (prepareOffer.errors && prepareOffer.errors.length > 0) {
-    console.error("Errores preparando la oferta:");
-    prepareOffer.errors.forEach((e) => console.error(e.message));
-    process.exit(2);
+    throw new Error(prepareOffer.errors.map((error) => error.message).join(" · "));
   }
 
   const authorizations = prepareOffer.authorizations;
@@ -490,51 +507,35 @@ async function sellCard(assetId, priceCents, durationDays, minReceiveCents, reli
     clientMutationId: crypto.randomBytes(8).toString("hex"),
   };
 
-  if (minReceiveCents && minReceiveCents > 0) {
-    createOfferInput.minReceiveAmount = {
-      amount: minReceiveCents.toString(),
-      currency: CURRENCY,
-    };
-  }
-
-  const createData = await createOfferWithFallback(createOfferInput);
+  const createData = await client.request(CREATE_OFFER_MUTATION, { input: createOfferInput });
 
   const { tokenOffer, errors: createErrors } =
     createData.createSingleSaleOffer;
 
   if (createErrors && createErrors.length > 0) {
     if (NO_RELIST && isActiveOfferError(createErrors)) {
-      console.error("La carta ya tiene una oferta pública activa. Actualiza el inventario antes de volver a intentarlo.");
-      process.exit(2);
+      throw new Error("La carta ya tiene una oferta pública activa. Actualiza el inventario antes de volver a intentarlo.");
     }
     if (relistRetriesLeft > 0 && isActiveOfferError(createErrors)) {
       const existingOffer = await getExistingLiveOffer(assetId);
       if (!existingOffer) {
-        console.error("Existe una oferta activa, pero no se pudo obtener su blockchainId para cancelarla.");
-        createErrors.forEach((e) => console.error(e.message));
-        process.exit(2);
+        throw new Error("Existe una oferta activa, pero no se pudo obtener su blockchainId para cancelarla.");
       }
 
       const cancelResult = await tryCancelOffer(existingOffer);
       if (!cancelResult.cancelled) {
-        console.error("No se pudo cancelar la oferta activa existente para relistar.");
-        cancelResult.errors.forEach((error) => console.error(error));
-        createErrors.forEach((e) => console.error(e.message));
-        process.exit(2);
+        throw new Error(`No se pudo cancelar la oferta activa existente para relistar: ${cancelResult.errors.join(" · ")}`);
       }
 
       const offerCleared = await waitUntilOfferIsGone(assetId, existingOffer.id);
       if (!offerCleared) {
-        console.error("La oferta activa sigue apareciendo tras la cancelación; Sorare no confirmó el relistado a tiempo.");
-        process.exit(2);
+        throw new Error("La oferta activa sigue apareciendo tras la cancelación; Sorare no confirmó el relistado a tiempo.");
       }
 
-      return sellCard(assetId, priceCents, durationDays, minReceiveCents, relistRetriesLeft - 1);
+      return sellCard(assetId, priceCents, durationDays, relistRetriesLeft - 1);
     }
 
-    console.error("Errores creando la oferta:");
-    createErrors.forEach((e) => console.error(e.message));
-    process.exit(2);
+    throw new Error(createErrors.map((error) => error.message).join(" · "));
   }
 
   console.log("¡Oferta creada con éxito!");
@@ -542,7 +543,35 @@ async function sellCard(assetId, priceCents, durationDays, minReceiveCents, reli
 }
 
 // --- Invocación principal ---
-sellCard(ASSET_ID, PRICE_CENTS, DURATION_DAYS, MIN_RECEIVE_AMOUNT_CENTS).catch((err) => {
+async function setMinimumAndSell() {
+  let previousMinimum;
+  let minimumWasChanged = false;
+  if (PUBLIC_MINIMUM_AMOUNT_CENTS > 0) {
+    previousMinimum = await getCurrentPublicMinimum(ASSET_ID);
+    await setPublicMinimum(ASSET_ID, {
+      amount: String(PUBLIC_MINIMUM_AMOUNT_CENTS),
+      currency: CURRENCY,
+    });
+    minimumWasChanged = true;
+  }
+
+  try {
+    await sellCard(ASSET_ID, PRICE_CENTS, DURATION_DAYS);
+  } catch (saleError) {
+    if (minimumWasChanged) {
+      try {
+        await setPublicMinimum(ASSET_ID, previousMinimum);
+      } catch (rollbackError) {
+        throw new Error(
+          `${formatGraphQLError(saleError)} El mínimo anterior tampoco pudo restaurarse: ${formatGraphQLError(rollbackError)}`
+        );
+      }
+    }
+    throw saleError;
+  }
+}
+
+setMinimumAndSell().catch((err) => {
   if (err instanceof Error) {
     console.error(err.message);
   } else {

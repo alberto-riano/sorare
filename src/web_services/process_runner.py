@@ -123,15 +123,23 @@ def run_bid_scheduler(paths: SorarePaths, request: BidRequest) -> ScriptResult:
     return _run_command(cmd, paths.repo_root)
 
 
-def run_card_sale(paths: SorarePaths, *, asset_id: str, euros: str, duration_days: int) -> ScriptResult:
+def run_card_sale(
+    paths: SorarePaths,
+    *,
+    asset_id: str,
+    euros: str,
+    duration_days: int,
+    minimum_offer_eur: str | None = None,
+) -> ScriptResult:
     price_cents = int(round(float(euros) * 100))
+    minimum_offer_cents = int(round(float(minimum_offer_eur) * 100)) if minimum_offer_eur else 0
     cmd = [
         "node",
         str(paths.repo_root / "javascript" / "vender_carta.js"),
         asset_id.strip(),
         str(price_cents),
         str(int(duration_days)),
-        "0",
+        str(minimum_offer_cents),
         "--no-relist",
     ]
     return _run_command(cmd, paths.repo_root)

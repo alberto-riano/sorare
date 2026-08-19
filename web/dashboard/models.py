@@ -143,6 +143,7 @@ class SaleBatchItem(models.Model):
     player_name = models.CharField(max_length=180)
     rarity = models.CharField(max_length=16)
     euros = models.DecimalField(max_digits=8, decimal_places=2)
+    minimum_offer_eur = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     duration_days = models.PositiveSmallIntegerField(default=7)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED)
     error = models.TextField(blank=True)

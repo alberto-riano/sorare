@@ -68,6 +68,8 @@
 
       <label><span>Temporada</span><select name="season"><option value="">Todas</option>{% for value in available_seasons %}<option value="{{ value }}" {% if value == selected_season %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
       <label><span>Tipo</span><select name="in_season"><option value="">Todas</option><option value="yes" {% if selected_in_season == 'yes' %}selected{% endif %}>In season</option><option value="no" {% if selected_in_season == 'no' %}selected{% endif %}>Classic</option></select></label>
+      <label><span>Mín. Classic desde</span><div class="sales-filter-price"><span>€</span><input type="text" inputmode="decimal" name="classic_price_from" value="{{ classic_price_from }}" placeholder="0,00"></div></label>
+      <label><span>Mín. In-Season desde</span><div class="sales-filter-price"><span>€</span><input type="text" inputmode="decimal" name="inseason_price_from" value="{{ inseason_price_from }}" placeholder="0,00"></div></label>
       <label class="sales-check-filter"><input type="checkbox" name="show_blocked" value="1" {% if show_blocked %}checked{% endif %}><span>Ver no vendibles ({{ blocked_cards }})</span></label>
       <label><span>Por página</span><select name="per_page"><option value="20" {% if per_page == 20 %}selected{% endif %}>20</option><option value="50" {% if per_page == 50 %}selected{% endif %}>50</option><option value="100" {% if per_page == 100 %}selected{% endif %}>100</option></select></label>
       <a class="btn btn-secondary sales-clear" href="?rarity={{ selected_rarity }}">Limpiar</a>
@@ -75,10 +77,10 @@
 
     <div class="table-wrap sales-table-wrap">
       <table class="data-table sales-table">
-        <thead><tr><th><span class="sr-only">Seleccionar</span></th><th>Jugador</th><th>Equipo</th><th>Temporada</th><th>Posición</th><th>Liga / nivel</th><th>Rayos</th><th>Tras venta</th><th>Mín. classic</th><th>Mín. in-season</th><th>Media ventas</th><th>Precio</th></tr></thead>
+        <thead><tr><th><span class="sr-only">Seleccionar</span></th><th>Jugador</th><th>Equipo</th><th>Temporada</th><th>Posición</th><th>Liga / nivel</th><th>Rayos</th><th>Tras venta</th><th>Mín. classic</th><th>Mín. in-season</th><th>Precio</th></tr></thead>
         <tbody>
           {% for card in page_obj %}
-          <tr class="sales-card-row {% if card.in_season %}in-season-row{% endif %} {% if card.blocked %}is-blocked{% endif %}" data-asset-id="{{ card.asset_id }}" data-player="{{ card.player }}" data-player-slug="{{ card.player_slug }}" data-rarity="{{ card.rarity }}" data-season-year="{{ card.season_year }}" data-history-mode="{% if card.in_season %}in_season{% else %}classic{% endif %}" data-history-target="sales-history-{{ forloop.counter }}" data-player-picture="{{ card.player_picture_url }}" data-team-picture="{{ card.team_picture_url }}" data-average="{{ card.avg_price|default_if_none:'' }}" tabindex="0">
+          <tr class="sales-card-row {% if card.in_season %}in-season-row{% endif %} {% if card.blocked %}is-blocked{% endif %}" data-asset-id="{{ card.asset_id }}" data-player="{{ card.player }}" data-player-slug="{{ card.player_slug }}" data-rarity="{{ card.rarity }}" data-season-year="{{ card.season_year }}" data-history-mode="{% if card.in_season %}in_season{% else %}classic{% endif %}" data-history-target="sales-history-{{ forloop.counter }}" data-player-picture="{{ card.player_picture_url }}" data-team-picture="{{ card.team_picture_url }}" tabindex="0">
             <td><input class="sale-select" type="checkbox" aria-label="Seleccionar {{ card.player }}" {% if card.blocked %}disabled{% endif %}></td>
             <td><div class="sales-player">{% if card.player_picture_url %}<img src="{{ card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="sales-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong>{{ card.player }} <i class="fas fa-chart-line sales-history-cue" title="Ver últimas ventas"></i></strong><small>#{{ card.serial_number|default:'-' }}</small></div></div></td>
             <td><div class="sales-team">{% if card.team_picture_url %}<img src="{{ card.team_picture_url }}" alt="" loading="lazy">{% endif %}<span>{{ card.team }}</span></div></td>
@@ -89,14 +91,13 @@
             <td>{{ card.rays_after_sale|floatformat:0 }}</td>
             <td>{% if card.min_price_classic != None %}{{ card.min_price_classic|floatformat:2 }} €{% else %}—{% endif %}</td>
             <td>{% if card.min_price_inseason != None %}{{ card.min_price_inseason|floatformat:2 }} €{% else %}—{% endif %}</td>
-            <td>{% if card.avg_price != None %}{{ card.avg_price|floatformat:2 }} €<small>{{ card.recent_sales_count }} ventas</small>{% else %}—{% endif %}</td>
             <td class="sales-price-cell">
               {% if card.blocked %}<span class="sales-blocked"><i class="fas fa-lock"></i> {{ card.blocked_reason }}</span>{% if card.active_offer_eur %}<small>{{ card.active_offer_eur|floatformat:2 }} €</small>{% endif %}
               {% else %}<div class="sales-price-control"><span>€</span><input class="sale-price" inputmode="decimal" type="text" placeholder="0,00"><button type="button" class="sale-one" title="Revisar solo esta carta"><i class="fas fa-tag"></i></button></div>{% endif %}
             </td>
           </tr>
-          <tr id="sales-history-{{ forloop.counter }}" class="history-row sales-history-row" hidden><td colspan="12"><div class="history-content" aria-live="polite">Pulsa el jugador para cargar las ventas comparables.</div></td></tr>
-          {% empty %}<tr><td colspan="12" class="sales-empty">No hay cartas que coincidan con los filtros.</td></tr>{% endfor %}
+          <tr id="sales-history-{{ forloop.counter }}" class="history-row sales-history-row" hidden><td colspan="11"><div class="history-content" aria-live="polite">Pulsa el jugador para cargar las ventas comparables.</div></td></tr>
+          {% empty %}<tr><td colspan="11" class="sales-empty">No hay cartas que coincidan con los filtros.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
@@ -121,7 +122,7 @@
   <div class="sales-modal-backdrop" data-close-modal></div>
   <section class="sales-modal-card" role="dialog" aria-modal="true" aria-labelledby="salesModalTitle">
     <button class="sales-modal-close" type="button" data-close-modal aria-label="Cerrar">×</button>
-    <h2 id="salesModalTitle"><i class="fas fa-shield-halved"></i> Confirmar ventas</h2><p>Revisa el precio y el número de días. Las ventas se enviarán en segundo plano.</p>
+    <h2 id="salesModalTitle"><i class="fas fa-shield-halved"></i> Confirmar ventas</h2><p>Revisa el precio y los días. La oferta mínima pública es opcional y se configurará antes de poner la carta a la venta.</p>
     <div id="salesReviewList" class="sales-review-list"></div>
     <div class="btn-row sales-modal-actions"><button class="btn btn-secondary" type="button" data-close-modal>Volver</button><button class="btn btn-accent" type="button" id="confirmSales"><i class="fas fa-tags"></i> Confirmar y enviar</button></div>
   </section>
@@ -141,6 +142,7 @@
   if (filterForm) {
     var timer, search = filterForm.querySelector('[name="player"]');
     if (search) search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(submitFilters, 450); });
+    filterForm.querySelectorAll('[name="classic_price_from"], [name="inseason_price_from"]').forEach(function (input) { input.addEventListener('input', function () { input.value = input.value.replace(/[^0-9.,]/g, ''); clearTimeout(timer); timer = setTimeout(submitFilters, 550); }); });
     filterForm.querySelectorAll('select, input[name="show_blocked"]').forEach(function (input) { input.addEventListener('change', submitFilters); });
     filterForm.querySelectorAll('.sales-multi-filter').forEach(function (details) {
       var dirty = false;
@@ -173,7 +175,7 @@
     var list = document.getElementById('salesReviewList'); list.innerHTML = '';
     rows.forEach(function (row) {
       var item = document.createElement('article'); item.className = 'sales-review-item'; item.dataset.assetId = row.dataset.assetId;
-      item.innerHTML = '<div class="sales-review-player">' + (row.dataset.playerPicture ? '<img src="' + row.dataset.playerPicture + '" alt="">' : '') + (row.dataset.teamPicture ? '<img class="team" src="' + row.dataset.teamPicture + '" alt="">' : '') + '<strong></strong></div><label><span>Precio</span><div class="sales-review-input"><span>€</span><input class="review-price" inputmode="decimal"></div></label><label><span>Días</span><input class="review-days" type="number" min="1" max="30" value="7"></label>';
+      item.innerHTML = '<div class="sales-review-player">' + (row.dataset.playerPicture ? '<img src="' + row.dataset.playerPicture + '" alt="">' : '') + (row.dataset.teamPicture ? '<img class="team" src="' + row.dataset.teamPicture + '" alt="">' : '') + '<strong></strong></div><label><span>Precio</span><div class="sales-review-input"><span>€</span><input class="review-price" inputmode="decimal"></div></label><label><span>Oferta mínima <small>(opcional)</small></span><div class="sales-review-input"><span>€</span><input class="review-minimum" inputmode="decimal" placeholder="Sin mínimo"></div></label><label><span>Días</span><input class="review-days" type="number" min="1" max="30" value="7"></label>';
       item.querySelector('strong').textContent = row.dataset.player; item.querySelector('.review-price').value = row.querySelector('.sale-price').value; list.appendChild(item);
     }); modal.hidden = false; document.body.classList.add('modal-open');
   }
@@ -188,8 +190,8 @@
 
   var confirm = document.getElementById('confirmSales');
   if (confirm) confirm.addEventListener('click', function () {
-    var items = Array.from(document.querySelectorAll('.sales-review-item')).map(function (item) { return { asset_id: item.dataset.assetId, euros: item.querySelector('.review-price').value.replace(',', '.'), duration_days: item.querySelector('.review-days').value }; });
-    if (items.some(function (item) { return !validPrice(item.euros) || item.duration_days < 1 || item.duration_days > 30; })) { showToast('error', 'Revisa los precios y los días'); return; }
+    var items = Array.from(document.querySelectorAll('.sales-review-item')).map(function (item) { return { asset_id: item.dataset.assetId, euros: item.querySelector('.review-price').value.replace(',', '.'), minimum_offer_eur: item.querySelector('.review-minimum').value.replace(',', '.'), duration_days: item.querySelector('.review-days').value }; });
+    if (items.some(function (item) { return !validPrice(item.euros) || (item.minimum_offer_eur && (!validPrice(item.minimum_offer_eur) || Number(item.minimum_offer_eur) > Number(item.euros))) || item.duration_days < 1 || item.duration_days > 30; })) { showToast('error', 'Revisa los precios, los mínimos y los días'); return; }
     confirm.disabled = true; confirm.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Encolando…';
     var requestKey = (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (character) { var random = crypto.getRandomValues(new Uint8Array(1))[0] % 16; return (character === 'x' ? random : (random & 3) | 8).toString(16); }));
     var data = new FormData(); data.append('csrfmiddlewaretoken', csrf); data.append('confirm', 'on'); data.append('sales', JSON.stringify(items)); data.append('request_key', requestKey);
