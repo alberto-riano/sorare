@@ -778,7 +778,10 @@ class MovementHistoryTests(TestCase):
             "anyCards": [self._api_card()],
             "bestBid": {
                 "id": "winning-bid", "fiatPayment": True,
-                "amounts": {"eurCents": 650, "referenceCurrency": "EUR"},
+                "amounts": {
+                    "eurCents": 650, "wei": "3900000000000000",
+                    "referenceCurrency": "WEI",
+                },
                 "conversionCredit": {"totalDiscount": {"eurCents": 100, "referenceCurrency": "EUR"}},
             },
         }
@@ -790,6 +793,53 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(movement["gross_eur"], 6.5)
         self.assertEqual(movement["credits_eur"], 1.0)
         self.assertEqual(movement["net_eur"], 5.5)
+        self.assertEqual(movement["currency"], "EUR")
+
+    def test_completed_crypto_auction_reports_eth(self):
+        operation = {
+            "__typename": "TokenBid", "id": "crypto-bid", "createdAt": "2026-08-20T10:00:00Z",
+            "fiatPayment": False,
+            "amounts": {
+                "eurCents": 650, "wei": "3900000000000000",
+                "referenceCurrency": "WEI",
+            },
+            "conversionCredit": None,
+            "auction": {"transactionDate": "2026-08-20T10:00:00Z", "anyCards": [self._api_card()]},
+        }
+
+        movement = _movement_from_group([{
+            "id": "crypto-bid", "date": "2026-08-20T10:00:00Z", "entryType": "PAYMENT",
+            "amounts": operation["amounts"], "tokenOperation": operation,
+        }], "burguis")
+
+        self.assertEqual(movement["currency"], "ETH")
+
+    def test_essence_reward_reports_quantity_instead_of_card_or_eur(self):
+        operation = {
+            "__typename": "So5Reward", "id": "essence-reward", "amount": None,
+            "rewardCards": [],
+            "rewards": [{
+                "__typename": "CardShardsReward", "quantity": 20, "rarity": "rare",
+            }],
+            "rewardConfigs": [],
+            "so5Fixture": {"gameWeek": 5, "shortDisplayName": "GW5"},
+            "so5Leaderboard": {"displayName": "LALIGA – Rare"},
+            "so5Ranking": {"ranking": 194},
+        }
+        movement = _movement_from_group([{
+            "id": "essence-entry", "date": "2026-08-18T20:00:00Z", "entryType": "REWARD",
+            "amounts": {}, "tokenOperation": operation,
+        }], "burguis")
+        movement["market"] = "Recompensa de jornada · GW5 · LALIGA – Rare · Puesto 194"
+
+        self.assertEqual(movement["essence_quantity"], 20)
+        self.assertEqual(movement["essence_description"], "Rare")
+        self.assertEqual(movement["currency"], "")
+
+        MovementSnapshot.objects.create(user=self.user, movements=[movement], source_version=5)
+        response = self.client.get(reverse("movements"), {"category": "reward"})
+        self.assertContains(response, "+20 Esencia")
+        self.assertNotContains(response, ">Carta<")
 
     def test_trade_cycles_match_exact_card_and_calculate_balance(self):
         card = {"asset_id": "mathew-asset", "player": "Mathew Ryan", "player_slug": "mathew-ryan", "rarity": "rare", "season_year": 2026, "in_season": True, "serial_number": 11}
@@ -854,7 +904,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
         snapshot = MovementSnapshot.objects.get(user=self.user)
         self.assertEqual(snapshot.movements[0]["id"], "movement-1")
-        self.assertEqual(snapshot.source_version, 4)
+        self.assertEqual(snapshot.source_version, 5)
 
     @patch("web_services.movement_history.graphql_request")
     def test_collector_adds_confirmed_gameweek_rewards(self, request):

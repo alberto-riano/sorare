@@ -72,6 +72,18 @@ query RewardEntries($first: Int!, $after: String) {
           ... on So5Reward {
             id slug amount { eurCents wei referenceCurrency }
             rewardCards { anyCard { assetId } }
+            rewards {
+              __typename
+              ... on CardShardsReward {
+                quantity rarity
+              }
+            }
+            rewardConfigs {
+              __typename
+              ... on CardShardRewardConfig {
+                quantity rarity
+              }
+            }
             so5Fixture { gameWeek shortDisplayName }
             so5Leaderboard { displayName(short: true, withSeasonality: false) }
             so5Ranking { ranking }
@@ -103,6 +115,18 @@ query GameweekRewards($first: Int!, $after: String) {
           mySo5Rewards {
             __typename id slug aasmState amount { eurCents wei referenceCurrency }
             rewardCards { anyCard { assetId } }
+            rewards {
+              __typename
+              ... on CardShardsReward {
+                quantity rarity
+              }
+            }
+            rewardConfigs {
+              __typename
+              ... on CardShardRewardConfig {
+                quantity rarity
+              }
+            }
             so5Fixture { gameWeek shortDisplayName rewardsDeliveryDate }
             so5Leaderboard { displayName(short: true, withSeasonality: false) }
             so5Ranking { ranking }
@@ -132,6 +156,31 @@ def _money(amounts: dict | None) -> dict:
         "eth": float(abs(wei) / Decimal(10**18)),
         "currency": "ETH" if amounts.get("referenceCurrency") == "WEI" else "EUR",
     }
+
+
+def _settlement_currency(values: list | None) -> str:
+    normalized = {
+        "ETH" if str(value).upper() == "WEI" else str(value).upper()
+        for value in values or []
+        if value
+    }
+    return next(iter(normalized)) if len(normalized) == 1 and normalized <= {"EUR", "ETH"} else ""
+
+
+def _essence_from_operation(operation: dict) -> list[dict]:
+    rewards = [
+        reward for reward in operation.get("rewards") or []
+        if reward.get("__typename") == "CardShardsReward"
+    ]
+    if rewards:
+        return [{
+            "quantity": int(reward.get("quantity") or 0),
+            "rarity": str(reward.get("rarity") or "").lower(),
+        } for reward in rewards]
+    return [{
+        "quantity": int(config.get("quantity") or 0),
+        "rarity": str(config.get("rarity") or "").lower(),
+    } for config in operation.get("rewardConfigs") or [] if config.get("__typename") == "CardShardRewardConfig"]
 
 
 def _card(card: dict) -> dict:
@@ -255,17 +304,25 @@ def _movement_from_group(
     gross = _money(entries[0].get("amounts"))
     fee = {"eur": 0.0, "eth": 0.0, "currency": gross["currency"]}
     credits_eur = 0.0
+    essence = []
 
     if typename == "TokenBid":
         direction, market = "purchase", "Subasta"
         cash_direction = direction
         gross = _money(operation.get("amounts"))
+        if operation.get("fiatPayment") is True:
+            gross["currency"] = "EUR"
+        elif operation.get("fiatPayment") is False:
+            gross["currency"] = "ETH"
+        else:
+            gross["currency"] = ""
         credits_eur = _money((operation.get("conversionCredit") or {}).get("totalDiscount"))["eur"]
         received_cards = cards
     elif typename == "TokenPrimaryOffer":
         direction, market = "purchase", "Compra instantánea"
         cash_direction = direction
         gross = _money(operation.get("price"))
+        gross["currency"] = ""
         received_cards = cards
     elif typename == "TokenOffer":
         buyer = str((operation.get("userBuyer") or {}).get("slug") or "").casefold()
@@ -286,6 +343,7 @@ def _movement_from_group(
                 "SINGLE_SALE_OFFER": "Compra instantánea",
             }.get(operation.get("type"), "Oferta")
         gross = _money(_cash_side(operation).get("amounts"))
+        gross["currency"] = _settlement_currency(operation.get("settlementCurrencies"))
         fee = _money(operation.get("marketFeeAmounts"))
         sender_cards = _cards_from_operation({
             "__typename": "TokenPrimaryOffer",
@@ -320,8 +378,9 @@ def _movement_from_group(
         cash_direction = direction
         gross = _money(operation.get("amount") or operation.get("amounts") or entries[0].get("amounts"))
         received_cards = cards
-        if cards and not gross["eur"] and not gross["eth"]:
-            gross["currency"] = "CARD"
+        essence = _essence_from_operation(operation)
+        if not gross["eur"] and not gross["eth"]:
+            gross["currency"] = ""
     else:
         return None
 
@@ -340,6 +399,12 @@ def _movement_from_group(
         else "other"
     )
     operation_id = operation.get("id") or entries[0].get("id")
+    essence_quantity = sum(item["quantity"] for item in essence)
+    essence_labels = []
+    for item in essence:
+        label = item["rarity"].replace("_", " ").title()
+        if label and label not in essence_labels:
+            essence_labels.append(label)
     return {
         "id": str(operation_id),
         "occurred_at": occurred_at,
@@ -356,6 +421,9 @@ def _movement_from_group(
         "credits_eur": round(credits_eur, 2),
         "currency": gross["currency"],
         "eth": gross["eth"],
+        "essence": essence,
+        "essence_quantity": essence_quantity,
+        "essence_description": " / ".join(essence_labels),
         "entry_types": sorted({entry.get("entryType") for entry in entries if entry.get("entryType")}),
     }
 

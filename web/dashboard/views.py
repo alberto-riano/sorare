@@ -124,7 +124,7 @@ def _movement_datetime(value):
 
 def movements(request):
     stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-    snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 4 else None
+    snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 5 else None
     active_sync = MovementSyncJob.objects.filter(
         user=request.user,
         status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
