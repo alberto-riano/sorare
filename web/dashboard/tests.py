@@ -26,7 +26,9 @@ from dashboard.views import auction_price_history, auctions_list
 from sorare_utils import get_latest_prices
 from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler, run_card_sale
 from web_services.sales_inventory import collection_display_name
-from web_services.movement_history import _movement_from_group
+from web_services.movement_history import (
+    _movement_from_group, _operation_from_trade, collect_movement_history,
+)
 
 
 class LaLigaAuctionTests(TestCase):
@@ -688,7 +690,7 @@ class MovementHistoryTests(TestCase):
         operation = {
             "__typename": "TokenBid", "id": "bid-1", "createdAt": "2026-08-19T10:00:00Z",
             "fiatPayment": True, "amounts": {"eurCents": 650, "referenceCurrency": "EUR"},
-            "conversionCredits": [], "auction": {"transactionDate": "2026-08-19T10:00:00Z", "anyCards": [card]},
+            "conversionCredit": None, "auction": {"transactionDate": "2026-08-19T10:00:00Z", "anyCards": [card]},
         }
         movement = _movement_from_group([{
             "id": "entry-2", "date": "2026-08-19T10:00:00Z", "entryType": "PAYMENT",
@@ -697,6 +699,59 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(movement["category"], "other")
         self.assertEqual(movement["gross_eur"], 6.5)
 
+    def test_open_bid_is_not_a_completed_movement(self):
+        operation = {
+            "__typename": "TokenBid", "id": "live-bid", "createdAt": "2026-08-21T10:00:00Z",
+            "amounts": {"eurCents": 577, "wei": "3000000000000000", "referenceCurrency": "WEI"},
+            "conversionCredit": None,
+            "auction": {"id": "auction-live", "transactionDate": None, "anyCards": [self._api_card()]},
+        }
+        movement = _movement_from_group([{
+            "id": "provisional", "date": "2026-08-21T10:00:00Z",
+            "entryType": "PAYMENT", "amounts": operation["amounts"], "tokenOperation": operation,
+        }], "burguis")
+        self.assertIsNone(movement)
+
+    def test_completed_auction_uses_only_the_credit_actually_applied(self):
+        trade = {
+            "__typename": "TokenAuction", "id": "auction-won", "transactionDate": "2026-08-20T10:00:00Z",
+            "anyCards": [self._api_card()],
+            "bestBid": {
+                "id": "winning-bid", "fiatPayment": True,
+                "amounts": {"eurCents": 650, "referenceCurrency": "EUR"},
+                "conversionCredit": {"totalDiscount": {"eurCents": 100, "referenceCurrency": "EUR"}},
+            },
+        }
+        operation = _operation_from_trade(trade)
+        movement = _movement_from_group([{
+            "id": "winning-bid", "date": trade["transactionDate"], "entryType": "PAYMENT",
+            "amounts": operation["amounts"], "tokenOperation": operation,
+        }], "burguis")
+        self.assertEqual(movement["gross_eur"], 6.5)
+        self.assertEqual(movement["credits_eur"], 1.0)
+        self.assertEqual(movement["net_eur"], 5.5)
+
+    @patch("web_services.movement_history.graphql_request")
+    def test_collector_uses_completed_trades_and_discards_open_auctions(self, request):
+        card = self._api_card()
+        completed = {
+            "__typename": "TokenAuction", "id": "auction-completed",
+            "transactionDate": "2026-08-20T10:00:00Z", "anyCards": [{"assetId": card["assetId"]}],
+            "bestBid": {"id": "bid-completed", "fiatPayment": True, "amounts": {"eurCents": 650, "referenceCurrency": "EUR"}, "conversionCredit": None},
+        }
+        open_auction = dict(completed, id="auction-open", transactionDate=None)
+
+        def response(query, _variables, headers=None):
+            if "CompletedTrades" in query:
+                return {"currentUser": {"slug": "burguis", "trades": {"nodes": [open_auction, completed], "pageInfo": {"hasNextPage": False}}}}
+            if "MovementCards" in query:
+                return {"tokens": {"anyCards": [card]}}
+            return {"currentUser": {"rewards": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+
+        request.side_effect = response
+        movements = collect_movement_history(headers={"Authorization": "test"})
+        self.assertEqual([movement["id"] for movement in movements], ["bid-completed"])
+
     @patch("dashboard.management.commands.process_sales_queue.collect_movement_history")
     def test_background_sync_replaces_snapshot_only_after_success(self, collect):
         collect.return_value = [{"id": "movement-1", "category": "laliga_inseason"}]
@@ -704,7 +759,9 @@ class MovementHistoryTests(TestCase):
         process_next_movement_sync()
         job.refresh_from_db()
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
-        self.assertEqual(MovementSnapshot.objects.get(user=self.user).movements[0]["id"], "movement-1")
+        snapshot = MovementSnapshot.objects.get(user=self.user)
+        self.assertEqual(snapshot.movements[0]["id"], "movement-1")
+        self.assertEqual(snapshot.source_version, 2)
 
     def test_page_filters_category_rarity_and_calculates_totals(self):
         MovementSnapshot.objects.create(user=self.user, refreshed_at=datetime.now(tz=ZoneInfo("Europe/Madrid")), movements=[
@@ -720,4 +777,14 @@ class MovementHistoryTests(TestCase):
     def test_first_visit_enqueues_background_sync(self):
         response = self.client.get(reverse("movements"))
         self.assertEqual(response.status_code, 200)
+        self.assertTrue(MovementSyncJob.objects.filter(user=self.user, status="queued").exists())
+
+    def test_old_provisional_snapshot_is_hidden_and_rebuilt(self):
+        MovementSnapshot.objects.create(
+            user=self.user, source_version=1,
+            movements=[{"id": "live-bid", "category": "laliga_inseason", "cards": [{"player": "Puja abierta"}]}],
+        )
+        response = self.client.get(reverse("movements"))
+        self.assertNotContains(response, "Puja abierta")
+        self.assertContains(response, "Cargando tu historial")
         self.assertTrue(MovementSyncJob.objects.filter(user=self.user, status="queued").exists())

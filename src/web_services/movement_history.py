@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Callable
@@ -23,53 +22,40 @@ query MovementCards($assetIds: [String!]!) {{
 }}
 """
 
-ACCOUNT_ENTRIES_QUERY = f"""
-query MovementEntries($first: Int!, $after: String) {{
-  currentUser {{
+COMPLETED_TRADES_QUERY = """
+query CompletedTrades($first: Int!, $after: String) {
+  currentUser {
     slug
-    accountEntries(
-      first: $first,
-      after: $after,
-      sortType: DESC,
-      entryType: [PAYMENT, PAYMENT_FEE, CREDIT_CARD_FEE, FX_FEE, REWARD]
-    ) {{
-      nodes {{
-        id date entryType aasmState internal provisional
-        amounts {{ eurCents wei referenceCurrency }}
-        tokenOperation {{
-          __typename
-          ... on TokenBid {{
-            id createdAt fiatPayment
-            amounts {{ eurCents wei referenceCurrency }}
-            conversionCredits {{ totalDiscount {{ eurCents wei referenceCurrency }} }}
-            auction {{ id transactionDate anyCards {{ assetId }} }}
-          }}
-          ... on TokenOffer {{
-            id transactionDate type settlementCurrencies cardPaymentProvider
-            marketFeeAmounts {{ eurCents wei referenceCurrency }}
-            userBuyer {{ slug }} userSeller {{ slug }}
-            senderSide {{ amounts {{ eurCents wei referenceCurrency }} anyCards {{ assetId }} }}
-            receiverSide {{ amounts {{ eurCents wei referenceCurrency }} anyCards {{ assetId }} }}
-          }}
-          ... on TokenPrimaryOffer {{
-            id transactionDate cardPaymentProvider
-            price {{ eurCents wei referenceCurrency }}
-            anyCards {{ assetId }}
-            userBuyer {{ slug }} userSeller {{ slug }}
-          }}
-          ... on So5Reward {{
-            id slug amount {{ eurCents wei referenceCurrency }}
-            rewardCards {{ anyCard {{ assetId }} }}
-          }}
-          ... on TokenMonetaryReward {{
-            id rewardId amounts {{ eurCents wei referenceCurrency }}
-          }}
-        }}
-      }}
-      pageInfo {{ hasNextPage endCursor }}
-    }}
-  }}
-}}
+    trades(first: $first, after: $after, sortByEndDate: DESC, sport: [FOOTBALL]) {
+      nodes {
+        __typename
+        ... on TokenAuction {
+          id transactionDate dealStatus
+          anyCards { assetId }
+          bestBid {
+            id fiatPayment
+            amounts { eurCents wei referenceCurrency }
+            conversionCredit { totalDiscount { eurCents wei referenceCurrency } }
+          }
+        }
+        ... on TokenOffer {
+          id transactionDate dealStatus type settlementCurrencies cardPaymentProvider
+          marketFeeAmounts { eurCents wei referenceCurrency }
+          userBuyer { slug } userSeller { slug }
+          senderSide { amounts { eurCents wei referenceCurrency } anyCards { assetId } }
+          receiverSide { amounts { eurCents wei referenceCurrency } anyCards { assetId } }
+        }
+        ... on TokenPrimaryOffer {
+          id transactionDate dealStatus cardPaymentProvider
+          price { eurCents wei referenceCurrency }
+          anyCards { assetId }
+          userBuyer { slug } userSeller { slug }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
 """
 
 CARD_REWARDS_QUERY = f"""
@@ -153,6 +139,33 @@ def _cards_from_operation(operation: dict, card_by_asset: dict[str, dict] | None
     return [_card(card_by_asset.get(str(card.get("assetId"))) or card) for card in raw_cards]
 
 
+def _operation_from_trade(trade: dict) -> dict | None:
+    """Adapta una transacción completada a la forma común del normalizador."""
+    typename = trade.get("__typename")
+    if not trade.get("transactionDate"):
+        return None
+    if typename in {"TokenOffer", "TokenPrimaryOffer"}:
+        return trade
+    if typename == "TokenAuction":
+        best_bid = trade.get("bestBid") or {}
+        if not best_bid.get("id"):
+            return None
+        return {
+            "__typename": "TokenBid",
+            "id": best_bid["id"],
+            "createdAt": trade.get("transactionDate"),
+            "fiatPayment": best_bid.get("fiatPayment"),
+            "amounts": best_bid.get("amounts") or {},
+            "conversionCredit": best_bid.get("conversionCredit"),
+            "auction": {
+                "id": trade.get("id"),
+                "transactionDate": trade.get("transactionDate"),
+                "anyCards": trade.get("anyCards") or [],
+            },
+        }
+    return None
+
+
 def _cash_side(operation: dict) -> dict:
     sides = [operation.get("senderSide") or {}, operation.get("receiverSide") or {}]
     money_only = [side for side in sides if not (side.get("anyCards") or [])]
@@ -169,6 +182,10 @@ def _movement_from_group(
     if not operation:
         return None
     typename = operation.get("__typename") or ""
+    if typename == "TokenBid" and not (operation.get("auction") or {}).get("transactionDate"):
+        return None
+    if typename in {"TokenOffer", "TokenPrimaryOffer"} and not operation.get("transactionDate"):
+        return None
     cards = _cards_from_operation(operation, card_by_asset)
     occurred_at = (
         operation.get("transactionDate")
@@ -185,7 +202,7 @@ def _movement_from_group(
     if typename == "TokenBid":
         direction, market = "purchase", "Subasta"
         gross = _money(operation.get("amounts"))
-        credits_eur = sum(_money((credit or {}).get("totalDiscount"))["eur"] for credit in operation.get("conversionCredits") or [])
+        credits_eur = _money((operation.get("conversionCredit") or {}).get("totalDiscount"))["eur"]
     elif typename == "TokenPrimaryOffer":
         direction, market = "purchase", "Compra instantánea"
         gross = _money(operation.get("price"))
@@ -209,15 +226,8 @@ def _movement_from_group(
 
     gross_eur = gross["eur"]
     fee_eur = fee["eur"] if direction == "sale" else 0.0
-    ledger_payments = [
-        _money(entry.get("amounts"))["eur"]
-        for entry in entries
-        if entry.get("entryType") == "PAYMENT"
-    ]
-    ledger_payment_eur = max(ledger_payments, default=0.0)
     if direction == "sale":
-        calculated_net = max(gross_eur - fee_eur, 0.0)
-        net_eur = ledger_payment_eur if 0 < ledger_payment_eur <= gross_eur else calculated_net
+        net_eur = max(gross_eur - fee_eur, 0.0)
         fee_eur = max(gross_eur - net_eur, fee_eur)
     else:
         net_eur = max(gross_eur - credits_eur, 0.0)
@@ -266,36 +276,32 @@ def collect_movement_history(
     progress: Callable[[int, str], None] | None = None,
     headers: dict | None = None,
 ) -> list[dict]:
-    """Descarga compras, ventas y recompensas y las agrupa por operación."""
+    """Descarga únicamente transacciones completadas y recompensas reclamadas."""
     headers = headers or build_headers()
-    entries: list[dict] = []
+    trades: list[dict] = []
     current_slug = ""
     cursor = None
     page = 0
     while True:
         page += 1
-        data = graphql_request(ACCOUNT_ENTRIES_QUERY, {"first": 100, "after": cursor}, headers=headers)
+        data = graphql_request(COMPLETED_TRADES_QUERY, {"first": 100, "after": cursor}, headers=headers)
         current_user = data.get("currentUser") or {}
         current_slug = current_slug or str(current_user.get("slug") or "")
-        connection = current_user.get("accountEntries") or {}
-        entries.extend(connection.get("nodes") or [])
+        connection = current_user.get("trades") or {}
+        trades.extend(trade for trade in connection.get("nodes") or [] if trade.get("transactionDate"))
         if progress:
-            progress(len(entries), f"{len(entries)} asientos · página {page}")
+            progress(len(trades), f"{len(trades)} transacciones completadas · página {page}")
         page_info = connection.get("pageInfo") or {}
         if not page_info.get("hasNextPage"):
             break
         cursor = page_info.get("endCursor")
 
-    grouped: dict[str, list[dict]] = defaultdict(list)
-    for entry in entries:
-        operation = entry.get("tokenOperation") or {}
-        key = str(operation.get("id") or f"entry:{entry.get('id')}")
-        grouped[key].append(entry)
+    operations = [operation for trade in trades if (operation := _operation_from_trade(trade))]
 
     asset_ids = sorted({
         str(card.get("assetId"))
-        for entry in entries
-        for card in _raw_cards_from_operation(entry.get("tokenOperation") or {})
+        for operation in operations
+        for card in _raw_cards_from_operation(operation)
         if card.get("assetId")
     })
     card_by_asset: dict[str, dict] = {}
@@ -306,11 +312,18 @@ def collect_movement_history(
             if card and card.get("assetId"):
                 card_by_asset[str(card["assetId"])] = card
         if progress:
-            progress(len(entries), f"Enriqueciendo cartas {min(start + 100, len(asset_ids))}/{len(asset_ids)}")
+            progress(len(trades), f"Cargando cartas {min(start + 100, len(asset_ids))}/{len(asset_ids)}")
 
     movements = [
-        movement for group in grouped.values()
-        if (movement := _movement_from_group(group, current_slug, card_by_asset))
+        movement
+        for operation in operations
+        if (movement := _movement_from_group([{
+            "id": operation.get("id"),
+            "date": operation.get("transactionDate") or (operation.get("auction") or {}).get("transactionDate"),
+            "entryType": "PAYMENT",
+            "amounts": operation.get("amounts") or operation.get("price") or {},
+            "tokenOperation": operation,
+        }], current_slug, card_by_asset))
     ]
 
     cursor = None
@@ -324,7 +337,7 @@ def collect_movement_history(
                 movements.append(reward)
                 known_ids.add(reward["id"])
         if progress:
-            progress(len(entries), f"{len(movements)} movimientos normalizados")
+            progress(len(trades), f"{len(movements)} movimientos completados y recompensas")
         page_info = connection.get("pageInfo") or {}
         if not page_info.get("hasNextPage"):
             break
