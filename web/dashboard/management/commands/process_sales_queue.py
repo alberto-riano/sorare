@@ -5,8 +5,12 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from dashboard.models import SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob
+from dashboard.models import (
+    MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
+    SalesInventory, SalesRefreshJob,
+)
 from dashboard.views import PATHS
+from web_services.movement_history import collect_movement_history
 from web_services.process_runner import run_card_sale, sale_error_message
 from web_services.sales_inventory import collect_sales_inventory
 
@@ -47,6 +51,42 @@ def process_next_refresh():
     job.save(update_fields=(
         "status", "card_count", "processed_count", "total_count",
         "progress_label", "error", "finished_at",
+    ))
+    return job
+
+
+def process_next_movement_sync():
+    with transaction.atomic():
+        job = MovementSyncJob.objects.select_for_update().filter(status=MovementSyncJob.Status.QUEUED).first()
+        if not job:
+            return None
+        job.status = MovementSyncJob.Status.RUNNING
+        job.started_at = timezone.now()
+        job.progress_label = "Conectando con el historial de Sorare"
+        job.save(update_fields=("status", "started_at", "progress_label"))
+
+    try:
+        def save_progress(processed, label):
+            MovementSyncJob.objects.filter(pk=job.pk).update(
+                processed_count=processed,
+                progress_label=label,
+            )
+
+        movements = collect_movement_history(progress=save_progress)
+        MovementSnapshot.objects.update_or_create(
+            user=job.user,
+            defaults={"movements": movements, "refreshed_at": timezone.now()},
+        )
+        job.movement_count = len(movements)
+        job.progress_label = "Historial actualizado"
+        job.status = MovementSyncJob.Status.SUCCEEDED
+    except Exception as exc:
+        job.status = MovementSyncJob.Status.FAILED
+        job.progress_label = "Actualización interrumpida"
+        job.error = f"No se pudo actualizar el historial: {exc}"[:2000]
+    job.finished_at = timezone.now()
+    job.save(update_fields=(
+        "status", "movement_count", "processed_count", "progress_label", "error", "finished_at",
     ))
     return job
 
@@ -123,7 +163,7 @@ def process_next_sale():
 
 
 class Command(BaseCommand):
-    help = "Actualiza el inventario y procesa ventas en segundo plano"
+    help = "Actualiza inventario e historial y procesa ventas en segundo plano"
 
     def add_arguments(self, parser):
         parser.add_argument("--watch", action="store_true", help="Permanecer escuchando nuevos trabajos")
@@ -133,6 +173,11 @@ class Command(BaseCommand):
         interrupted_refreshes.update(
             status=SalesRefreshJob.Status.FAILED,
             error="La actualización se interrumpió; el inventario anterior sigue disponible.",
+            finished_at=timezone.now(),
+        )
+        MovementSyncJob.objects.filter(status=MovementSyncJob.Status.RUNNING).update(
+            status=MovementSyncJob.Status.FAILED,
+            error="La actualización se interrumpió; el historial anterior sigue disponible.",
             finished_at=timezone.now(),
         )
         for job in SaleBatchJob.objects.filter(status=SaleBatchJob.Status.RUNNING):
@@ -146,7 +191,7 @@ class Command(BaseCommand):
             job.save(update_fields=("status", "failure_count", "finished_at"))
 
         while True:
-            processed = process_next_refresh() or process_next_sale()
+            processed = process_next_refresh() or process_next_movement_sync() or process_next_sale()
             if not options["watch"]:
                 break
             if processed is None:

@@ -137,6 +137,10 @@ nav a:hover {
   width: min(1600px, 98vw);
 }
 
+.page:has(.movements-page) {
+  width: min(1450px, 97vw);
+}
+
 .panel {
   background: linear-gradient(120deg, rgba(255, 255, 255, 0.92), rgba(255, 250, 240, 0.96));
   border: 1px solid var(--line);
@@ -1289,8 +1293,58 @@ body.modal-open { overflow: hidden; }
 .global-sales-progress.is-complete { border-left-color: #22c55e; }
 .global-sales-progress.is-error { border-left-color: #ef4444; }
 
+/* Historial económico */
+.movements-page { display: grid; gap: 1rem; }
+.movements-hero { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; }
+.movements-hero h1 { margin: .2rem 0 .45rem; font-size: clamp(1.55rem,3vw,2.35rem); }
+.movements-hero p:last-child { margin-bottom: 0; color: var(--muted); }
+.movement-sync { display: grid; min-width: 230px; justify-items: end; gap: .18rem; }
+.movement-sync > span, .movement-sync > small { color: var(--muted); font-size: .78rem; }
+.movement-sync .btn { margin-top: .45rem; }
+.movement-tabs { display: flex; flex: none; justify-content: flex-start; gap: .55rem; overflow-x: auto; }
+.movement-tabs a { flex: 0 0 auto; color: var(--ink); border: 1px solid var(--line); background: #fff; }
+.movement-tabs a b { color: var(--muted); font-family: "IBM Plex Mono",monospace; }
+.movement-tabs a.is-active { color: #fff; border-color: var(--accent); background: var(--accent); }
+.movement-tabs a.is-active b { color: #fff; }
+.movement-kpis { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .8rem; }
+.movement-kpis article { display: grid; gap: .2rem; }
+.movement-kpis span, .movement-kpis small { color: var(--muted); }
+.movement-kpis strong { font: 700 1.45rem "IBM Plex Mono",monospace; }
+.is-out { color: #b91c1c !important; }
+.is-in { color: var(--good) !important; }
+.movement-results { min-width: 0; }
+.movement-help { color: var(--muted); font-size: .82rem; }
+.movement-filters { display: grid; grid-template-columns: 1.3fr repeat(5,minmax(125px,1fr)) auto; gap: .65rem; align-items: end; margin: 1rem 0; }
+.movement-filters label { min-width: 0; }
+.movement-filters input, .movement-filters select { width: 100%; min-height: 44px; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); font: inherit; }
+.movement-clear { min-height: 44px; justify-content: center; }
+.movement-table-wrap { overflow: auto; }
+.movement-table { min-width: 980px; }
+.movement-table td { vertical-align: middle; }
+.movement-table td > small, .movement-date small, .movement-kind + small { display: block; margin-top: .2rem; color: var(--muted); }
+.movement-date strong { white-space: nowrap; }
+.movement-cards { display: grid; gap: .45rem; min-width: 265px; }
+.movement-card { display: flex; align-items: center; gap: .65rem; }
+.movement-card > img, .movement-avatar { width: 44px; height: 44px; flex: 0 0 auto; border-radius: 50%; object-fit: cover; background: #ecfdf5; }
+.movement-avatar { display: grid; place-items: center; color: var(--muted); }
+.movement-card small { display: flex; align-items: center; gap: .25rem; margin-top: .12rem; color: var(--muted); }
+.movement-team { width: 18px; height: 18px; object-fit: contain; }
+.movement-kind { display: inline-flex; align-items: center; gap: .4rem; width: max-content; padding: .32rem .55rem; border-radius: 999px; font-weight: 700; font-size: .8rem; }
+.kind-purchase { color: #9f1239; background: #ffe4e6; }
+.kind-sale { color: #166534; background: #dcfce7; }
+.kind-reward { color: #854d0e; background: #fef9c3; }
+.movement-amount { min-width: 210px; }
+.movement-amount > span { display: inline-grid; gap: .08rem; margin-right: .9rem; }
+.movement-amount small { color: var(--muted); }
+.movement-amount strong { font-family: "IBM Plex Mono",monospace; }
+.movement-amount em { display: block; margin-top: .25rem; color: var(--muted); font-size: .72rem; font-style: normal; }
+.movement-pagination { display: flex; flex: none; justify-content: center; align-items: center; gap: .5rem; margin-top: 1rem; }
+.movement-pagination a { display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 1px solid var(--accent); border-radius: 50%; color: var(--accent); background: #fff; }
+
 @media (max-width: 1180px) {
   .sales-filters { grid-template-columns: repeat(4,minmax(150px,1fr)); }
+  .movement-filters { grid-template-columns: repeat(4,minmax(145px,1fr)); }
+  .movement-kpis { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 780px) {
   .sales-market-head, .sales-toolbar { align-items: stretch; flex-direction: column; }
@@ -1300,9 +1354,13 @@ body.modal-open { overflow: hidden; }
   .sales-review-item { grid-template-columns: 1fr 1fr; }
   .sales-review-player { grid-column: 1 / -1; }
   .sales-modal-card { padding: 1.1rem; }
+  .movements-hero { align-items: stretch; flex-direction: column; }
+  .movement-sync { justify-items: start; }
+  .movement-filters { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 520px) {
   .sales-filters, .sales-review-item { grid-template-columns: 1fr; }
   .sales-review-player { grid-column: auto; }
   .sales-basket { width: 100%; justify-content: space-between; border-radius: 18px; }
+  .movement-filters, .movement-kpis { grid-template-columns: 1fr; }
 }

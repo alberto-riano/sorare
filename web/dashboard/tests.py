@@ -1,6 +1,7 @@
 import json
 import tempfile
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -13,15 +14,19 @@ from django.urls import reverse
 import listar_subastas
 from dashboard.forms import BatchBidForm, BatchSaleForm, InlineBidForm
 from dashboard.management.commands.process_bid_queue import process_next_job
-from dashboard.management.commands.process_sales_queue import process_next_refresh, process_next_sale
+from dashboard.management.commands.process_sales_queue import (
+    process_next_movement_sync, process_next_refresh, process_next_sale,
+)
 from dashboard.models import (
     AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer,
-    SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob,
+    MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
+    SalesInventory, SalesRefreshJob,
 )
 from dashboard.views import auction_price_history, auctions_list
 from sorare_utils import get_latest_prices
 from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler, run_card_sale
 from web_services.sales_inventory import collection_display_name
+from web_services.movement_history import _movement_from_group
 
 
 class LaLigaAuctionTests(TestCase):
@@ -643,3 +648,76 @@ class SalesWorkbenchTests(TestCase):
             "active_listing": False, "blocked": blocked,
             "blocked_reason": "En lineup" if blocked else "",
         }
+
+
+class MovementHistoryTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username="burguis", password="test")
+        self.client.force_login(self.user)
+
+    @staticmethod
+    def _api_card(*, player="Carles Aleñá", rarity="rare", in_season=True, league="laliga-ea-sports"):
+        return {
+            "assetId": f"asset-{player}", "slug": player.lower(), "name": player,
+            "rarityTyped": rarity, "seasonYear": 2026, "inSeasonEligible": in_season,
+            "pictureUrl": "", "anyPlayer": {"slug": player.lower(), "displayName": player, "squaredPictureUrl": "player.png"},
+            "anyTeam": {"name": "Deportivo Alavés", "pictureUrl": "team.png", "domesticLeague": {"slug": league, "displayName": "LALIGA EA SPORTS" if "laliga" in league else "J1 League"}},
+        }
+
+    def test_sale_reports_buyer_price_received_amount_and_fee(self):
+        card = self._api_card()
+        operation = {
+            "__typename": "TokenOffer", "id": "offer-1", "transactionDate": "2026-08-20T10:00:00Z",
+            "type": "SINGLE_BUY_OFFER", "settlementCurrencies": ["EUR"],
+            "userBuyer": {"slug": "other"}, "userSeller": {"slug": "burguis"},
+            "marketFeeAmounts": {"eurCents": 500, "referenceCurrency": "EUR"},
+            "senderSide": {"amounts": {"eurCents": 0}, "anyCards": [card]},
+            "receiverSide": {"amounts": {"eurCents": 10000, "referenceCurrency": "EUR"}, "anyCards": []},
+        }
+        movement = _movement_from_group([{
+            "id": "entry-1", "date": "2026-08-20T10:00:00Z", "entryType": "PAYMENT",
+            "amounts": {"eurCents": 9500, "referenceCurrency": "EUR"}, "tokenOperation": operation,
+        }], "burguis")
+        self.assertEqual(movement["direction"], "sale")
+        self.assertEqual(movement["market"], "Oferta pública")
+        self.assertEqual((movement["gross_eur"], movement["net_eur"], movement["fee_eur"]), (100.0, 95.0, 5.0))
+        self.assertEqual(movement["category"], "laliga_inseason")
+
+    def test_classic_card_goes_to_other_movements(self):
+        card = self._api_card(player="Take", in_season=False)
+        operation = {
+            "__typename": "TokenBid", "id": "bid-1", "createdAt": "2026-08-19T10:00:00Z",
+            "fiatPayment": True, "amounts": {"eurCents": 650, "referenceCurrency": "EUR"},
+            "conversionCredits": [], "auction": {"transactionDate": "2026-08-19T10:00:00Z", "anyCards": [card]},
+        }
+        movement = _movement_from_group([{
+            "id": "entry-2", "date": "2026-08-19T10:00:00Z", "entryType": "PAYMENT",
+            "amounts": {"eurCents": -650, "referenceCurrency": "EUR"}, "tokenOperation": operation,
+        }], "burguis")
+        self.assertEqual(movement["category"], "other")
+        self.assertEqual(movement["gross_eur"], 6.5)
+
+    @patch("dashboard.management.commands.process_sales_queue.collect_movement_history")
+    def test_background_sync_replaces_snapshot_only_after_success(self, collect):
+        collect.return_value = [{"id": "movement-1", "category": "laliga_inseason"}]
+        job = MovementSyncJob.objects.create(user=self.user)
+        process_next_movement_sync()
+        job.refresh_from_db()
+        self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
+        self.assertEqual(MovementSnapshot.objects.get(user=self.user).movements[0]["id"], "movement-1")
+
+    def test_page_filters_category_rarity_and_calculates_totals(self):
+        MovementSnapshot.objects.create(user=self.user, refreshed_at=datetime.now(tz=ZoneInfo("Europe/Madrid")), movements=[
+            {"id": "buy", "occurred_at": "2026-08-18T10:00:00Z", "direction": "purchase", "market": "Subasta", "category": "laliga_inseason", "cards": [{"player": "Carles Aleñá", "rarity": "rare", "in_season": True}], "gross_eur": 10, "net_eur": 8, "credits_eur": 2, "fee_eur": 0, "currency": "EUR", "eth": 0},
+            {"id": "other", "occurred_at": "2026-08-17T10:00:00Z", "direction": "purchase", "market": "Subasta", "category": "other", "cards": [{"player": "Take", "rarity": "limited", "in_season": False}], "gross_eur": 6.5, "net_eur": 6.5, "credits_eur": 0, "fee_eur": 0, "currency": "EUR", "eth": 0},
+        ])
+        response = self.client.get(reverse("movements"), {"category": "laliga_inseason", "rarity": "rare"})
+        self.assertContains(response, "Carles Aleñá")
+        self.assertNotContains(response, ">Take<")
+        self.assertEqual(response.context["totals"]["purchases"], Decimal("8"))
+        self.assertEqual(response.context["totals"]["credits"], Decimal("2"))
+
+    def test_first_visit_enqueues_background_sync(self):
+        response = self.client.get(reverse("movements"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(MovementSyncJob.objects.filter(user=self.user, status="queued").exists())

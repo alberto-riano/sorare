@@ -25,7 +25,8 @@ from web_services.sales_inventory import collection_display_name
 from .forms import BatchBidForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
 from .models import (
     AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer,
-    SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob,
+    MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
+    SalesInventory, SalesRefreshJob,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -87,6 +88,13 @@ def index(request):
             "status": "Disponible",
         },
         {
+            "title": "Movimientos",
+            "icon": "fas fa-chart-pie",
+            "description": "Analiza compras, ventas, comisiones y recompensas de tu cuenta.",
+            "url": "movements",
+            "status": "Disponible",
+        },
+        {
             "title": "Renovar Token",
             "icon": "fas fa-key",
             "description": "Renueva el JWT con tu MFA cuando caduque, sin tocar archivos.",
@@ -102,6 +110,125 @@ def index(request):
         },
     ]
     return render(request, "dashboard/index.html", {"cards": cards})
+
+
+def _movement_datetime(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def movements(request):
+    snapshot = MovementSnapshot.objects.filter(user=request.user).first()
+    active_sync = MovementSyncJob.objects.filter(
+        user=request.user,
+        status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
+    ).order_by("-created_at").first()
+    if not snapshot and not active_sync:
+        active_sync = MovementSyncJob.objects.create(user=request.user)
+
+    all_movements = list(snapshot.movements if snapshot else [])
+    category = request.GET.get("category", "laliga_inseason")
+    if category not in {"laliga_inseason", "other", "all"}:
+        category = "laliga_inseason"
+    direction = request.GET.get("direction", "")
+    rarity = request.GET.get("rarity", "")
+    player = request.GET.get("player", "").strip().casefold()
+    date_from = request.GET.get("date_from", "").strip()
+    date_to = request.GET.get("date_to", "").strip()
+
+    rows = []
+    rarities = set()
+    for raw in all_movements:
+        row = dict(raw)
+        cards = row.get("cards") or []
+        rarities.update(card.get("rarity") for card in cards if card.get("rarity"))
+        occurred_at = _movement_datetime(row.get("occurred_at"))
+        row["occurred_at_dt"] = occurred_at
+        if category != "all" and row.get("category") != category:
+            continue
+        if direction and row.get("direction") != direction:
+            continue
+        if rarity and not any(card.get("rarity") == rarity for card in cards):
+            continue
+        if player and not any(player in str(card.get("player", "")).casefold() for card in cards):
+            continue
+        iso_date = occurred_at.date().isoformat() if occurred_at else ""
+        if date_from and iso_date < date_from:
+            continue
+        if date_to and iso_date > date_to:
+            continue
+        rows.append(row)
+
+    purchases = [row for row in rows if row.get("direction") == "purchase"]
+    sales = [row for row in rows if row.get("direction") == "sale"]
+    rewards = [row for row in rows if row.get("direction") == "reward"]
+    totals = {
+        "purchases": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases),
+        "sales_gross": sum(Decimal(str(row.get("gross_eur") or 0)) for row in sales),
+        "sales_net": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales),
+        "fees": sum(Decimal(str(row.get("fee_eur") or 0)) for row in sales),
+        "credits": sum(Decimal(str(row.get("credits_eur") or 0)) for row in purchases),
+        "rewards": len(rewards),
+        "balance": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
+        - sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases),
+    }
+    try:
+        per_page = int(request.GET.get("per_page", 25))
+    except ValueError:
+        per_page = 25
+    per_page = per_page if per_page in {25, 50, 100} else 25
+    page_obj = Paginator(rows, per_page).get_page(request.GET.get("page", 1))
+    query = request.GET.copy()
+    query.pop("page", None)
+
+    return render(request, "dashboard/movements.html", {
+        "snapshot": snapshot,
+        "active_sync": active_sync,
+        "page_obj": page_obj,
+        "total_rows": len(rows),
+        "all_count": len(all_movements),
+        "laliga_count": sum(row.get("category") == "laliga_inseason" for row in all_movements),
+        "other_count": sum(row.get("category") == "other" for row in all_movements),
+        "totals": totals,
+        "available_rarities": sorted(rarities),
+        "selected_category": category,
+        "selected_direction": direction,
+        "selected_rarity": rarity,
+        "date_from": date_from,
+        "date_to": date_to,
+        "per_page": per_page,
+        "query_without_page": query.urlencode(),
+    })
+
+
+@require_POST
+def enqueue_movements_sync(request):
+    active = MovementSyncJob.objects.filter(
+        user=request.user,
+        status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
+    ).first()
+    job = active or MovementSyncJob.objects.create(user=request.user)
+    return JsonResponse({"job_id": job.id, "status": job.status}, status=202)
+
+
+@require_GET
+def movements_sync_status(request):
+    job = MovementSyncJob.objects.filter(user=request.user).order_by("-created_at").first()
+    if not job:
+        return JsonResponse({"job": None})
+    return JsonResponse({"job": {
+        "id": job.id,
+        "status": job.status,
+        "movement_count": job.movement_count,
+        "processed_count": job.processed_count,
+        "progress_label": job.progress_label,
+        "error": job.error,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+    }})
 
 
 def telegram_alerts(request):
