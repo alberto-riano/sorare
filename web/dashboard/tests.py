@@ -773,6 +773,19 @@ class MovementHistoryTests(TestCase):
         self.assertFalse(cycle["exact_card"])
         self.assertIn("compra #16 · venta #10", cycle["notes"][0])
 
+    def test_trade_cycles_can_group_a_repurchase_after_the_sale(self):
+        bought = {"asset_id": "zakaria-19", "player": "Zakaria Eddahchouri", "player_slug": "zakaria", "rarity": "rare", "season_year": 2026, "in_season": True, "serial_number": 19}
+        sold = dict(bought, asset_id="zakaria-16", serial_number=16)
+        sale = {"id": "sell-z", "occurred_at": "2026-08-20T00:00:00Z", "direction": "sale", "cash_direction": "sale", "market": "Oferta pública", "cards": [sold], "received_cards": [], "sent_cards": [sold], "gross_eur": 7.56, "net_eur": 7.2, "fee_eur": .36}
+        purchase = {"id": "buy-z", "occurred_at": "2026-08-20T00:20:00Z", "direction": "purchase", "cash_direction": "purchase", "market": "Subasta", "cards": [bought], "received_cards": [bought], "sent_cards": [], "net_eur": 5.4}
+
+        cycle = build_trade_cycles([purchase, sale])[0]
+
+        self.assertTrue(cycle["purchase_after_sale"])
+        self.assertEqual(cycle["balance_eur"], Decimal("1.80"))
+        self.assertIn("compra #19 · venta #16", cycle["notes"][0])
+        self.assertIn("compra es posterior", cycle["notes"][1])
+
     @patch("web_services.movement_history.graphql_request")
     def test_collector_uses_completed_trades_and_discards_open_auctions(self, request):
         card = self._api_card()
@@ -837,11 +850,30 @@ class MovementHistoryTests(TestCase):
 
         response = self.client.get(reverse("movements"), {"category": "laliga_inseason", "grouped": "1"})
 
-        self.assertContains(response, "2 ciclos cerrados")
+        self.assertContains(response, "2 compraventas agrupadas")
+        self.assertContains(response, 'class="movement-cycle-card"', count=2)
         self.assertContains(response, "Misma carta")
         self.assertContains(response, "+7,09 €")
         self.assertContains(response, "Cartas distintas: compra #16 · venta #10")
         self.assertContains(response, "category=other&amp;grouped=1")
+
+    def test_cash_and_card_trade_shows_gross_net_and_commission(self):
+        sivera = {"asset_id": "sivera-10", "player": "Sivera", "team": "D. Alavés", "rarity": "rare", "serial_number": 10}
+        dituro = {"asset_id": "dituro-14", "player": "Matías Dituro", "team": "Elche CF", "rarity": "rare", "serial_number": 14}
+        MovementSnapshot.objects.create(user=self.user, movements=[{
+            "id": "swap", "occurred_at": "2026-08-19T11:02:00Z", "direction": "trade",
+            "cash_direction": "sale", "market": "Intercambio + dinero", "category": "laliga_inseason",
+            "cards": [sivera, dituro], "sent_cards": [sivera], "received_cards": [dituro],
+            "gross_eur": 45, "net_eur": 42.75, "fee_eur": 2.25, "credits_eur": 0,
+            "currency": "EUR", "eth": 0,
+        }])
+
+        response = self.client.get(reverse("movements"), {"category": "laliga_inseason", "grouped": "0"})
+
+        self.assertContains(response, "Importe")
+        self.assertContains(response, "45,00 €")
+        self.assertContains(response, "42,75 €")
+        self.assertContains(response, "−2,25 € comisión")
 
     def test_first_visit_enqueues_background_sync(self):
         response = self.client.get(reverse("movements"))

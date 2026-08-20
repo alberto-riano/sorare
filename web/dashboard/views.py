@@ -221,6 +221,10 @@ def movements(request):
     page_obj = Paginator(display_rows, per_page).get_page(request.GET.get("page", 1))
     query = request.GET.copy()
     query.pop("page", None)
+    grouped_query = query.copy()
+    grouped_query["grouped"] = "1"
+    movements_query = query.copy()
+    movements_query["grouped"] = "0"
 
     return render(request, "dashboard/movements.html", {
         "snapshot": snapshot,
@@ -240,6 +244,8 @@ def movements(request):
         "date_to": date_to,
         "per_page": per_page,
         "query_without_page": query.urlencode(),
+        "grouped_query": grouped_query.urlencode(),
+        "movements_query": movements_query.urlencode(),
     })
 
 

@@ -27,39 +27,44 @@
   {% if snapshot %}
   <section class="movement-kpis">
     <article class="panel"><span>{% if grouped %}Coste de ciclos cerrados{% else %}Gastado en compras{% endif %}</span><strong class="is-out">−{{ totals.purchases|floatformat:2 }} €</strong><small>Descontando {{ totals.credits|floatformat:2 }} € en créditos</small></article>
-    <article class="panel"><span>Ventas brutas</span><strong>{{ totals.sales_gross|floatformat:2 }} €</strong><small>Precio pagado por compradores</small></article>
     <article class="panel"><span>Recibido en ventas</span><strong class="is-in">+{{ totals.sales_net|floatformat:2 }} €</strong><small>{{ totals.fees|floatformat:2 }} € en comisiones</small></article>
     <article class="panel"><span>Balance compraventa</span><strong class="{% if totals.balance < 0 %}is-out{% else %}is-in{% endif %}">{{ totals.balance|floatformat:2 }} €</strong><small>{% if grouped %}Solo ciclos con coste y venta determinables{% else %}{{ totals.rewards }} recompensas en la selección{% endif %}</small></article>
   </section>
 
   <section class="panel movement-results reveal">
-    <div class="table-head"><div><p class="kicker">Selección actual</p><h2>{{ total_rows }} {% if grouped %}ciclos cerrados{% else %}movimientos{% endif %}</h2></div><p class="movement-help">{% if grouped %}Se empareja primero la carta exacta y después cartas equivalentes del mismo jugador.{% else %}Una operación con varias cartas aparece una sola vez.{% endif %}</p></div>
+    <div class="table-head"><div><p class="kicker">Selección actual</p><h2>{{ total_rows }} {% if grouped %}compraventas agrupadas{% else %}movimientos{% endif %}</h2></div><div class="movement-view-switch" aria-label="Vista del historial"><a href="?{{ movements_query }}" class="{% if not grouped %}is-active{% endif %}"><i class="fas fa-list"></i> Movimientos</a><a href="?{{ grouped_query }}" class="{% if grouped %}is-active{% endif %}"><i class="fas fa-link"></i> Compraventas agrupadas</a></div></div>
+    <p class="movement-help">{% if grouped %}Cada bloque une la compra y la venta. Primero se busca la misma carta y después otra equivalente del mismo jugador.{% else %}Una operación con varias cartas aparece una sola vez.{% endif %}</p>
     <form method="get" id="movementFilters" class="movement-filters">
       <input type="hidden" name="category" value="{{ selected_category }}">
+      <input type="hidden" name="grouped" value="{% if grouped %}1{% else %}0{% endif %}">
       <label><span>Jugador</span><input type="search" name="player" value="{{ request.GET.player }}" placeholder="Nombre"></label>
-      <label><span>Movimiento</span><select name="direction" {% if grouped %}disabled{% endif %}><option value="">Todos</option><option value="purchase" {% if selected_direction == 'purchase' %}selected{% endif %}>Compras</option><option value="sale" {% if selected_direction == 'sale' %}selected{% endif %}>Ventas</option><option value="trade" {% if selected_direction == 'trade' %}selected{% endif %}>Intercambios</option><option value="reward" {% if selected_direction == 'reward' %}selected{% endif %}>Recompensas</option></select></label>
+      {% if not grouped %}<label><span>Movimiento</span><select name="direction"><option value="">Todos</option><option value="purchase" {% if selected_direction == 'purchase' %}selected{% endif %}>Compras</option><option value="sale" {% if selected_direction == 'sale' %}selected{% endif %}>Ventas</option><option value="trade" {% if selected_direction == 'trade' %}selected{% endif %}>Intercambios</option><option value="reward" {% if selected_direction == 'reward' %}selected{% endif %}>Recompensas</option></select></label>{% endif %}
       <label><span>Rareza</span><select name="rarity"><option value="">Todas</option>{% for value in available_rarities %}<option value="{{ value }}" {% if selected_rarity == value %}selected{% endif %}>{% if value == 'limited' %}Limited{% elif value == 'rare' %}Rare{% elif value == 'super_rare' %}Super Rare{% else %}{{ value|title }}{% endif %}</option>{% endfor %}</select></label>
       <label><span>Desde</span><input type="date" name="date_from" value="{{ date_from }}"></label>
       <label><span>Hasta</span><input type="date" name="date_to" value="{{ date_to }}"></label>
       <label><span>Por página</span><select name="per_page"><option value="25" {% if per_page == 25 %}selected{% endif %}>25</option><option value="50" {% if per_page == 50 %}selected{% endif %}>50</option><option value="100" {% if per_page == 100 %}selected{% endif %}>100</option></select></label>
-      <label class="movement-check"><input type="checkbox" name="grouped" value="1" {% if grouped %}checked{% endif %}><span>Agrupar compra → venta</span></label>
-      <a class="btn btn-secondary movement-clear" href="?category={{ selected_category }}">Limpiar</a>
+      <a class="btn btn-secondary movement-clear" href="?category={{ selected_category }}{% if grouped %}&amp;grouped=1{% endif %}">Limpiar</a>
     </form>
 
+    {% if grouped %}
+    <div class="movement-cycle-list">
+      {% for cycle in page_obj %}<article class="movement-cycle-card">
+        <header>
+          <div class="movement-card">{% if cycle.sale_card.player_picture_url %}<img src="{{ cycle.sale_card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="movement-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong>{{ cycle.sale_card.player }}</strong><small>{{ cycle.sale_card.team }} · {{ cycle.sale_card.rarity|title }}</small></div></div>
+          <div class="cycle-badges">{% if cycle.exact_card %}<em class="cycle-match is-exact"><i class="fas fa-link"></i> Misma carta #{{ cycle.sale_card.serial_number|default:'—' }}</em>{% else %}<em class="cycle-match is-different"><i class="fas fa-triangle-exclamation"></i> Serial distinto</em>{% endif %}{% if cycle.purchase_after_sale %}<em class="cycle-match is-later"><i class="fas fa-clock"></i> Compra posterior</em>{% endif %}</div>
+        </header>
+        <div class="cycle-summary">
+          <section><span>Compra{% if cycle.purchase_after_sale %} posterior{% endif %}</span><strong>{{ cycle.purchase_at_dt|date:'d/m/Y H:i' }}</strong><small>{{ cycle.purchase.market }} · #{{ cycle.purchase_card.serial_number|default:'—' }}</small>{% if cycle.purchase_cost_eur != None %}<b class="is-out">−{{ cycle.purchase_cost_eur|floatformat:2 }} €</b>{% else %}<b>Indeterminado</b>{% endif %}</section>
+          <i class="fas fa-arrow-right cycle-arrow"></i>
+          <section><span>Venta</span><strong>{{ cycle.sale_at_dt|date:'d/m/Y H:i' }}</strong><small>{{ cycle.sale.market }} · #{{ cycle.sale_card.serial_number|default:'—' }}</small>{% if cycle.sale_net_eur != None %}<b class="is-in">+{{ cycle.sale_net_eur|floatformat:2 }} € netos</b>{% else %}<b>Indeterminado</b>{% endif %}{% if cycle.sale.fee_eur %}<small>−{{ cycle.sale.fee_eur|floatformat:2 }} € de comisión</small>{% endif %}</section>
+          <aside><span>Balance</span>{% if cycle.balance_eur != None %}<strong class="{% if cycle.balance_eur < 0 %}is-out{% else %}is-in{% endif %}">{% if cycle.balance_eur > 0 %}+{% endif %}{{ cycle.balance_eur|floatformat:2 }} €</strong>{% else %}<strong>—</strong>{% endif %}</aside>
+        </div>
+        {% if cycle.notes %}<footer>{% for note in cycle.notes %}<small><i class="fas fa-circle-info"></i> {{ note }}</small>{% endfor %}</footer>{% endif %}
+      </article>{% empty %}<div class="sales-empty">No hay compras y ventas que se puedan emparejar con estos filtros.</div>{% endfor %}
+    </div>
+    {% else %}
     <div class="table-wrap movement-table-wrap">
       <table class="data-table movement-table">
-        {% if grouped %}
-        <thead><tr><th>Venta</th><th>Jugador / carta</th><th>Compra</th><th>Venta neta</th><th>Balance</th></tr></thead>
-        <tbody>
-          {% for cycle in page_obj %}<tr class="movement-cycle-row">
-            <td class="movement-date"><strong>{{ cycle.sale_at_dt|date:'d/m/Y' }}</strong><small>{{ cycle.sale_at_dt|date:'H:i' }}</small></td>
-            <td><div class="movement-card">{% if cycle.sale_card.player_picture_url %}<img src="{{ cycle.sale_card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="movement-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong>{{ cycle.sale_card.player }}</strong><small>{{ cycle.sale_card.team }} · {{ cycle.sale_card.rarity|title }} · #{{ cycle.sale_card.serial_number|default:'—' }}</small>{% if cycle.exact_card %}<em class="cycle-match is-exact"><i class="fas fa-link"></i> Misma carta</em>{% else %}<em class="cycle-match is-different"><i class="fas fa-triangle-exclamation"></i> Serial distinto</em>{% endif %}</div></div></td>
-            <td class="cycle-money"><small>{{ cycle.purchase_at_dt|date:'d/m/Y' }} · {{ cycle.purchase.market }}</small>{% if cycle.purchase_cost_eur != None %}<strong class="is-out">−{{ cycle.purchase_cost_eur|floatformat:2 }} €</strong>{% else %}<strong>Indeterminado</strong>{% endif %}</td>
-            <td class="cycle-money"><small>{{ cycle.sale.market }}</small>{% if cycle.sale_net_eur != None %}<strong class="is-in">+{{ cycle.sale_net_eur|floatformat:2 }} €</strong>{% else %}<strong>Indeterminado</strong>{% endif %}</td>
-            <td class="cycle-balance">{% if cycle.balance_eur != None %}<strong class="{% if cycle.balance_eur < 0 %}is-out{% else %}is-in{% endif %}">{% if cycle.balance_eur > 0 %}+{% endif %}{{ cycle.balance_eur|floatformat:2 }} €</strong>{% else %}<strong>—</strong>{% endif %}{% for note in cycle.notes %}<small><i class="fas fa-circle-info"></i> {{ note }}</small>{% endfor %}</td>
-          </tr>{% empty %}<tr><td colspan="5" class="sales-empty">No hay compras y ventas que se puedan emparejar con estos filtros.</td></tr>{% endfor %}
-        </tbody>
-        {% else %}
         <thead><tr><th>Fecha</th><th>Jugador / carta</th><th>Movimiento</th><th>Moneda</th><th>Importes</th></tr></thead>
         <tbody>
           {% for movement in page_obj %}
@@ -69,7 +74,7 @@
             <td><span class="movement-kind kind-{{ movement.direction }}">{% if movement.direction == 'purchase' %}<i class="fas fa-cart-shopping"></i> Compra{% elif movement.direction == 'sale' %}<i class="fas fa-tag"></i> Venta{% elif movement.direction == 'trade' %}<i class="fas fa-right-left"></i> Intercambio{% else %}<i class="fas fa-gift"></i> Recompensa{% endif %}</span><small>{{ movement.market }}</small></td>
             <td><strong>{{ movement.currency }}</strong>{% if movement.currency == 'ETH' %}<small>{{ movement.eth|floatformat:6 }} ETH</small>{% endif %}</td>
             <td class="movement-amount">
-              {% if movement.direction == 'trade' %}{% if movement.cash_direction == 'sale' %}<span><small>Efectivo recibido</small><strong class="is-in">{{ movement.net_eur|floatformat:2 }} €</strong></span>{% if movement.fee_eur %}<em>−{{ movement.fee_eur|floatformat:2 }} € comisión</em>{% endif %}{% elif movement.cash_direction == 'purchase' %}<span><small>Efectivo enviado</small><strong class="is-out">{{ movement.net_eur|floatformat:2 }} €</strong></span>{% else %}<strong>Sin efectivo</strong>{% endif %}
+              {% if movement.direction == 'trade' %}{% if movement.cash_direction == 'sale' %}<span><small>Importe</small><strong>{{ movement.gross_eur|floatformat:2 }} €</strong></span><span><small>Recibido</small><strong class="is-in">{{ movement.net_eur|floatformat:2 }} €</strong></span>{% if movement.fee_eur %}<em>−{{ movement.fee_eur|floatformat:2 }} € comisión</em>{% endif %}{% elif movement.cash_direction == 'purchase' %}<span><small>Efectivo enviado</small><strong class="is-out">{{ movement.net_eur|floatformat:2 }} €</strong></span>{% else %}<strong>Sin efectivo</strong>{% endif %}
               {% elif movement.direction == 'sale' %}<span><small>Pagado</small><strong>{{ movement.gross_eur|floatformat:2 }} €</strong></span><span><small>Recibido</small><strong class="is-in">{{ movement.net_eur|floatformat:2 }} €</strong></span>{% if movement.fee_eur %}<em>−{{ movement.fee_eur|floatformat:2 }} € comisión</em>{% endif %}
               {% elif movement.direction == 'purchase' %}<span><small>Precio</small><strong class="is-out">{{ movement.gross_eur|floatformat:2 }} €</strong></span>{% if movement.credits_eur %}<em>−{{ movement.credits_eur|floatformat:2 }} € créditos · {{ movement.net_eur|floatformat:2 }} € de saldo</em>{% endif %}
               {% elif movement.gross_eur %}<span><small>Recibido</small><strong class="is-in">{{ movement.gross_eur|floatformat:2 }} €</strong></span>{% else %}<strong class="is-in">Carta</strong>{% endif %}
@@ -77,9 +82,9 @@
           </tr>
           {% empty %}<tr><td colspan="5" class="sales-empty">No hay movimientos que coincidan con estos filtros.</td></tr>{% endfor %}
         </tbody>
-        {% endif %}
       </table>
     </div>
+    {% endif %}
 
     {% if page_obj.paginator.num_pages > 1 %}<nav class="movement-pagination" aria-label="Paginación">
       {% if page_obj.has_previous %}<a href="?{% if query_without_page %}{{ query_without_page }}&{% endif %}page=1"><i class="fas fa-angles-left"></i></a><a href="?{% if query_without_page %}{{ query_without_page }}&{% endif %}page={{ page_obj.previous_page_number }}"><i class="fas fa-angle-left"></i></a>{% endif %}
@@ -125,7 +130,7 @@
   });
   var form = document.getElementById('movementFilters');
   if (form) {
-    form.querySelectorAll('select,input[type="date"],input[name="grouped"]').forEach(function (control) { control.addEventListener('change', function () { form.submit(); }); });
+    form.querySelectorAll('select,input[type="date"]').forEach(function (control) { control.addEventListener('change', function () { form.submit(); }); });
     var search = form.querySelector('input[type="search"]');
     var timer;
     search.addEventListener('input', function () { window.clearTimeout(timer); timer = window.setTimeout(function () { form.submit(); }, 450); });

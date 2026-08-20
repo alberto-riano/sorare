@@ -347,70 +347,17 @@ def _player_card_key(card: dict) -> tuple:
 
 
 def build_trade_cycles(movements: list[dict]) -> list[dict]:
-    """Empareja adquisiciones y ventas, priorizando el assetId exacto y FIFO."""
-    open_positions: list[dict] = []
+    """Empareja compras y ventas, priorizando la carta exacta y la cercanía temporal."""
+    acquisitions: list[dict] = []
+    disposals: list[dict] = []
     cycles: list[dict] = []
-    for movement in sorted(movements, key=_movement_timestamp):
+    for movement in movements:
         sent_cards = movement.get("sent_cards") or (
             movement.get("cards") or [] if movement.get("direction") == "sale" else []
         )
         received_cards = movement.get("received_cards") or (
             movement.get("cards") or [] if movement.get("direction") == "purchase" else []
         )
-
-        for sold_card in sent_cards:
-            sold_asset = str(sold_card.get("asset_id") or "")
-            exact_index = next((
-                index for index, position in enumerate(open_positions)
-                if sold_asset and str(position["card"].get("asset_id") or "") == sold_asset
-            ), None)
-            match_index = exact_index
-            if match_index is None:
-                sold_key = _player_card_key(sold_card)
-                match_index = next((
-                    index for index, position in enumerate(open_positions)
-                    if _player_card_key(position["card"]) == sold_key
-                ), None)
-            if match_index is None:
-                continue
-
-            purchase = open_positions.pop(match_index)
-            exact_card = exact_index is not None
-            sale_cash_direction = movement.get("cash_direction") or movement.get("direction")
-            sale_net = Decimal(str(movement.get("net_eur") or 0)) if len(sent_cards) == 1 and sale_cash_direction == "sale" else None
-            purchase_cost = purchase.get("cost_eur")
-            balance = sale_net - purchase_cost if sale_net is not None and purchase_cost is not None else None
-            notes = []
-            if not exact_card:
-                buy_serial = purchase["card"].get("serial_number")
-                sell_serial = sold_card.get("serial_number")
-                notes.append(
-                    f"Cartas distintas: compra #{buy_serial or '—'} · venta #{sell_serial or '—'}"
-                )
-            received_in_trade = movement.get("received_cards") or []
-            if received_in_trade:
-                names = ", ".join(card.get("player") or "Carta" for card in received_in_trade)
-                notes.append(f"La venta incluyó recibir {names}; el balance mostrado solo contempla el efectivo")
-            if len(sent_cards) > 1:
-                notes.append("Venta conjunta: no se puede repartir el importe con precisión entre las cartas")
-            if purchase_cost is None:
-                notes.append("Coste de adquisición no determinable porque la carta llegó en un intercambio o lote")
-
-            cycles.append({
-                "id": f"cycle:{purchase['movement'].get('id')}:{movement.get('id')}:{sold_asset}",
-                "occurred_at": movement.get("occurred_at"),
-                "purchase_at": purchase["movement"].get("occurred_at"),
-                "sale_at": movement.get("occurred_at"),
-                "purchase": purchase["movement"],
-                "sale": movement,
-                "purchase_card": purchase["card"],
-                "sale_card": sold_card,
-                "exact_card": exact_card,
-                "purchase_cost_eur": purchase_cost,
-                "sale_net_eur": sale_net,
-                "balance_eur": balance,
-                "notes": notes,
-            })
 
         for received_card in received_cards:
             known_cost = (
@@ -420,13 +367,100 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
                 and (movement.get("cash_direction") or movement.get("direction")) == "purchase"
                 else None
             )
-            open_positions.append({
+            acquisitions.append({
                 "card": received_card,
                 "movement": movement,
                 "cost_eur": known_cost,
+                "timestamp": _movement_timestamp(movement),
             })
 
-    cycles.sort(key=lambda cycle: str(cycle.get("sale_at") or ""), reverse=True)
+        for sold_card in sent_cards:
+            sale_cash_direction = movement.get("cash_direction") or movement.get("direction")
+            disposals.append({
+                "card": sold_card,
+                "movement": movement,
+                "net_eur": (
+                    Decimal(str(movement.get("net_eur") or 0))
+                    if len(sent_cards) == 1 and sale_cash_direction == "sale"
+                    else None
+                ),
+                "sent_count": len(sent_cards),
+                "timestamp": _movement_timestamp(movement),
+            })
+
+    unused_acquisitions = set(range(len(acquisitions)))
+
+    def closest_candidate(indexes: list[int], sale_at: datetime) -> int | None:
+        if not indexes:
+            return None
+        previous = [index for index in indexes if acquisitions[index]["timestamp"] <= sale_at]
+        if previous:
+            return max(previous, key=lambda index: acquisitions[index]["timestamp"])
+        return min(indexes, key=lambda index: acquisitions[index]["timestamp"])
+
+    for disposal in sorted(disposals, key=lambda item: item["timestamp"]):
+        sold_card = disposal["card"]
+        sold_asset = str(sold_card.get("asset_id") or "")
+        exact_candidates = [
+            index for index in unused_acquisitions
+            if sold_asset and str(acquisitions[index]["card"].get("asset_id") or "") == sold_asset
+        ]
+        match_index = closest_candidate(exact_candidates, disposal["timestamp"])
+        if match_index is None:
+            sold_key = _player_card_key(sold_card)
+            equivalent_candidates = [
+                index for index in unused_acquisitions
+                if _player_card_key(acquisitions[index]["card"]) == sold_key
+            ]
+            match_index = closest_candidate(equivalent_candidates, disposal["timestamp"])
+        if match_index is None:
+            continue
+
+        unused_acquisitions.remove(match_index)
+        purchase = acquisitions[match_index]
+        exact_card = bool(
+            sold_asset
+            and str(purchase["card"].get("asset_id") or "") == sold_asset
+        )
+        purchase_after_sale = purchase["timestamp"] > disposal["timestamp"]
+        movement = disposal["movement"]
+        purchase_cost = purchase.get("cost_eur")
+        sale_net = disposal.get("net_eur")
+        balance = sale_net - purchase_cost if sale_net is not None and purchase_cost is not None else None
+        notes = []
+        if not exact_card:
+            buy_serial = purchase["card"].get("serial_number")
+            sell_serial = sold_card.get("serial_number")
+            notes.append(f"Cartas distintas: compra #{buy_serial or '—'} · venta #{sell_serial or '—'}")
+        if purchase_after_sale:
+            notes.append("La compra es posterior a la venta; se agrupan por jugador, rareza y temporada")
+        received_in_trade = movement.get("received_cards") or []
+        if received_in_trade:
+            names = ", ".join(card.get("player") or "Carta" for card in received_in_trade)
+            notes.append(f"La venta incluyó recibir {names}; el balance mostrado solo contempla el efectivo")
+        if disposal["sent_count"] > 1:
+            notes.append("Venta conjunta: no se puede repartir el importe con precisión entre las cartas")
+        if purchase_cost is None:
+            notes.append("Coste de adquisición no determinable porque la carta llegó en un intercambio o lote")
+
+        cycles.append({
+            "id": f"cycle:{purchase['movement'].get('id')}:{movement.get('id')}:{sold_asset}",
+            "occurred_at": max(purchase["timestamp"], disposal["timestamp"]).isoformat(),
+            "purchase_at": purchase["movement"].get("occurred_at"),
+            "sale_at": movement.get("occurred_at"),
+            "purchase": purchase["movement"],
+            "sale": movement,
+            "purchase_card": purchase["card"],
+            "sale_card": sold_card,
+            "exact_card": exact_card,
+            "purchase_after_sale": purchase_after_sale,
+            "purchase_cost_eur": purchase_cost,
+            "sale_net_eur": sale_net,
+            "balance_eur": balance,
+            "notes": notes,
+        })
+
+    cycles.sort(key=lambda cycle: str(cycle.get("occurred_at") or ""), reverse=True)
     return cycles
 
 
