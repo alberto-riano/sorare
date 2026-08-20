@@ -19,55 +19,52 @@
   </section>
 
   <nav class="movement-tabs panel" aria-label="Sección del historial">
-    <a href="?category=laliga_inseason{% if grouped %}&amp;grouped=1{% endif %}" class="{% if selected_category == 'laliga_inseason' %}is-active{% endif %}"><i class="fas fa-shield-halved"></i> LaLiga In-Season <b>{{ laliga_count }}</b></a>
-    <a href="?category=other{% if grouped %}&amp;grouped=1{% endif %}" class="{% if selected_category == 'other' %}is-active{% endif %}"><i class="fas fa-layer-group"></i> Otros movimientos <b>{{ other_count }}</b></a>
-    <a href="?category=all{% if grouped %}&amp;grouped=1{% endif %}" class="{% if selected_category == 'all' %}is-active{% endif %}"><i class="fas fa-list"></i> Todos <b>{{ all_count }}</b></a>
+    <a href="?category=laliga_inseason" class="{% if selected_category == 'laliga_inseason' %}is-active{% endif %}"><i class="fas fa-shield-halved"></i> LaLiga In-Season <b>{{ laliga_count }}</b></a>
+    <a href="?category=other" class="{% if selected_category == 'other' %}is-active{% endif %}"><i class="fas fa-layer-group"></i> Otros movimientos <b>{{ other_count }}</b></a>
+    <a href="?category=all" class="{% if selected_category == 'all' %}is-active{% endif %}"><i class="fas fa-list"></i> Todos <b>{{ all_count }}</b></a>
   </nav>
 
   {% if snapshot %}
   <section class="movement-kpis">
-    <article class="panel"><span>{% if grouped %}Coste de ciclos cerrados{% else %}Gastado en compras{% endif %}</span><strong class="is-out">−{{ totals.purchases|floatformat:2 }} €</strong><small>Descontando {{ totals.credits|floatformat:2 }} € en créditos</small></article>
+    <article class="panel"><span>Gastado en compras</span><strong class="is-out">−{{ totals.purchases|floatformat:2 }} €</strong><small>Descontando {{ totals.credits|floatformat:2 }} € en créditos</small></article>
     <article class="panel"><span>Recibido en ventas</span><strong class="is-in">+{{ totals.sales_net|floatformat:2 }} €</strong><small>{{ totals.fees|floatformat:2 }} € en comisiones</small></article>
-    <article class="panel"><span>Balance compraventa</span><strong class="{% if totals.balance < 0 %}is-out{% else %}is-in{% endif %}">{{ totals.balance|floatformat:2 }} €</strong><small>{% if grouped %}Solo ciclos con coste y venta determinables{% else %}{{ totals.rewards }} recompensas en la selección{% endif %}</small></article>
+    <article class="panel"><span>Balance compraventa</span><strong class="{% if totals.balance < 0 %}is-out{% else %}is-in{% endif %}">{{ totals.balance|floatformat:2 }} €</strong><small>{{ totals.rewards }} recompensas en la selección</small></article>
   </section>
 
   <section class="panel movement-results reveal">
-    <div class="table-head"><div><p class="kicker">Selección actual</p><h2>{{ total_rows }} {% if grouped %}compraventas agrupadas{% else %}movimientos{% endif %}</h2></div><div class="movement-view-switch" aria-label="Vista del historial"><a href="?{{ movements_query }}" class="{% if not grouped %}is-active{% endif %}"><i class="fas fa-list"></i> Movimientos</a><a href="?{{ grouped_query }}" class="{% if grouped %}is-active{% endif %}"><i class="fas fa-link"></i> Compraventas agrupadas</a></div></div>
-    <p class="movement-help">{% if grouped %}Cada bloque une la compra y la venta. Primero se busca la misma carta y después otra equivalente del mismo jugador.{% else %}Una operación con varias cartas aparece una sola vez.{% endif %}</p>
+    <div class="table-head"><div><p class="kicker">Selección actual</p><h2>{{ total_rows }} movimientos</h2></div><p class="movement-help">Las compras y ventas relacionadas se muestran juntas en una sola fila.</p></div>
     <form method="get" id="movementFilters" class="movement-filters">
       <input type="hidden" name="category" value="{{ selected_category }}">
-      <input type="hidden" name="grouped" value="{% if grouped %}1{% else %}0{% endif %}">
       <label><span>Jugador</span><input type="search" name="player" value="{{ request.GET.player }}" placeholder="Nombre"></label>
-      {% if not grouped %}<label><span>Movimiento</span><select name="direction"><option value="">Todos</option><option value="purchase" {% if selected_direction == 'purchase' %}selected{% endif %}>Compras</option><option value="sale" {% if selected_direction == 'sale' %}selected{% endif %}>Ventas</option><option value="trade" {% if selected_direction == 'trade' %}selected{% endif %}>Intercambios</option><option value="reward" {% if selected_direction == 'reward' %}selected{% endif %}>Recompensas</option></select></label>{% endif %}
+      <label><span>Movimiento</span><select name="direction"><option value="">Todos</option><option value="purchase" {% if selected_direction == 'purchase' %}selected{% endif %}>Compras</option><option value="sale" {% if selected_direction == 'sale' %}selected{% endif %}>Ventas</option><option value="trade" {% if selected_direction == 'trade' %}selected{% endif %}>Intercambios</option><option value="reward" {% if selected_direction == 'reward' %}selected{% endif %}>Recompensas</option></select></label>
       <label><span>Rareza</span><select name="rarity"><option value="">Todas</option>{% for value in available_rarities %}<option value="{{ value }}" {% if selected_rarity == value %}selected{% endif %}>{% if value == 'limited' %}Limited{% elif value == 'rare' %}Rare{% elif value == 'super_rare' %}Super Rare{% else %}{{ value|title }}{% endif %}</option>{% endfor %}</select></label>
       <label><span>Desde</span><input type="date" name="date_from" value="{{ date_from }}"></label>
       <label><span>Hasta</span><input type="date" name="date_to" value="{{ date_to }}"></label>
       <label><span>Por página</span><select name="per_page"><option value="25" {% if per_page == 25 %}selected{% endif %}>25</option><option value="50" {% if per_page == 50 %}selected{% endif %}>50</option><option value="100" {% if per_page == 100 %}selected{% endif %}>100</option></select></label>
-      <a class="btn btn-secondary movement-clear" href="?category={{ selected_category }}{% if grouped %}&amp;grouped=1{% endif %}">Limpiar</a>
+      <a class="btn btn-secondary movement-clear" href="?category={{ selected_category }}">Limpiar</a>
     </form>
-
-    {% if grouped %}
-    <div class="movement-cycle-list">
-      {% for cycle in page_obj %}<article class="movement-cycle-card">
-        <header>
-          <div class="movement-card">{% if cycle.sale_card.player_picture_url %}<img src="{{ cycle.sale_card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="movement-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong>{{ cycle.sale_card.player }}</strong><small>{{ cycle.sale_card.team }} · {{ cycle.sale_card.rarity|title }}</small></div></div>
-          <div class="cycle-badges">{% if cycle.exact_card %}<em class="cycle-match is-exact"><i class="fas fa-link"></i> Misma carta #{{ cycle.sale_card.serial_number|default:'—' }}</em>{% else %}<em class="cycle-match is-different"><i class="fas fa-triangle-exclamation"></i> Serial distinto</em>{% endif %}{% if cycle.purchase_after_sale %}<em class="cycle-match is-later"><i class="fas fa-clock"></i> Compra posterior</em>{% endif %}</div>
-        </header>
-        <div class="cycle-summary">
-          <section><span>Compra{% if cycle.purchase_after_sale %} posterior{% endif %}</span><strong>{{ cycle.purchase_at_dt|date:'d/m/Y H:i' }}</strong><small>{{ cycle.purchase.market }} · #{{ cycle.purchase_card.serial_number|default:'—' }}</small>{% if cycle.purchase_cost_eur != None %}<b class="is-out">−{{ cycle.purchase_cost_eur|floatformat:2 }} €</b>{% else %}<b>Indeterminado</b>{% endif %}</section>
-          <i class="fas fa-arrow-right cycle-arrow"></i>
-          <section><span>Venta</span><strong>{{ cycle.sale_at_dt|date:'d/m/Y H:i' }}</strong><small>{{ cycle.sale.market }} · #{{ cycle.sale_card.serial_number|default:'—' }}</small>{% if cycle.sale_net_eur != None %}<b class="is-in">+{{ cycle.sale_net_eur|floatformat:2 }} € netos</b>{% else %}<b>Indeterminado</b>{% endif %}{% if cycle.sale.fee_eur %}<small>−{{ cycle.sale.fee_eur|floatformat:2 }} € de comisión</small>{% endif %}</section>
-          <aside><span>Balance</span>{% if cycle.balance_eur != None %}<strong class="{% if cycle.balance_eur < 0 %}is-out{% else %}is-in{% endif %}">{% if cycle.balance_eur > 0 %}+{% endif %}{{ cycle.balance_eur|floatformat:2 }} €</strong>{% else %}<strong>—</strong>{% endif %}</aside>
-        </div>
-        {% if cycle.notes %}<footer>{% for note in cycle.notes %}<small><i class="fas fa-circle-info"></i> {{ note }}</small>{% endfor %}</footer>{% endif %}
-      </article>{% empty %}<div class="sales-empty">No hay compras y ventas que se puedan emparejar con estos filtros.</div>{% endfor %}
-    </div>
-    {% else %}
     <div class="table-wrap movement-table-wrap">
       <table class="data-table movement-table">
         <thead><tr><th>Fecha</th><th>Jugador / carta</th><th>Movimiento</th><th>Moneda</th><th>Importes</th></tr></thead>
         <tbody>
           {% for movement in page_obj %}
+          {% if movement.row_type == 'cycle' %}
+          <tr class="movement-grouped-row">
+            <td class="movement-date"><strong>{{ movement.occurred_at_dt|date:'d/m/Y' }}</strong><small>{{ movement.occurred_at_dt|date:'H:i' }}</small></td>
+            <td>
+              <div class="movement-card">{% if movement.sale_card.player_picture_url %}<img src="{{ movement.sale_card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="movement-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong>{{ movement.sale_card.player }}</strong><small>{{ movement.sale_card.team }} · {{ movement.sale_card.rarity|title }}</small><div class="cycle-badges">{% if movement.exact_card %}<em class="cycle-match is-exact"><i class="fas fa-link"></i> Misma carta #{{ movement.sale_card.serial_number|default:'—' }}</em>{% else %}<em class="cycle-match is-different"><i class="fas fa-triangle-exclamation"></i> #{{ movement.purchase_card.serial_number|default:'—' }} → #{{ movement.sale_card.serial_number|default:'—' }}</em>{% endif %}{% if movement.purchase_after_sale %}<em class="cycle-match is-later"><i class="fas fa-clock"></i> Compra posterior</em>{% endif %}</div></div></div>
+            </td>
+            <td colspan="3" class="movement-grouped-detail">
+              <div class="movement-inline-cycle">
+                <section><span>Compra{% if movement.purchase_after_sale %} posterior{% endif %}</span><small>{{ movement.purchase_at_dt|date:'d/m/Y H:i' }} · {{ movement.purchase.market }}</small>{% if movement.purchase_cost_eur != None %}<strong class="is-out">−{{ movement.purchase_cost_eur|floatformat:2 }} €</strong>{% else %}<strong>Indeterminado</strong>{% endif %}</section>
+                <i class="fas fa-arrow-right"></i>
+                <section><span>Venta</span><small>{{ movement.sale_at_dt|date:'d/m/Y H:i' }} · {{ movement.sale.market }}</small>{% if movement.sale_net_eur != None %}<strong class="is-in">+{{ movement.sale_net_eur|floatformat:2 }} € netos</strong>{% else %}<strong>Indeterminado</strong>{% endif %}{% if movement.sale.fee_eur %}<small>−{{ movement.sale.fee_eur|floatformat:2 }} € comisión</small>{% endif %}</section>
+                <aside><span>Balance</span>{% if movement.balance_eur != None %}<strong class="{% if movement.balance_eur < 0 %}is-out{% else %}is-in{% endif %}">{% if movement.balance_eur > 0 %}+{% endif %}{{ movement.balance_eur|floatformat:2 }} €</strong>{% else %}<strong>—</strong>{% endif %}</aside>
+              </div>
+              {% if movement.notes %}<div class="movement-inline-notes">{% for note in movement.notes %}<small><i class="fas fa-circle-info"></i> {{ note }}</small>{% endfor %}</div>{% endif %}
+            </td>
+          </tr>
+          {% else %}
           <tr>
             <td class="movement-date">{% if movement.occurred_at_dt %}<strong>{{ movement.occurred_at_dt|date:'d/m/Y' }}</strong><small>{{ movement.occurred_at_dt|date:'H:i' }}</small>{% else %}—{% endif %}</td>
             <td><div class="movement-cards">{% if movement.direction == 'trade' %}<div class="movement-side"><b>Recibes</b>{% for card in movement.received_cards %}<div class="movement-card">{% if card.player_picture_url %}<img src="{{ card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="movement-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong>{{ card.player }}</strong><small>{{ card.team }} · #{{ card.serial_number|default:'—' }}</small></div></div>{% endfor %}</div><div class="movement-side is-sent"><b>Envías</b>{% for card in movement.sent_cards %}<div class="movement-card">{% if card.player_picture_url %}<img src="{{ card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="movement-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong>{{ card.player }}</strong><small>{{ card.team }} · #{{ card.serial_number|default:'—' }}</small></div></div>{% endfor %}</div>{% else %}{% for card in movement.cards %}<div class="movement-card">{% if card.player_picture_url %}<img src="{{ card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="movement-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong>{{ card.player }}</strong><small>{% if card.team_picture_url %}<img class="movement-team" src="{{ card.team_picture_url }}" alt="" loading="lazy">{% endif %} {{ card.team }} · {% if card.rarity == 'super_rare' %}Super Rare{% else %}{{ card.rarity|title }}{% endif %} · {% if card.in_season %}In-Season{% else %}Classic{% endif %} · #{{ card.serial_number|default:'—' }}</small></div></div>{% empty %}<span>Recompensa monetaria</span>{% endfor %}{% endif %}</div></td>
@@ -80,11 +77,11 @@
               {% elif movement.gross_eur %}<span><small>Recibido</small><strong class="is-in">{{ movement.gross_eur|floatformat:2 }} €</strong></span>{% else %}<strong class="is-in">Carta</strong>{% endif %}
             </td>
           </tr>
+          {% endif %}
           {% empty %}<tr><td colspan="5" class="sales-empty">No hay movimientos que coincidan con estos filtros.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
-    {% endif %}
 
     {% if page_obj.paginator.num_pages > 1 %}<nav class="movement-pagination" aria-label="Paginación">
       {% if page_obj.has_previous %}<a href="?{% if query_without_page %}{{ query_without_page }}&{% endif %}page=1"><i class="fas fa-angles-left"></i></a><a href="?{% if query_without_page %}{{ query_without_page }}&{% endif %}page={{ page_obj.previous_page_number }}"><i class="fas fa-angle-left"></i></a>{% endif %}

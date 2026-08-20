@@ -1318,12 +1318,6 @@ body.modal-open { overflow: hidden; }
 .movement-filters label { min-width: 0; }
 .movement-filters input, .movement-filters select { width: 100%; min-height: 44px; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); font: inherit; }
 .movement-clear { min-height: 44px; justify-content: center; }
-.movement-view-switch { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .4rem; }
-.movement-view-switch a { display: inline-flex; align-items: center; gap: .4rem; padding: .52rem .72rem; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: #fff; font-size: .8rem; font-weight: 700; }
-.movement-view-switch a.is-active { border-color: var(--accent); color: #fff; background: var(--accent); }
-.movement-check { display: flex; align-items: center; gap: .5rem; min-height: 44px; padding: .45rem .55rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
-.movement-check input { width: 18px; min-height: 18px; flex: 0 0 auto; }
-.movement-check span { color: var(--ink); font-size: .82rem; }
 .movement-table-wrap { overflow: auto; }
 .movement-table { min-width: 980px; }
 .movement-table td { vertical-align: middle; }
@@ -1350,24 +1344,25 @@ body.modal-open { overflow: hidden; }
 .movement-amount em { display: block; margin-top: .25rem; color: var(--muted); font-size: .72rem; font-style: normal; }
 .movement-pagination { display: flex; flex: none; justify-content: center; align-items: center; gap: .5rem; margin-top: 1rem; }
 .movement-pagination a { display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 1px solid var(--accent); border-radius: 50%; color: var(--accent); background: #fff; }
-.movement-cycle-list { display: grid; gap: .8rem; }
-.movement-cycle-card { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
-.movement-cycle-card > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .8rem 1rem; border-bottom: 1px solid var(--line); background: #faf8f1; }
 .cycle-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .35rem; }
 .cycle-match { display: block; width: max-content; max-width: 100%; margin-top: .3rem; padding: .18rem .35rem; border-radius: 999px; font-size: .68rem; font-style: normal; }
 .cycle-match.is-exact { color: #166534; background: #dcfce7; }
 .cycle-match.is-different { color: #9a3412; background: #ffedd5; }
 .cycle-match.is-later { color: #5b21b6; background: #ede9fe; }
-.cycle-summary { display: grid; grid-template-columns: minmax(180px,1fr) auto minmax(180px,1fr) minmax(150px,.7fr); align-items: stretch; gap: .65rem; padding: .85rem 1rem; }
-.cycle-summary section, .cycle-summary aside { display: grid; align-content: center; gap: .18rem; padding: .75rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
-.cycle-summary section > span, .cycle-summary aside > span { color: var(--muted); font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-.cycle-summary section > small { color: var(--muted); }
-.cycle-summary section > b, .cycle-summary aside > strong { margin-top: .22rem; font: 700 1.08rem "IBM Plex Mono",monospace; }
-.cycle-summary aside { border-color: #99d8cf; background: #f0fdfa; }
-.cycle-summary aside > strong { font-size: 1.35rem; }
-.cycle-arrow { align-self: center; color: var(--accent); }
-.movement-cycle-card > footer { display: grid; gap: .2rem; padding: 0 1rem .85rem; color: #9a3412; }
-.movement-cycle-card > footer small { line-height: 1.35; }
+.movement-grouped-row { background: #fbfdfb; }
+.movement-grouped-row > td { padding-top: .65rem; padding-bottom: .65rem; }
+.movement-grouped-row .cycle-badges { justify-content: flex-start; }
+.movement-grouped-detail { min-width: 570px; }
+.movement-inline-cycle { display: grid; grid-template-columns: minmax(155px,1fr) auto minmax(175px,1fr) minmax(105px,.65fr); align-items: center; gap: .55rem; }
+.movement-inline-cycle section, .movement-inline-cycle aside { display: grid; gap: .08rem; padding: .45rem .55rem; border-radius: 9px; background: #f7f5ef; }
+.movement-inline-cycle section > span, .movement-inline-cycle aside > span { color: var(--muted); font-size: .64rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.movement-inline-cycle section > small { color: var(--muted); font-size: .7rem; }
+.movement-inline-cycle section > strong, .movement-inline-cycle aside > strong { font: 700 .95rem "IBM Plex Mono",monospace; }
+.movement-inline-cycle > i { color: var(--accent); }
+.movement-inline-cycle aside { border: 1px solid #99d8cf; background: #f0fdfa; }
+.movement-inline-cycle aside > strong { font-size: 1.08rem; }
+.movement-inline-notes { display: flex; flex-wrap: wrap; gap: .25rem .8rem; margin-top: .35rem; color: #9a3412; }
+.movement-inline-notes small { font-size: .68rem; }
 
 @media (max-width: 1180px) {
   .sales-filters { grid-template-columns: repeat(4,minmax(150px,1fr)); }
@@ -1386,20 +1381,10 @@ body.modal-open { overflow: hidden; }
   .movement-sync { justify-items: start; }
   .movement-filters { grid-template-columns: 1fr 1fr; }
   .table-head { align-items: stretch; flex-direction: column; }
-  .movement-view-switch { justify-content: flex-start; }
-  .cycle-summary { grid-template-columns: 1fr 1fr; }
-  .cycle-arrow { display: none; }
-  .cycle-summary aside { grid-column: 1 / -1; }
 }
 @media (max-width: 520px) {
   .sales-filters, .sales-review-item { grid-template-columns: 1fr; }
   .sales-review-player { grid-column: auto; }
   .sales-basket { width: 100%; justify-content: space-between; border-radius: 18px; }
   .movement-filters, .movement-kpis { grid-template-columns: 1fr; }
-  .movement-view-switch { display: grid; grid-template-columns: 1fr; }
-  .movement-view-switch a { justify-content: center; }
-  .movement-cycle-card > header { align-items: flex-start; flex-direction: column; }
-  .cycle-badges { justify-content: flex-start; }
-  .cycle-summary { grid-template-columns: 1fr; }
-  .cycle-summary aside { grid-column: auto; }
 }

@@ -829,7 +829,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(response.context["totals"]["purchases"], Decimal("8"))
         self.assertEqual(response.context["totals"]["credits"], Decimal("2"))
 
-    def test_grouped_page_shows_purchase_sale_balance_and_serial_warning(self):
+    def test_page_inlines_purchase_sale_cycles_and_keeps_unmatched_movements(self):
         mathew = {
             "asset_id": "mathew-11", "player": "Mathew Ryan", "player_slug": "mathew-ryan",
             "team": "Levante UD", "rarity": "rare", "season_year": 2026,
@@ -846,16 +846,18 @@ class MovementHistoryTests(TestCase):
             {"id": "mathew-sale", "occurred_at": "2026-08-20T07:01:00Z", "direction": "sale", "cash_direction": "sale", "market": "Compra instantánea", "category": "laliga_inseason", "cards": [mathew], "received_cards": [], "sent_cards": [mathew], "gross_eur": 83, "net_eur": 78.85, "fee_eur": 4.15},
             {"id": "zakaria-buy", "occurred_at": "2026-08-10T10:00:00Z", "direction": "purchase", "cash_direction": "purchase", "market": "Subasta", "category": "laliga_inseason", "cards": [zakaria_bought], "received_cards": [zakaria_bought], "sent_cards": [], "gross_eur": 5.4, "net_eur": 5.4},
             {"id": "zakaria-sale", "occurred_at": "2026-08-20T02:07:00Z", "direction": "sale", "cash_direction": "sale", "market": "Oferta directa", "category": "laliga_inseason", "cards": [zakaria_sold], "received_cards": [], "sent_cards": [zakaria_sold], "gross_eur": 7.56, "net_eur": 7.56, "fee_eur": 0},
+            {"id": "unmatched", "occurred_at": "2026-08-19T12:00:00Z", "direction": "purchase", "cash_direction": "purchase", "market": "Subasta", "category": "laliga_inseason", "cards": [{"asset_id": "unmatched", "player": "Jugador sin vender", "player_slug": "sin-vender", "team": "Equipo", "rarity": "rare", "season_year": 2026, "in_season": True, "serial_number": 20}], "received_cards": [{"asset_id": "unmatched", "player": "Jugador sin vender", "player_slug": "sin-vender", "team": "Equipo", "rarity": "rare", "season_year": 2026, "in_season": True, "serial_number": 20}], "sent_cards": [], "gross_eur": 6, "net_eur": 6},
         ])
 
-        response = self.client.get(reverse("movements"), {"category": "laliga_inseason", "grouped": "1"})
+        response = self.client.get(reverse("movements"), {"category": "laliga_inseason"})
 
-        self.assertContains(response, "2 compraventas agrupadas")
-        self.assertContains(response, 'class="movement-cycle-card"', count=2)
+        self.assertContains(response, "3 movimientos")
+        self.assertContains(response, 'class="movement-grouped-row"', count=2)
         self.assertContains(response, "Misma carta")
         self.assertContains(response, "+7,09 €")
         self.assertContains(response, "Cartas distintas: compra #16 · venta #10")
-        self.assertContains(response, "category=other&amp;grouped=1")
+        self.assertContains(response, "Jugador sin vender")
+        self.assertNotContains(response, "Compraventas agrupadas")
 
     def test_cash_and_card_trade_shows_gross_net_and_commission(self):
         sivera = {"asset_id": "sivera-10", "player": "Sivera", "team": "D. Alavés", "rarity": "rare", "serial_number": 10}
@@ -868,7 +870,7 @@ class MovementHistoryTests(TestCase):
             "currency": "EUR", "eth": 0,
         }])
 
-        response = self.client.get(reverse("movements"), {"category": "laliga_inseason", "grouped": "0"})
+        response = self.client.get(reverse("movements"), {"category": "laliga_inseason"})
 
         self.assertContains(response, "Importe")
         self.assertContains(response, "45,00 €")
