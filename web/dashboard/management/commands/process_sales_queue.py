@@ -75,7 +75,7 @@ def process_next_movement_sync():
         movements = collect_movement_history(progress=save_progress)
         MovementSnapshot.objects.update_or_create(
             user=job.user,
-            defaults={"movements": movements, "refreshed_at": timezone.now(), "source_version": 3},
+            defaults={"movements": movements, "refreshed_at": timezone.now(), "source_version": 4},
         )
         job.movement_count = len(movements)
         job.progress_label = "Historial actualizado"

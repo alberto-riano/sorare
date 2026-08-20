@@ -686,6 +686,42 @@ class MovementHistoryTests(TestCase):
         self.assertEqual((movement["gross_eur"], movement["net_eur"], movement["fee_eur"]), (100.0, 95.0, 5.0))
         self.assertEqual(movement["category"], "laliga_inseason")
 
+    def test_public_offer_is_identified_by_the_seller_accepting_it(self):
+        card = self._api_card(player="Mathew Ryan")
+        operation = {
+            "__typename": "TokenOffer", "id": "offer-mathew", "transactionDate": "2026-08-20T07:01:00Z",
+            "type": "SINGLE_SALE_OFFER", "userAcceptor": {"slug": "burguis"},
+            "userBuyer": {"slug": "buyer"}, "userSeller": {"slug": "burguis"},
+            "marketFeeAmounts": {"eurCents": 415, "referenceCurrency": "EUR"},
+            "senderSide": {"amounts": {"eurCents": 0}, "anyCards": [card]},
+            "receiverSide": {"amounts": {"eurCents": 8300, "referenceCurrency": "EUR"}, "anyCards": []},
+        }
+
+        movement = _movement_from_group([{
+            "id": "offer-mathew", "date": operation["transactionDate"], "entryType": "PAYMENT",
+            "amounts": operation["receiverSide"]["amounts"], "tokenOperation": operation,
+        }], "burguis")
+
+        self.assertEqual(movement["market"], "Oferta pública")
+
+    def test_instant_buy_is_identified_by_the_buyer_accepting_it(self):
+        card = self._api_card(player="Venta de mercado")
+        operation = {
+            "__typename": "TokenOffer", "id": "offer-listing", "transactionDate": "2026-08-20T07:01:00Z",
+            "type": "SINGLE_SALE_OFFER", "userAcceptor": {"slug": "buyer"},
+            "userBuyer": {"slug": "buyer"}, "userSeller": {"slug": "burguis"},
+            "marketFeeAmounts": {"eurCents": 50, "referenceCurrency": "EUR"},
+            "senderSide": {"amounts": {"eurCents": 0}, "anyCards": [card]},
+            "receiverSide": {"amounts": {"eurCents": 1000, "referenceCurrency": "EUR"}, "anyCards": []},
+        }
+
+        movement = _movement_from_group([{
+            "id": "offer-listing", "date": operation["transactionDate"], "entryType": "PAYMENT",
+            "amounts": operation["receiverSide"]["amounts"], "tokenOperation": operation,
+        }], "burguis")
+
+        self.assertEqual(movement["market"], "Compra instantánea")
+
     def test_cash_and_card_offer_separates_sent_and_received_cards(self):
         sivera = self._api_card(player="Sivera")
         sivera["assetId"], sivera["serialNumber"] = "sivera-asset", 10
@@ -799,9 +835,11 @@ class MovementHistoryTests(TestCase):
         def response(query, _variables, headers=None):
             if "CompletedTrades" in query:
                 return {"currentUser": {"slug": "burguis", "trades": {"nodes": [open_auction, completed], "pageInfo": {"hasNextPage": False}}}}
+            if "GameweekRewards" in query:
+                return {"so5": {"allSo5Fixtures": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
             if "MovementCards" in query:
                 return {"tokens": {"anyCards": [card]}}
-            return {"currentUser": {"rewards": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            return {"currentUser": {"accountEntries": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
 
         request.side_effect = response
         movements = collect_movement_history(headers={"Authorization": "test"})
@@ -816,7 +854,44 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
         snapshot = MovementSnapshot.objects.get(user=self.user)
         self.assertEqual(snapshot.movements[0]["id"], "movement-1")
-        self.assertEqual(snapshot.source_version, 3)
+        self.assertEqual(snapshot.source_version, 4)
+
+    @patch("web_services.movement_history.graphql_request")
+    def test_collector_adds_confirmed_gameweek_rewards(self, request):
+        card = self._api_card(player="Premio de jornada")
+        reward_operation = {
+            "__typename": "So5Reward", "id": "reward-1", "slug": "reward-1",
+            "amount": {"eurCents": 500, "referenceCurrency": "EUR"},
+            "rewardCards": [{"anyCard": {"assetId": card["assetId"]}}],
+            "so5Fixture": {
+                "gameWeek": 12, "shortDisplayName": "GW 12",
+                "rewardsDeliveryDate": "2026-08-20T12:00:00Z",
+            },
+            "so5Leaderboard": {"displayName": "Rare"},
+            "so5Ranking": {"ranking": 25},
+        }
+
+        def response(query, _variables, headers=None):
+            if "CompletedTrades" in query:
+                return {"currentUser": {"slug": "burguis", "trades": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "GameweekRewards" in query:
+                return {"so5": {"allSo5Fixtures": {"nodes": [{
+                    "id": "fixture-12", "mySo5Rewards": [reward_operation],
+                }], "pageInfo": {"hasNextPage": False}}}}
+            if "RewardEntries" in query:
+                return {"currentUser": {"accountEntries": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "MovementCards" in query:
+                return {"tokens": {"anyCards": [card]}}
+            raise AssertionError("Consulta inesperada")
+
+        request.side_effect = response
+        movements = collect_movement_history(headers={"Authorization": "test"})
+
+        self.assertEqual(len(movements), 1)
+        self.assertEqual(movements[0]["direction"], "reward")
+        self.assertEqual(movements[0]["category"], "reward")
+        self.assertEqual(movements[0]["market"], "Recompensa de jornada · GW 12 · Rare · Puesto 25")
+        self.assertEqual(movements[0]["gross_eur"], 5.0)
 
     def test_page_filters_category_rarity_and_calculates_totals(self):
         MovementSnapshot.objects.create(user=self.user, refreshed_at=datetime.now(tz=ZoneInfo("Europe/Madrid")), movements=[

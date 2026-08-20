@@ -124,7 +124,7 @@ def _movement_datetime(value):
 
 def movements(request):
     stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-    snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 3 else None
+    snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 4 else None
     active_sync = MovementSyncJob.objects.filter(
         user=request.user,
         status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -134,7 +134,7 @@ def movements(request):
 
     all_movements = list(snapshot.movements if snapshot else [])
     category = request.GET.get("category", "laliga_inseason")
-    if category not in {"laliga_inseason", "other", "all"}:
+    if category not in {"laliga_inseason", "reward", "other", "all"}:
         category = "laliga_inseason"
     direction = request.GET.get("direction", "")
     rarity = request.GET.get("rarity", "")
@@ -218,6 +218,7 @@ def movements(request):
         "total_rows": len(display_rows),
         "all_count": len(all_movements),
         "laliga_count": sum(row.get("category") == "laliga_inseason" for row in all_movements),
+        "reward_count": sum(row.get("category") == "reward" for row in all_movements),
         "other_count": sum(row.get("category") == "other" for row in all_movements),
         "totals": totals,
         "available_rarities": sorted(rarities),

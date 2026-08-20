@@ -43,7 +43,7 @@ query CompletedTrades($first: Int!, $after: String) {
           marketFeeAmounts { eurCents wei referenceCurrency }
           sender { __typename ... on User { slug } }
           receiver { __typename ... on User { slug } }
-          userBuyer { slug } userSeller { slug }
+          userAcceptor { slug } userBuyer { slug } userSeller { slug }
           senderSide { amounts { eurCents wei referenceCurrency } anyCards { assetId } }
           receiverSide { amounts { eurCents wei referenceCurrency } anyCards { assetId } }
         }
@@ -60,20 +60,59 @@ query CompletedTrades($first: Int!, $after: String) {
 }
 """
 
-CARD_REWARDS_QUERY = f"""
-query CardRewards($first: Int!, $after: String) {{
-  currentUser {{
-    rewards(first: $first, after: $after, sport: FOOTBALL, aasmState: CLAIMED) {{
-      nodes {{
-        __typename id
-        ... on AnyCardReward {{
-          card {{ ownerSince {CARD_FIELDS} }}
-        }}
-      }}
-      pageInfo {{ hasNextPage endCursor }}
-    }}
-  }}
-}}
+REWARD_ENTRIES_QUERY = """
+query RewardEntries($first: Int!, $after: String) {
+  currentUser {
+    accountEntries(first: $first, after: $after, entryType: [REWARD]) {
+      nodes {
+        id date entryType provisional aasmState
+        amounts { eurCents wei referenceCurrency }
+        tokenOperation {
+          __typename
+          ... on So5Reward {
+            id slug amount { eurCents wei referenceCurrency }
+            rewardCards { anyCard { assetId } }
+            so5Fixture { gameWeek shortDisplayName }
+            so5Leaderboard { displayName(short: true, withSeasonality: false) }
+            so5Ranking { ranking }
+          }
+          ... on TokenMonetaryReward {
+            id rewardId sport amounts { eurCents wei referenceCurrency }
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+
+GAMEWEEK_REWARDS_QUERY = """
+query GameweekRewards($first: Int!, $after: String) {
+  so5 {
+    allSo5Fixtures(
+      first: $first
+      after: $after
+      eventType: CLASSIC
+      sport: FOOTBALL
+      future: false
+    ) {
+      nodes {
+        ... on So5Fixture {
+          id
+          mySo5Rewards {
+            __typename id slug aasmState amount { eurCents wei referenceCurrency }
+            rewardCards { anyCard { assetId } }
+            so5Fixture { gameWeek shortDisplayName rewardsDeliveryDate }
+            so5Leaderboard { displayName(short: true, withSeasonality: false) }
+            so5Ranking { ranking }
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
 """
 
 
@@ -231,14 +270,21 @@ def _movement_from_group(
     elif typename == "TokenOffer":
         buyer = str((operation.get("userBuyer") or {}).get("slug") or "").casefold()
         seller = str((operation.get("userSeller") or {}).get("slug") or "").casefold()
+        acceptor = str((operation.get("userAcceptor") or {}).get("slug") or "").casefold()
         own_slug = current_slug.casefold()
         direction = "sale" if seller == own_slug else "purchase" if buyer == own_slug else "other"
         cash_direction = direction
-        market = {
-            "DIRECT_OFFER": "Oferta directa",
-            "SINGLE_BUY_OFFER": "Oferta pública",
-            "SINGLE_SALE_OFFER": "Compra instantánea",
-        }.get(operation.get("type"), "Oferta")
+        if operation.get("type") == "DIRECT_OFFER":
+            market = "Oferta directa"
+        elif acceptor and acceptor == seller:
+            market = "Oferta pública"
+        elif acceptor and acceptor == buyer:
+            market = "Compra instantánea"
+        else:
+            market = {
+                "SINGLE_BUY_OFFER": "Oferta pública",
+                "SINGLE_SALE_OFFER": "Compra instantánea",
+            }.get(operation.get("type"), "Oferta")
         gross = _money(_cash_side(operation).get("amounts"))
         fee = _money(operation.get("marketFeeAmounts"))
         sender_cards = _cards_from_operation({
@@ -274,6 +320,8 @@ def _movement_from_group(
         cash_direction = direction
         gross = _money(operation.get("amount") or operation.get("amounts") or entries[0].get("amounts"))
         received_cards = cards
+        if cards and not gross["eur"] and not gross["eth"]:
+            gross["currency"] = "CARD"
     else:
         return None
 
@@ -284,7 +332,13 @@ def _movement_from_group(
         fee_eur = max(gross_eur - net_eur, fee_eur)
     else:
         net_eur = max(gross_eur - credits_eur, 0.0)
-    category = "laliga_inseason" if cards and all(card["is_laliga"] and card["in_season"] for card in cards) else "other"
+    category = (
+        "reward"
+        if direction == "reward"
+        else "laliga_inseason"
+        if cards and all(card["is_laliga"] and card["in_season"] for card in cards)
+        else "other"
+    )
     operation_id = operation.get("id") or entries[0].get("id")
     return {
         "id": str(operation_id),
@@ -306,27 +360,22 @@ def _movement_from_group(
     }
 
 
-def _card_reward(node: dict) -> dict | None:
-    if node.get("__typename") != "AnyCardReward" or not node.get("card"):
-        return None
-    card = _card(node["card"])
-    return {
-        "id": f"reward:{node.get('id')}",
-        "occurred_at": node["card"].get("ownerSince"),
-        "direction": "reward",
-        "market": "Recompensa de carta",
-        "category": "laliga_inseason" if card["is_laliga"] and card["in_season"] else "other",
-        "cards": [card],
-        "sent_cards": [],
-        "received_cards": [card],
-        "gross_eur": 0.0,
-        "net_eur": 0.0,
-        "fee_eur": 0.0,
-        "credits_eur": 0.0,
-        "currency": "CARD",
-        "eth": 0.0,
-        "entry_types": ["REWARD"],
-    }
+def _reward_market(operation: dict) -> str:
+    if operation.get("__typename") != "So5Reward":
+        return "Recompensa monetaria"
+    fixture = operation.get("so5Fixture") or {}
+    leaderboard = operation.get("so5Leaderboard") or {}
+    parts = ["Recompensa de jornada"]
+    if fixture.get("shortDisplayName"):
+        parts.append(str(fixture["shortDisplayName"]))
+    elif fixture.get("gameWeek") is not None:
+        parts.append(f"Jornada {fixture['gameWeek']}")
+    if leaderboard.get("displayName"):
+        parts.append(str(leaderboard["displayName"]))
+    ranking = (operation.get("so5Ranking") or {}).get("ranking")
+    if ranking is not None:
+        parts.append(f"Puesto {ranking}")
+    return " · ".join(parts)
 
 
 def _movement_timestamp(movement: dict) -> datetime:
@@ -491,9 +540,55 @@ def collect_movement_history(
 
     operations = [operation for trade in trades if (operation := _operation_from_trade(trade))]
 
+    reward_entries: list[dict] = []
+    cursor = None
+    fixture_page = 0
+    while True:
+        fixture_page += 1
+        data = graphql_request(GAMEWEEK_REWARDS_QUERY, {"first": 100, "after": cursor}, headers=headers)
+        connection = ((data.get("so5") or {}).get("allSo5Fixtures") or {})
+        for fixture in connection.get("nodes") or []:
+            for reward in fixture.get("mySo5Rewards") or []:
+                reward_fixture = reward.get("so5Fixture") or {}
+                reward_entries.append({
+                    "id": f"gameweek:{reward.get('id')}",
+                    "date": reward_fixture.get("rewardsDeliveryDate"),
+                    "entryType": "REWARD",
+                    "provisional": False,
+                    "aasmState": "CONFIRMED",
+                    "amounts": reward.get("amount") or {},
+                    "tokenOperation": reward,
+                })
+        if progress:
+            progress(len(trades), f"{len(reward_entries)} premios de jornada · página {fixture_page}")
+        page_info = connection.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+
+    cursor = None
+    reward_page = 0
+    while True:
+        reward_page += 1
+        data = graphql_request(REWARD_ENTRIES_QUERY, {"first": 100, "after": cursor}, headers=headers)
+        connection = ((data.get("currentUser") or {}).get("accountEntries") or {})
+        reward_entries.extend(
+            entry for entry in connection.get("nodes") or []
+            if not entry.get("provisional")
+            and entry.get("aasmState") == "CONFIRMED"
+            and (entry.get("tokenOperation") or {}).get("__typename") in {"So5Reward", "TokenMonetaryReward"}
+        )
+        if progress:
+            progress(len(trades), f"{len(reward_entries)} recompensas confirmadas · página {reward_page}")
+        page_info = connection.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+
+    reward_operations = [entry.get("tokenOperation") or {} for entry in reward_entries]
     asset_ids = sorted({
         str(card.get("assetId"))
-        for operation in operations
+        for operation in operations + reward_operations
         for card in _raw_cards_from_operation(operation)
         if card.get("assetId")
     })
@@ -519,22 +614,21 @@ def collect_movement_history(
         }], current_slug, card_by_asset))
     ]
 
-    cursor = None
-    while True:
-        data = graphql_request(CARD_REWARDS_QUERY, {"first": 100, "after": cursor}, headers=headers)
-        connection = ((data.get("currentUser") or {}).get("rewards") or {})
-        known_ids = {movement["id"] for movement in movements}
-        for node in connection.get("nodes") or []:
-            reward = _card_reward(node)
-            if reward and reward["id"] not in known_ids:
-                movements.append(reward)
-                known_ids.add(reward["id"])
-        if progress:
-            progress(len(trades), f"{len(movements)} movimientos completados y recompensas")
-        page_info = connection.get("pageInfo") or {}
-        if not page_info.get("hasNextPage"):
-            break
-        cursor = page_info.get("endCursor")
+    reward_groups: dict[str, list[dict]] = {}
+    for entry in reward_entries:
+        operation = entry.get("tokenOperation") or {}
+        key = str(operation.get("id") or entry.get("id"))
+        reward_groups.setdefault(key, []).append(entry)
+    known_ids = {movement["id"] for movement in movements}
+    for entries in reward_groups.values():
+        reward = _movement_from_group(entries, current_slug, card_by_asset)
+        if not reward or reward["id"] in known_ids:
+            continue
+        reward["market"] = _reward_market(entries[0].get("tokenOperation") or {})
+        movements.append(reward)
+        known_ids.add(reward["id"])
+    if progress:
+        progress(len(trades), f"{len(movements)} movimientos completados y recompensas")
 
     minimum = datetime.min.replace(tzinfo=timezone.utc).isoformat()
     movements.sort(key=lambda movement: movement.get("occurred_at") or minimum, reverse=True)
