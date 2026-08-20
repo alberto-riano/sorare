@@ -26,4 +26,7 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now sorare-bid-worker.service
+sudo systemctl enable sorare-bid-worker.service
+# Las colas son procesos persistentes: hay que reiniciarlas para que un deploy
+# no siga ejecutando la versión anterior del código.
+sudo systemctl restart sorare-bid-worker.service

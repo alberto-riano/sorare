@@ -26,4 +26,7 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now sorare-sales-worker.service
+sudo systemctl enable sorare-sales-worker.service
+# `enable --now` no reinicia un servicio que ya estaba activo. En cada deploy
+# necesitamos cargar el código Python recién descargado.
+sudo systemctl restart sorare-sales-worker.service
