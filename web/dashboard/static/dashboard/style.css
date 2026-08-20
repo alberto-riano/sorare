@@ -1310,6 +1310,13 @@ body.modal-open { overflow: hidden; }
 .movement-kpis article { display: grid; gap: .2rem; }
 .movement-kpis span, .movement-kpis small { color: var(--muted); }
 .movement-kpis strong { font: 700 1.45rem "IBM Plex Mono",monospace; }
+.reward-kpi > span i { width: 1.1rem; color: var(--accent); }
+.essence-kpi-values { display: flex; flex-wrap: wrap; gap: .4rem; margin: .08rem 0; }
+.essence-kpi-values strong { display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .55rem; border-radius: 10px; font-size: 1rem; }
+.essence-kpi-values .rarity-limited { color: #854d0e; background: #fef3c7; }
+.essence-kpi-values .rarity-rare { color: #991b1b; background: #fee2e2; }
+.essence-kpi-values .rarity-super_rare { color: #1e40af; background: #dbeafe; }
+.reward-cards-total { color: #5b21b6; }
 .is-out { color: #b91c1c !important; }
 .is-in { color: var(--good) !important; }
 .movement-results { min-width: 0; }

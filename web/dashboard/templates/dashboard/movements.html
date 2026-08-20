@@ -27,9 +27,15 @@
 
   {% if snapshot %}
   <section class="movement-kpis">
+    {% if selected_category == 'reward' %}
+    <article class="panel reward-kpi"><span><i class="fas fa-coins"></i> Dinero recibido</span><strong class="is-in">+{{ totals.reward_money|floatformat:2 }} €</strong><small>Valor total de los premios monetarios</small></article>
+    <article class="panel reward-kpi"><span><i class="fas fa-gem"></i> Esencia recibida</span><div class="essence-kpi-values"><strong class="rarity-limited"><i class="fas fa-gem"></i> {{ totals.essence_limited }}</strong><strong class="rarity-rare"><i class="fas fa-gem"></i> {{ totals.essence_rare }}</strong><strong class="rarity-super_rare"><i class="fas fa-gem"></i> {{ totals.essence_super_rare }}</strong></div><small>Limited · Rare · Super Rare</small></article>
+    <article class="panel reward-kpi"><span><i class="fas fa-clone"></i> Cartas recibidas</span><strong class="reward-cards-total">{{ totals.reward_cards }}</strong><small>Cartas ganadas en la selección</small></article>
+    {% else %}
     <article class="panel"><span>Gastado en compras</span><strong class="is-out">−{{ totals.purchases|floatformat:2 }} €</strong><small>Descontando {{ totals.credits|floatformat:2 }} € en créditos</small></article>
     <article class="panel"><span>Recibido en ventas</span><strong class="is-in">+{{ totals.sales_net|floatformat:2 }} €</strong><small>{{ totals.fees|floatformat:2 }} € en comisiones</small></article>
     <article class="panel"><span>Balance compraventa</span><strong class="{% if totals.balance < 0 %}is-out{% else %}is-in{% endif %}">{{ totals.balance|floatformat:2 }} €</strong><small>{{ totals.rewards }} recompensas en la selección</small></article>
+    {% endif %}
   </section>
 
   <section class="panel movement-results reveal">

@@ -142,7 +142,8 @@ def movements(request):
     if reward_type not in {"money", "essence", "card"}:
         reward_type = ""
     player = request.GET.get("player", "").strip().casefold()
-    date_from = request.GET.get("date_from", "").strip()
+    requested_date_from = request.GET.get("date_from")
+    date_from = "2026-08-13" if requested_date_from is None else requested_date_from.strip()
     date_to = request.GET.get("date_to", "").strip()
 
     rows = []
@@ -179,7 +180,8 @@ def movements(request):
             continue
         if player and not any(player in str(card.get("player", "")).casefold() for card in cards):
             continue
-        iso_date = occurred_at.date().isoformat() if occurred_at else ""
+        local_occurred_at = occurred_at.astimezone(ZoneInfo("Europe/Madrid")) if occurred_at else None
+        iso_date = local_occurred_at.date().isoformat() if local_occurred_at else ""
         if date_from and iso_date < date_from:
             continue
         if date_to and iso_date > date_to:
@@ -212,6 +214,18 @@ def movements(request):
     purchases = [row for row in rows if (row.get("cash_direction") or row.get("direction")) == "purchase"]
     sales = [row for row in rows if (row.get("cash_direction") or row.get("direction")) == "sale"]
     rewards = [row for row in rows if row.get("direction") == "reward"]
+    essence_totals = {"limited": 0, "rare": 0, "super_rare": 0}
+    for reward in rewards:
+        essence_items = reward.get("essence") or []
+        if essence_items:
+            for item in essence_items:
+                item_rarity = str(item.get("rarity") or "")
+                if item_rarity in essence_totals:
+                    essence_totals[item_rarity] += int(item.get("quantity") or 0)
+        elif reward.get("essence_quantity"):
+            reward_rarity = str(reward.get("reward_rarity") or "")
+            if reward_rarity in essence_totals:
+                essence_totals[reward_rarity] += int(reward.get("essence_quantity") or 0)
     totals = {
         "purchases": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases),
         "sales_gross": sum(Decimal(str(row.get("gross_eur") or 0)) for row in sales),
@@ -219,6 +233,11 @@ def movements(request):
         "fees": sum(Decimal(str(row.get("fee_eur") or 0)) for row in sales),
         "credits": sum(Decimal(str(row.get("credits_eur") or 0)) for row in purchases),
         "rewards": len(rewards),
+        "reward_money": sum(Decimal(str(row.get("gross_eur") or 0)) for row in rewards if row.get("reward_type") == "money"),
+        "reward_cards": sum(len(row.get("cards") or []) for row in rewards if row.get("reward_type") == "card"),
+        "essence_limited": essence_totals["limited"],
+        "essence_rare": essence_totals["rare"],
+        "essence_super_rare": essence_totals["super_rare"],
         "balance": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
         - sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases),
     }

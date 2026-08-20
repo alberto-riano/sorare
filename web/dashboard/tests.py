@@ -992,6 +992,51 @@ class MovementHistoryTests(TestCase):
         self.assertNotContains(response, "22,46 €")
         self.assertNotContains(response, "Carta premio")
 
+    def test_reward_kpis_sum_money_essence_by_rarity_and_cards(self):
+        base = {
+            "occurred_at": "2026-08-18T20:00:00Z", "direction": "reward",
+            "cash_direction": "reward", "market": "GW5", "category": "reward",
+            "gross_eur": 0, "eth": 0, "currency": "", "cards": [],
+            "essence": [], "essence_quantity": 0,
+        }
+        limited = dict(base, id="limited", reward_type="essence", reward_rarity="limited",
+                       essence=[{"quantity": 12, "rarity": "limited"}], essence_quantity=12)
+        rare = dict(base, id="rare", reward_type="essence", reward_rarity="rare",
+                    essence=[{"quantity": 20, "rarity": "rare"}], essence_quantity=20)
+        super_rare = dict(base, id="super-rare", reward_type="essence", reward_rarity="super_rare",
+                          essence=[{"quantity": 4, "rarity": "super_rare"}], essence_quantity=4)
+        money = dict(base, id="money", reward_type="money", gross_eur=22.46, currency="ETH")
+        cards = dict(base, id="cards", reward_type="card", cards=[{"player": "Uno"}, {"player": "Dos"}])
+        MovementSnapshot.objects.create(
+            user=self.user, source_version=6,
+            movements=[limited, rare, super_rare, money, cards],
+        )
+
+        response = self.client.get(reverse("movements"), {"category": "reward"})
+
+        self.assertEqual(response.context["totals"]["reward_money"], Decimal("22.46"))
+        self.assertEqual(response.context["totals"]["essence_limited"], 12)
+        self.assertEqual(response.context["totals"]["essence_rare"], 20)
+        self.assertEqual(response.context["totals"]["essence_super_rare"], 4)
+        self.assertEqual(response.context["totals"]["reward_cards"], 2)
+        self.assertContains(response, "Dinero recibido")
+        self.assertContains(response, "Esencia recibida")
+        self.assertContains(response, "Cartas recibidas")
+
+    def test_default_history_starts_on_current_season_date_but_can_be_cleared(self):
+        MovementSnapshot.objects.create(user=self.user, source_version=6, movements=[
+            {"id": "before", "occurred_at": "2026-08-12T21:59:00Z", "direction": "purchase", "category": "other", "cards": [{"player": "Antes de temporada"}]},
+            {"id": "current", "occurred_at": "2026-08-12T22:00:00Z", "direction": "purchase", "category": "other", "cards": [{"player": "Temporada actual"}]},
+        ])
+
+        default_response = self.client.get(reverse("movements"), {"category": "other"})
+        all_response = self.client.get(reverse("movements"), {"category": "other", "date_from": ""})
+
+        self.assertEqual(default_response.context["date_from"], "2026-08-13")
+        self.assertNotContains(default_response, "Antes de temporada")
+        self.assertContains(default_response, "Temporada actual")
+        self.assertContains(all_response, "Antes de temporada")
+
     def test_page_filters_category_rarity_and_calculates_totals(self):
         MovementSnapshot.objects.create(user=self.user, refreshed_at=datetime.now(tz=ZoneInfo("Europe/Madrid")), movements=[
             {"id": "buy", "occurred_at": "2026-08-18T10:00:00Z", "direction": "purchase", "market": "Subasta", "category": "laliga_inseason", "cards": [{"player": "Carles Aleñá", "rarity": "rare", "in_season": True}], "gross_eur": 10, "net_eur": 8, "credits_eur": 2, "fee_eur": 0, "currency": "EUR", "eth": 0},
@@ -1023,7 +1068,7 @@ class MovementHistoryTests(TestCase):
             {"id": "unmatched", "occurred_at": "2026-08-19T12:00:00Z", "direction": "purchase", "cash_direction": "purchase", "market": "Subasta", "category": "laliga_inseason", "cards": [{"asset_id": "unmatched", "player": "Jugador sin vender", "player_slug": "sin-vender", "team": "Equipo", "rarity": "rare", "season_year": 2026, "in_season": True, "serial_number": 20}], "received_cards": [{"asset_id": "unmatched", "player": "Jugador sin vender", "player_slug": "sin-vender", "team": "Equipo", "rarity": "rare", "season_year": 2026, "in_season": True, "serial_number": 20}], "sent_cards": [], "gross_eur": 6, "net_eur": 6},
         ])
 
-        response = self.client.get(reverse("movements"), {"category": "laliga_inseason"})
+        response = self.client.get(reverse("movements"), {"category": "laliga_inseason", "date_from": ""})
 
         self.assertContains(response, "3 movimientos")
         self.assertContains(response, 'class="movement-grouped-row"', count=2)
