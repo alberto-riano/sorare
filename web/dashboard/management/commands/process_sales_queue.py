@@ -7,10 +7,10 @@ from django.utils import timezone
 
 from dashboard.models import (
     MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
-    SalesInventory, SalesRefreshJob,
+    PublicRewardSnapshot, PublicRewardSyncJob, SalesInventory, SalesRefreshJob,
 )
 from dashboard.views import PATHS
-from web_services.movement_history import collect_movement_history
+from web_services.movement_history import collect_movement_history, collect_public_reward_history
 from web_services.process_runner import run_card_sale, sale_error_message
 from web_services.sales_inventory import collect_sales_inventory
 
@@ -84,6 +84,50 @@ def process_next_movement_sync():
         job.status = MovementSyncJob.Status.FAILED
         job.progress_label = "Actualización interrumpida"
         job.error = f"No se pudo actualizar el historial: {exc}"[:2000]
+    job.finished_at = timezone.now()
+    job.save(update_fields=(
+        "status", "movement_count", "processed_count", "progress_label", "error", "finished_at",
+    ))
+    return job
+
+
+def process_next_public_reward_sync():
+    with transaction.atomic():
+        job = PublicRewardSyncJob.objects.select_for_update().filter(
+            status=PublicRewardSyncJob.Status.QUEUED,
+        ).first()
+        if not job:
+            return None
+        job.status = PublicRewardSyncJob.Status.RUNNING
+        job.started_at = timezone.now()
+        job.progress_label = f"Buscando recompensas de {job.manager_slug}"
+        job.save(update_fields=("status", "started_at", "progress_label"))
+
+    try:
+        def save_progress(processed, label):
+            PublicRewardSyncJob.objects.filter(pk=job.pk).update(
+                processed_count=processed,
+                progress_label=label,
+            )
+
+        result = collect_public_reward_history(job.manager_slug, progress=save_progress)
+        movements = result["movements"]
+        PublicRewardSnapshot.objects.update_or_create(
+            manager_slug=job.manager_slug,
+            defaults={
+                "manager_nickname": result["manager_nickname"],
+                "movements": movements,
+                "refreshed_at": timezone.now(),
+                "source_version": 1,
+            },
+        )
+        job.movement_count = len(movements)
+        job.progress_label = "Recompensas públicas actualizadas"
+        job.status = PublicRewardSyncJob.Status.SUCCEEDED
+    except Exception as exc:
+        job.status = PublicRewardSyncJob.Status.FAILED
+        job.progress_label = "Actualización interrumpida"
+        job.error = f"No se pudieron actualizar las recompensas públicas: {exc}"[:2000]
     job.finished_at = timezone.now()
     job.save(update_fields=(
         "status", "movement_count", "processed_count", "progress_label", "error", "finished_at",
@@ -180,6 +224,11 @@ class Command(BaseCommand):
             error="La actualización se interrumpió; el historial anterior sigue disponible.",
             finished_at=timezone.now(),
         )
+        PublicRewardSyncJob.objects.filter(status=PublicRewardSyncJob.Status.RUNNING).update(
+            status=PublicRewardSyncJob.Status.FAILED,
+            error="La actualización se interrumpió; las recompensas anteriores siguen disponibles.",
+            finished_at=timezone.now(),
+        )
         for job in SaleBatchJob.objects.filter(status=SaleBatchJob.Status.RUNNING):
             job.items.filter(status__in=(SaleBatchItem.Status.QUEUED, SaleBatchItem.Status.RUNNING)).update(
                 status=SaleBatchItem.Status.FAILED,
@@ -191,7 +240,12 @@ class Command(BaseCommand):
             job.save(update_fields=("status", "failure_count", "finished_at"))
 
         while True:
-            processed = process_next_refresh() or process_next_movement_sync() or process_next_sale()
+            processed = (
+                process_next_refresh()
+                or process_next_movement_sync()
+                or process_next_public_reward_sync()
+                or process_next_sale()
+            )
             if not options["watch"]:
                 break
             if processed is None:

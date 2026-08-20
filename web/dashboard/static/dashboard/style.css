@@ -1306,6 +1306,12 @@ body.modal-open { overflow: hidden; }
 .movement-tabs a b { color: var(--muted); font-family: "IBM Plex Mono",monospace; }
 .movement-tabs a.is-active { color: #fff; border-color: var(--accent); background: var(--accent); }
 .movement-tabs a.is-active b { color: #fff; }
+.reward-manager-switch { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-top: .85rem; padding-bottom: .85rem; }
+.reward-manager-switch > div { display: grid; gap: .12rem; }
+.reward-manager-switch > div span, .reward-manager-switch label > span { color: var(--muted); font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.reward-manager-switch > div strong { font-size: 1.05rem; }
+.reward-manager-switch label { display: flex; align-items: center; gap: .65rem; }
+.reward-manager-switch select { min-width: 180px; min-height: 42px; padding: .55rem 2.2rem .55rem .75rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); font: inherit; }
 .movement-kpis { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; }
 .movement-kpis article { display: grid; gap: .2rem; }
 .movement-kpis span, .movement-kpis small { color: var(--muted); }
@@ -1396,6 +1402,9 @@ body.modal-open { overflow: hidden; }
   .sales-modal-card { padding: 1.1rem; }
   .movements-hero { align-items: stretch; flex-direction: column; }
   .movement-sync { justify-items: start; }
+  .reward-manager-switch { align-items: stretch; flex-direction: column; }
+  .reward-manager-switch label { align-items: stretch; flex-direction: column; gap: .25rem; }
+  .reward-manager-switch select { width: 100%; }
   .movement-filters { grid-template-columns: 1fr 1fr; }
   .table-head { align-items: stretch; flex-direction: column; }
 }

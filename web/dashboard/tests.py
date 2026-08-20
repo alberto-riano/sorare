@@ -15,12 +15,12 @@ import listar_subastas
 from dashboard.forms import BatchBidForm, BatchSaleForm, InlineBidForm
 from dashboard.management.commands.process_bid_queue import process_next_job
 from dashboard.management.commands.process_sales_queue import (
-    process_next_movement_sync, process_next_refresh, process_next_sale,
+    process_next_movement_sync, process_next_public_reward_sync, process_next_refresh, process_next_sale,
 )
 from dashboard.models import (
     AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer,
-    MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
-    SalesInventory, SalesRefreshJob,
+    MovementSnapshot, MovementSyncJob, PublicRewardSnapshot, PublicRewardSyncJob,
+    SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob,
 )
 from dashboard.views import auction_price_history, auctions_list
 from sorare_utils import get_latest_prices
@@ -28,7 +28,7 @@ from web_services.process_runner import BidRequest, ScriptResult, bid_error_mess
 from web_services.sales_inventory import collection_display_name
 from web_services.movement_history import (
     _account_currency, _movement_from_group, _operation_from_trade, build_trade_cycles,
-    collect_movement_history,
+    collect_movement_history, collect_public_reward_history,
 )
 
 
@@ -969,6 +969,85 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(movements[0]["category"], "reward")
         self.assertEqual(movements[0]["market"], "GW 12 · Rare · Puesto 25")
         self.assertEqual(movements[0]["gross_eur"], 5.0)
+
+    @patch("web_services.movement_history.graphql_request")
+    def test_public_reward_collector_reads_another_managers_actual_rewards(self, request):
+        card = self._api_card(player="Carta pública")
+        reward = {
+            "__typename": "So5Reward", "id": "public-reward", "slug": "public-reward",
+            "aasmState": "claimed", "amount": None, "rewardCards": [],
+            "rewards": [{"__typename": "CardShardsReward", "quantity": 510, "rarity": "rare"}],
+            "rewardConfigs": [],
+            "so5Fixture": {"gameWeek": 5, "shortDisplayName": "GW5", "rewardsDeliveryDate": "2026-08-18T20:00:00Z"},
+            "so5Leaderboard": {"displayName": "Champ. – Rare"},
+            "so5Ranking": {"ranking": 66},
+        }
+
+        def response(query, _variables, headers=None):
+            if "PublicManagerRewards" in query:
+                return {
+                    "user": {"slug": "blasco93", "nickname": "Blasco93"},
+                    "so5": {"allSo5Fixtures": {
+                        "nodes": [{
+                            "__typename": "So5Fixture", "endDate": "2026-08-18T13:59:59Z",
+                            "rewardsDeliveryDate": "2026-08-18T20:00:00Z",
+                            "userFixtureResults": {"eligibleOrSo5Rewards": [reward]},
+                        }],
+                        "pageInfo": {"hasPreviousPage": False, "startCursor": None},
+                    }},
+                }
+            if "MovementCards" in query:
+                return {"tokens": {"anyCards": [card]}}
+            raise AssertionError("Consulta inesperada")
+
+        request.side_effect = response
+        result = collect_public_reward_history("blasco93", headers={"Authorization": "test"})
+
+        self.assertEqual(result["manager_nickname"], "Blasco93")
+        self.assertEqual(len(result["movements"]), 1)
+        self.assertEqual(result["movements"][0]["essence_quantity"], 510)
+        self.assertEqual(result["movements"][0]["market"], "GW5 · Champ. – Rare · Puesto 66")
+
+    @patch("dashboard.management.commands.process_sales_queue.collect_public_reward_history")
+    def test_public_reward_sync_saves_snapshot_in_background(self, collect):
+        collect.return_value = {
+            "manager_slug": "blasco93", "manager_nickname": "Blasco93",
+            "movements": [{"id": "reward-1", "category": "reward"}],
+        }
+        job = PublicRewardSyncJob.objects.create(user=self.user, manager_slug="blasco93")
+
+        process_next_public_reward_sync()
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, PublicRewardSyncJob.Status.SUCCEEDED)
+        snapshot = PublicRewardSnapshot.objects.get(manager_slug="blasco93")
+        self.assertEqual(snapshot.movements[0]["id"], "reward-1")
+
+    def test_reward_manager_selector_uses_cached_public_rewards(self):
+        PublicRewardSnapshot.objects.create(
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=1,
+            movements=[{
+                "id": "blasco-reward", "occurred_at": "2026-08-18T20:00:00Z",
+                "direction": "reward", "cash_direction": "reward", "category": "reward",
+                "market": "GW5 · Champ. – Rare · Puesto 66", "reward_type": "essence",
+                "reward_rarity": "rare", "essence": [{"quantity": 510, "rarity": "rare"}],
+                "essence_quantity": 510, "cards": [], "gross_eur": 0, "eth": 0, "currency": "",
+            }],
+        )
+
+        response = self.client.get(reverse("movements"), {"category": "reward", "manager": "blasco93"})
+
+        self.assertEqual(response.context["selected_manager"], "blasco93")
+        self.assertContains(response, "Recompensas de Blasco93")
+        self.assertContains(response, "+510 Esencia")
+        self.assertContains(response, '<option value="blasco93" selected>Blasco93</option>', html=True)
+
+    def test_first_public_reward_visit_enqueues_background_sync(self):
+        response = self.client.get(reverse("movements"), {"category": "reward", "manager": "blasco93"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(PublicRewardSyncJob.objects.filter(manager_slug="blasco93", status="queued").exists())
+        self.assertContains(response, "Cargando las recompensas de Blasco93")
 
     def test_reward_filter_separates_money_essence_and_cards(self):
         base = {

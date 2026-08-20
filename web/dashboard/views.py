@@ -26,13 +26,14 @@ from web_services.sales_inventory import collection_display_name
 from .forms import BatchBidForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
 from .models import (
     AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer,
-    MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
-    SalesInventory, SalesRefreshJob,
+    MovementSnapshot, MovementSyncJob, PublicRewardSnapshot, PublicRewardSyncJob,
+    SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PATHS = SorarePaths(repo_root=REPO_ROOT)
 SALES_SELECTED_RARITY_SESSION_KEY = "sales_selected_rarity"
+PUBLIC_REWARD_MANAGER_SLUG = "blasco93"
 
 # Añadir el directorio src al path para importar listar_subastas
 sys.path.insert(0, str(REPO_ROOT / 'src'))
@@ -123,19 +124,39 @@ def _movement_datetime(value):
 
 
 def movements(request):
-    stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-    snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 6 else None
-    active_sync = MovementSyncJob.objects.filter(
-        user=request.user,
-        status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
-    ).order_by("-created_at").first()
-    if not snapshot and not active_sync:
-        active_sync = MovementSyncJob.objects.create(user=request.user)
-
-    all_movements = list(snapshot.movements if snapshot else [])
     category = request.GET.get("category", "laliga_inseason")
     if category not in {"laliga_inseason", "reward", "other", "all"}:
         category = "laliga_inseason"
+    selected_manager = request.GET.get("manager", "me") if category == "reward" else "me"
+    if selected_manager not in {"me", PUBLIC_REWARD_MANAGER_SLUG}:
+        selected_manager = "me"
+    public_rewards = selected_manager == PUBLIC_REWARD_MANAGER_SLUG
+
+    if public_rewards:
+        stored_snapshot = PublicRewardSnapshot.objects.filter(manager_slug=selected_manager).first()
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 1 else None
+        active_sync = PublicRewardSyncJob.objects.filter(
+            manager_slug=selected_manager,
+            status__in=(PublicRewardSyncJob.Status.QUEUED, PublicRewardSyncJob.Status.RUNNING),
+        ).order_by("-created_at").first()
+        if not snapshot and not active_sync:
+            active_sync = PublicRewardSyncJob.objects.create(
+                user=request.user,
+                manager_slug=selected_manager,
+            )
+        manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
+    else:
+        stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 6 else None
+        active_sync = MovementSyncJob.objects.filter(
+            user=request.user,
+            status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
+        ).order_by("-created_at").first()
+        if not snapshot and not active_sync:
+            active_sync = MovementSyncJob.objects.create(user=request.user)
+        manager_nickname = "burguis"
+
+    all_movements = list(snapshot.movements if snapshot else [])
     direction = request.GET.get("direction", "")
     rarity = request.GET.get("rarity", "")
     reward_type = request.GET.get("reward_type", "")
@@ -266,6 +287,9 @@ def movements(request):
         "selected_direction": direction,
         "selected_rarity": rarity,
         "selected_reward_type": reward_type,
+        "selected_manager": selected_manager,
+        "manager_nickname": manager_nickname,
+        "public_rewards": public_rewards,
         "date_from": date_from,
         "date_to": date_to,
         "per_page": per_page,
@@ -275,6 +299,17 @@ def movements(request):
 
 @require_POST
 def enqueue_movements_sync(request):
+    selected_manager = request.GET.get("manager", "me")
+    if selected_manager == PUBLIC_REWARD_MANAGER_SLUG:
+        active = PublicRewardSyncJob.objects.filter(
+            manager_slug=selected_manager,
+            status__in=(PublicRewardSyncJob.Status.QUEUED, PublicRewardSyncJob.Status.RUNNING),
+        ).first()
+        job = active or PublicRewardSyncJob.objects.create(
+            user=request.user,
+            manager_slug=selected_manager,
+        )
+        return JsonResponse({"job_id": job.id, "status": job.status}, status=202)
     active = MovementSyncJob.objects.filter(
         user=request.user,
         status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -285,7 +320,13 @@ def enqueue_movements_sync(request):
 
 @require_GET
 def movements_sync_status(request):
-    job = MovementSyncJob.objects.filter(user=request.user).order_by("-created_at").first()
+    selected_manager = request.GET.get("manager", "me")
+    if selected_manager == PUBLIC_REWARD_MANAGER_SLUG:
+        job = PublicRewardSyncJob.objects.filter(
+            manager_slug=selected_manager,
+        ).order_by("-created_at").first()
+    else:
+        job = MovementSyncJob.objects.filter(user=request.user).order_by("-created_at").first()
     if not job:
         return JsonResponse({"job": None})
     return JsonResponse({"job": {

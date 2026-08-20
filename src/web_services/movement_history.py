@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 
@@ -159,6 +159,49 @@ query GameweekRewards($first: Int!, $after: String) {
         }
       }
       pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+
+PUBLIC_MANAGER_REWARDS_QUERY = """
+query PublicManagerRewards($managerSlug: String!, $last: Int!, $before: String) {
+  user(slug: $managerSlug) { slug nickname }
+  so5 {
+    allSo5Fixtures(
+      last: $last
+      before: $before
+      eventType: CLASSIC
+      sport: FOOTBALL
+      future: false
+    ) {
+      nodes {
+        __typename
+        ... on So5Fixture {
+          endDate rewardsDeliveryDate gameWeek shortDisplayName
+          userFixtureResults(userSlug: $managerSlug) {
+            eligibleOrSo5Rewards {
+              __typename
+              ... on So5Reward {
+                id slug aasmState amount { eurCents wei referenceCurrency }
+                rewardCards { anyCard { assetId } }
+                rewards {
+                  __typename
+                  ... on CardShardsReward { quantity rarity }
+                }
+                rewardConfigs {
+                  __typename
+                  ... on CardShardRewardConfig { quantity rarity }
+                }
+                so5Fixture { gameWeek shortDisplayName rewardsDeliveryDate }
+                so5Leaderboard { displayName(short: true, withSeasonality: false) }
+                so5Ranking { ranking }
+              }
+            }
+          }
+        }
+      }
+      pageInfo { hasPreviousPage startCursor }
     }
   }
 }
@@ -616,6 +659,105 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
 
     cycles.sort(key=lambda cycle: str(cycle.get("occurred_at") or ""), reverse=True)
     return cycles
+
+
+def collect_public_reward_history(
+    manager_slug: str,
+    *,
+    start_date: date = date(2026, 8, 13),
+    progress: Callable[[int, str], None] | None = None,
+    headers: dict | None = None,
+) -> dict:
+    """Reconstruye los premios públicos de un manager desde una fecha concreta."""
+    headers = headers or build_headers()
+    reward_entries: list[dict] = []
+    manager_nickname = manager_slug
+    cursor = None
+    page = 0
+
+    while True:
+        page += 1
+        data = graphql_request(PUBLIC_MANAGER_REWARDS_QUERY, {
+            "managerSlug": manager_slug,
+            "last": 25,
+            "before": cursor,
+        }, headers=headers)
+        public_user = data.get("user") or {}
+        manager_nickname = str(public_user.get("nickname") or manager_nickname)
+        connection = ((data.get("so5") or {}).get("allSo5Fixtures") or {})
+        fixture_dates: list[date] = []
+
+        for fixture in connection.get("nodes") or []:
+            if fixture.get("__typename") != "So5Fixture":
+                continue
+            fixture_end = _movement_timestamp({"occurred_at": fixture.get("endDate")})
+            if fixture.get("endDate"):
+                fixture_dates.append(fixture_end.date())
+                if fixture_end.date() < start_date:
+                    continue
+            results = fixture.get("userFixtureResults") or {}
+            for reward in results.get("eligibleOrSo5Rewards") or []:
+                if reward.get("__typename") != "So5Reward":
+                    continue
+                reward_fixture = reward.get("so5Fixture") or {}
+                reward_entries.append({
+                    "id": f"public:{reward.get('id')}",
+                    "date": (
+                        reward_fixture.get("rewardsDeliveryDate")
+                        or fixture.get("rewardsDeliveryDate")
+                        or fixture.get("endDate")
+                    ),
+                    "entryType": "REWARD",
+                    "provisional": False,
+                    "aasmState": str(reward.get("aasmState") or "").upper(),
+                    "amounts": reward.get("amount") or {},
+                    "tokenOperation": reward,
+                })
+
+        if progress:
+            progress(len(reward_entries), f"{len(reward_entries)} recompensas públicas · página {page}")
+        page_info = connection.get("pageInfo") or {}
+        reached_start = bool(fixture_dates and min(fixture_dates) < start_date)
+        if reached_start or not page_info.get("hasPreviousPage"):
+            break
+        cursor = page_info.get("startCursor")
+
+    reward_operations = [entry.get("tokenOperation") or {} for entry in reward_entries]
+    asset_ids = sorted({
+        str(card.get("assetId"))
+        for operation in reward_operations
+        for card in _raw_cards_from_operation(operation)
+        if card.get("assetId")
+    })
+    card_by_asset: dict[str, dict] = {}
+    for start in range(0, len(asset_ids), 100):
+        chunk = asset_ids[start:start + 100]
+        data = graphql_request(CARD_DETAILS_QUERY, {"assetIds": chunk}, headers=headers)
+        for card in (data.get("tokens") or {}).get("anyCards") or []:
+            if card and card.get("assetId"):
+                card_by_asset[str(card["assetId"])] = card
+        if progress:
+            progress(len(reward_entries), f"Cargando cartas {min(start + 100, len(asset_ids))}/{len(asset_ids)}")
+
+    movements = []
+    known_ids: set[str] = set()
+    for entry in reward_entries:
+        reward = _movement_from_group([entry], manager_slug, card_by_asset)
+        if not reward or reward["id"] in known_ids:
+            continue
+        reward["market"] = _reward_market(entry.get("tokenOperation") or {})
+        movements.append(reward)
+        known_ids.add(reward["id"])
+
+    minimum = datetime.min.replace(tzinfo=timezone.utc).isoformat()
+    movements.sort(key=lambda movement: movement.get("occurred_at") or minimum, reverse=True)
+    if progress:
+        progress(len(movements), f"{len(movements)} recompensas públicas guardadas")
+    return {
+        "manager_slug": str(public_user.get("slug") or manager_slug),
+        "manager_nickname": manager_nickname,
+        "movements": movements,
+    }
 
 
 def collect_movement_history(

@@ -123,6 +123,42 @@ class MovementSyncJob(models.Model):
         ordering = ("created_at",)
 
 
+class PublicRewardSnapshot(models.Model):
+    """Copia local de las recompensas públicas de otro manager."""
+
+    manager_slug = models.SlugField(max_length=180, unique=True)
+    manager_nickname = models.CharField(max_length=180)
+    movements = models.JSONField(default=list)
+    refreshed_at = models.DateTimeField(null=True, blank=True)
+    source_version = models.PositiveSmallIntegerField(default=1)
+
+
+class PublicRewardSyncJob(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "En cola"
+        RUNNING = "running", "Actualizando"
+        SUCCEEDED = "succeeded", "Completada"
+        FAILED = "failed", "Fallida"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sorare_public_reward_sync_jobs",
+    )
+    manager_slug = models.SlugField(max_length=180, db_index=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    movement_count = models.PositiveIntegerField(default=0)
+    processed_count = models.PositiveIntegerField(default=0)
+    progress_label = models.CharField(max_length=180, blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("created_at",)
+
+
 class SalesRefreshJob(models.Model):
     class Status(models.TextChoices):
         QUEUED = "queued", "En cola"
