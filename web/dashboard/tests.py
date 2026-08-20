@@ -27,7 +27,8 @@ from sorare_utils import get_latest_prices
 from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler, run_card_sale
 from web_services.sales_inventory import collection_display_name
 from web_services.movement_history import (
-    _movement_from_group, _operation_from_trade, collect_movement_history,
+    _movement_from_group, _operation_from_trade, build_trade_cycles,
+    collect_movement_history,
 )
 
 
@@ -685,6 +686,29 @@ class MovementHistoryTests(TestCase):
         self.assertEqual((movement["gross_eur"], movement["net_eur"], movement["fee_eur"]), (100.0, 95.0, 5.0))
         self.assertEqual(movement["category"], "laliga_inseason")
 
+    def test_cash_and_card_offer_separates_sent_and_received_cards(self):
+        sivera = self._api_card(player="Sivera")
+        sivera["assetId"], sivera["serialNumber"] = "sivera-asset", 10
+        dituro = self._api_card(player="Matías Dituro")
+        dituro["assetId"], dituro["serialNumber"] = "dituro-asset", 14
+        operation = {
+            "__typename": "TokenOffer", "id": "swap-1", "transactionDate": "2026-08-19T11:02:00Z",
+            "type": "DIRECT_OFFER", "userBuyer": {"slug": "other"}, "userSeller": {"slug": "burguis"},
+            "sender": {"slug": "burguis"}, "receiver": {"slug": "other"},
+            "marketFeeAmounts": {"eurCents": 225, "referenceCurrency": "EUR"},
+            "senderSide": {"amounts": {"eurCents": 0}, "anyCards": [sivera]},
+            "receiverSide": {"amounts": {"eurCents": 4500, "referenceCurrency": "EUR"}, "anyCards": [dituro]},
+        }
+        movement = _movement_from_group([{
+            "id": "swap-1", "date": operation["transactionDate"], "entryType": "PAYMENT",
+            "amounts": operation["receiverSide"]["amounts"], "tokenOperation": operation,
+        }], "burguis")
+        self.assertEqual(movement["direction"], "trade")
+        self.assertEqual(movement["cash_direction"], "sale")
+        self.assertEqual([card["player"] for card in movement["sent_cards"]], ["Sivera"])
+        self.assertEqual([card["player"] for card in movement["received_cards"]], ["Matías Dituro"])
+        self.assertEqual((movement["gross_eur"], movement["net_eur"]), (45.0, 42.75))
+
     def test_classic_card_goes_to_other_movements(self):
         card = self._api_card(player="Take", in_season=False)
         operation = {
@@ -731,6 +755,24 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(movement["credits_eur"], 1.0)
         self.assertEqual(movement["net_eur"], 5.5)
 
+    def test_trade_cycles_match_exact_card_and_calculate_balance(self):
+        card = {"asset_id": "mathew-asset", "player": "Mathew Ryan", "player_slug": "mathew-ryan", "rarity": "rare", "season_year": 2026, "in_season": True, "serial_number": 11}
+        purchase = {"id": "buy", "occurred_at": "2026-08-14T10:35:00Z", "direction": "purchase", "cash_direction": "purchase", "market": "Subasta", "cards": [card], "received_cards": [card], "sent_cards": [], "net_eur": 71.76, "credits_eur": 0}
+        sale = {"id": "sell", "occurred_at": "2026-08-20T07:01:00Z", "direction": "sale", "cash_direction": "sale", "market": "Compra instantánea", "cards": [card], "received_cards": [], "sent_cards": [card], "gross_eur": 83, "net_eur": 78.85, "fee_eur": 4.15}
+        cycles = build_trade_cycles([sale, purchase])
+        self.assertEqual(len(cycles), 1)
+        self.assertTrue(cycles[0]["exact_card"])
+        self.assertEqual(cycles[0]["balance_eur"], Decimal("7.09"))
+
+    def test_trade_cycles_warn_when_matching_a_different_serial(self):
+        bought = {"asset_id": "zakaria-16", "player": "Zakaria Eddahchouri", "player_slug": "zakaria", "rarity": "rare", "season_year": 2026, "in_season": True, "serial_number": 16}
+        sold = dict(bought, asset_id="zakaria-10", serial_number=10)
+        purchase = {"id": "buy-z", "occurred_at": "2026-08-10T10:00:00Z", "direction": "purchase", "cash_direction": "purchase", "market": "Oferta directa", "cards": [bought], "received_cards": [bought], "sent_cards": [], "net_eur": 7.56}
+        sale = {"id": "sell-z", "occurred_at": "2026-08-20T10:00:00Z", "direction": "sale", "cash_direction": "sale", "market": "Venta", "cards": [sold], "received_cards": [], "sent_cards": [sold], "gross_eur": 5.4, "net_eur": 5.4, "fee_eur": 0}
+        cycle = build_trade_cycles([purchase, sale])[0]
+        self.assertFalse(cycle["exact_card"])
+        self.assertIn("compra #16 · venta #10", cycle["notes"][0])
+
     @patch("web_services.movement_history.graphql_request")
     def test_collector_uses_completed_trades_and_discards_open_auctions(self, request):
         card = self._api_card()
@@ -761,7 +803,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
         snapshot = MovementSnapshot.objects.get(user=self.user)
         self.assertEqual(snapshot.movements[0]["id"], "movement-1")
-        self.assertEqual(snapshot.source_version, 2)
+        self.assertEqual(snapshot.source_version, 3)
 
     def test_page_filters_category_rarity_and_calculates_totals(self):
         MovementSnapshot.objects.create(user=self.user, refreshed_at=datetime.now(tz=ZoneInfo("Europe/Madrid")), movements=[
@@ -773,6 +815,33 @@ class MovementHistoryTests(TestCase):
         self.assertNotContains(response, ">Take<")
         self.assertEqual(response.context["totals"]["purchases"], Decimal("8"))
         self.assertEqual(response.context["totals"]["credits"], Decimal("2"))
+
+    def test_grouped_page_shows_purchase_sale_balance_and_serial_warning(self):
+        mathew = {
+            "asset_id": "mathew-11", "player": "Mathew Ryan", "player_slug": "mathew-ryan",
+            "team": "Levante UD", "rarity": "rare", "season_year": 2026,
+            "in_season": True, "serial_number": 11,
+        }
+        zakaria_bought = {
+            "asset_id": "zakaria-16", "player": "Zakaria Eddahchouri", "player_slug": "zakaria",
+            "team": "RC Deportivo", "rarity": "rare", "season_year": 2026,
+            "in_season": True, "serial_number": 16,
+        }
+        zakaria_sold = dict(zakaria_bought, asset_id="zakaria-10", serial_number=10)
+        MovementSnapshot.objects.create(user=self.user, movements=[
+            {"id": "mathew-buy", "occurred_at": "2026-08-14T10:35:00Z", "direction": "purchase", "cash_direction": "purchase", "market": "Subasta", "category": "laliga_inseason", "cards": [mathew], "received_cards": [mathew], "sent_cards": [], "gross_eur": 71.76, "net_eur": 71.76, "credits_eur": 0},
+            {"id": "mathew-sale", "occurred_at": "2026-08-20T07:01:00Z", "direction": "sale", "cash_direction": "sale", "market": "Compra instantánea", "category": "laliga_inseason", "cards": [mathew], "received_cards": [], "sent_cards": [mathew], "gross_eur": 83, "net_eur": 78.85, "fee_eur": 4.15},
+            {"id": "zakaria-buy", "occurred_at": "2026-08-10T10:00:00Z", "direction": "purchase", "cash_direction": "purchase", "market": "Subasta", "category": "laliga_inseason", "cards": [zakaria_bought], "received_cards": [zakaria_bought], "sent_cards": [], "gross_eur": 5.4, "net_eur": 5.4},
+            {"id": "zakaria-sale", "occurred_at": "2026-08-20T02:07:00Z", "direction": "sale", "cash_direction": "sale", "market": "Oferta directa", "category": "laliga_inseason", "cards": [zakaria_sold], "received_cards": [], "sent_cards": [zakaria_sold], "gross_eur": 7.56, "net_eur": 7.56, "fee_eur": 0},
+        ])
+
+        response = self.client.get(reverse("movements"), {"category": "laliga_inseason", "grouped": "1"})
+
+        self.assertContains(response, "2 ciclos cerrados")
+        self.assertContains(response, "Misma carta")
+        self.assertContains(response, "+7,09 €")
+        self.assertContains(response, "Cartas distintas: compra #16 · venta #10")
+        self.assertContains(response, "category=other&amp;grouped=1")
 
     def test_first_visit_enqueues_background_sync(self):
         response = self.client.get(reverse("movements"))

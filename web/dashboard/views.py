@@ -21,6 +21,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from web_services.config_files import SorarePaths, load_telegram_alert_payload, save_telegram_alert_payload
 from web_services.process_runner import BidRequest, run_bid_scheduler, run_telegram_alert
+from web_services.movement_history import build_trade_cycles
 from web_services.sales_inventory import collection_display_name
 from .forms import BatchBidForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
 from .models import (
@@ -123,7 +124,7 @@ def _movement_datetime(value):
 
 def movements(request):
     stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-    snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 2 else None
+    snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 3 else None
     active_sync = MovementSyncJob.objects.filter(
         user=request.user,
         status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -136,6 +137,9 @@ def movements(request):
     if category not in {"laliga_inseason", "other", "all"}:
         category = "laliga_inseason"
     direction = request.GET.get("direction", "")
+    grouped = request.GET.get("grouped") == "1"
+    if grouped:
+        direction = ""
     rarity = request.GET.get("rarity", "")
     player = request.GET.get("player", "").strip().casefold()
     date_from = request.GET.get("date_from", "").strip()
@@ -151,38 +155,70 @@ def movements(request):
         row["occurred_at_dt"] = occurred_at
         if category != "all" and row.get("category") != category:
             continue
-        if direction and row.get("direction") != direction:
+        if direction and row.get("direction") != direction and row.get("cash_direction") != direction:
             continue
-        if rarity and not any(card.get("rarity") == rarity for card in cards):
+        if not grouped and rarity and not any(card.get("rarity") == rarity for card in cards):
             continue
-        if player and not any(player in str(card.get("player", "")).casefold() for card in cards):
+        if not grouped and player and not any(player in str(card.get("player", "")).casefold() for card in cards):
             continue
         iso_date = occurred_at.date().isoformat() if occurred_at else ""
-        if date_from and iso_date < date_from:
+        if not grouped and date_from and iso_date < date_from:
             continue
-        if date_to and iso_date > date_to:
+        if not grouped and date_to and iso_date > date_to:
             continue
         rows.append(row)
 
-    purchases = [row for row in rows if row.get("direction") == "purchase"]
-    sales = [row for row in rows if row.get("direction") == "sale"]
+    cycles = build_trade_cycles(rows) if grouped else []
+    if grouped:
+        filtered_cycles = []
+        for cycle in cycles:
+            cycle["purchase_at_dt"] = _movement_datetime(cycle.get("purchase_at"))
+            cycle["sale_at_dt"] = _movement_datetime(cycle.get("sale_at"))
+            card = cycle.get("sale_card") or {}
+            if rarity and card.get("rarity") != rarity:
+                continue
+            if player and player not in str(card.get("player", "")).casefold():
+                continue
+            sale_date = cycle["sale_at_dt"].date().isoformat() if cycle["sale_at_dt"] else ""
+            if date_from and sale_date < date_from:
+                continue
+            if date_to and sale_date > date_to:
+                continue
+            filtered_cycles.append(cycle)
+        cycles = filtered_cycles
+
+    purchases = [row for row in rows if (row.get("cash_direction") or row.get("direction")) == "purchase"]
+    sales = [row for row in rows if (row.get("cash_direction") or row.get("direction")) == "sale"]
     rewards = [row for row in rows if row.get("direction") == "reward"]
-    totals = {
-        "purchases": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases),
-        "sales_gross": sum(Decimal(str(row.get("gross_eur") or 0)) for row in sales),
-        "sales_net": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales),
-        "fees": sum(Decimal(str(row.get("fee_eur") or 0)) for row in sales),
-        "credits": sum(Decimal(str(row.get("credits_eur") or 0)) for row in purchases),
-        "rewards": len(rewards),
-        "balance": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
-        - sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases),
-    }
+    if grouped:
+        known_cycles = [cycle for cycle in cycles if cycle.get("balance_eur") is not None]
+        totals = {
+            "purchases": sum((cycle["purchase_cost_eur"] for cycle in known_cycles), Decimal("0")),
+            "sales_gross": sum(Decimal(str(cycle["sale"].get("gross_eur") or 0)) for cycle in known_cycles),
+            "sales_net": sum((cycle["sale_net_eur"] for cycle in known_cycles), Decimal("0")),
+            "fees": sum(Decimal(str(cycle["sale"].get("fee_eur") or 0)) for cycle in known_cycles),
+            "credits": sum(Decimal(str(cycle["purchase"].get("credits_eur") or 0)) for cycle in known_cycles),
+            "rewards": 0,
+            "balance": sum((cycle["balance_eur"] for cycle in known_cycles), Decimal("0")),
+        }
+    else:
+        totals = {
+            "purchases": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases),
+            "sales_gross": sum(Decimal(str(row.get("gross_eur") or 0)) for row in sales),
+            "sales_net": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales),
+            "fees": sum(Decimal(str(row.get("fee_eur") or 0)) for row in sales),
+            "credits": sum(Decimal(str(row.get("credits_eur") or 0)) for row in purchases),
+            "rewards": len(rewards),
+            "balance": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
+            - sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases),
+        }
     try:
         per_page = int(request.GET.get("per_page", 25))
     except ValueError:
         per_page = 25
     per_page = per_page if per_page in {25, 50, 100} else 25
-    page_obj = Paginator(rows, per_page).get_page(request.GET.get("page", 1))
+    display_rows = cycles if grouped else rows
+    page_obj = Paginator(display_rows, per_page).get_page(request.GET.get("page", 1))
     query = request.GET.copy()
     query.pop("page", None)
 
@@ -190,7 +226,7 @@ def movements(request):
         "snapshot": snapshot,
         "active_sync": active_sync,
         "page_obj": page_obj,
-        "total_rows": len(rows),
+        "total_rows": len(display_rows),
         "all_count": len(all_movements),
         "laliga_count": sum(row.get("category") == "laliga_inseason" for row in all_movements),
         "other_count": sum(row.get("category") == "other" for row in all_movements),
@@ -198,6 +234,7 @@ def movements(request):
         "available_rarities": sorted(rarities),
         "selected_category": category,
         "selected_direction": direction,
+        "grouped": grouped,
         "selected_rarity": rarity,
         "date_from": date_from,
         "date_to": date_to,

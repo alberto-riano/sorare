@@ -8,7 +8,7 @@ from sorare_utils import build_headers, graphql_request
 
 
 CARD_FIELDS = """
-  assetId slug name rarityTyped seasonYear inSeasonEligible pictureUrl
+  assetId slug name rarityTyped seasonYear serialNumber inSeasonEligible pictureUrl
   anyPlayer { slug displayName squaredPictureUrl }
   anyTeam {
     name pictureUrl
@@ -41,6 +41,8 @@ query CompletedTrades($first: Int!, $after: String) {
         ... on TokenOffer {
           id transactionDate dealStatus type settlementCurrencies cardPaymentProvider
           marketFeeAmounts { eurCents wei referenceCurrency }
+          sender { __typename ... on User { slug } }
+          receiver { __typename ... on User { slug } }
           userBuyer { slug } userSeller { slug }
           senderSide { amounts { eurCents wei referenceCurrency } anyCards { assetId } }
           receiverSide { amounts { eurCents wei referenceCurrency } anyCards { assetId } }
@@ -110,6 +112,7 @@ def _card(card: dict) -> dict:
         "team_picture_url": team.get("pictureUrl") or "",
         "rarity": str(card.get("rarityTyped") or "unknown").lower(),
         "season_year": card.get("seasonYear"),
+        "serial_number": card.get("serialNumber"),
         "in_season": bool(card.get("inSeasonEligible")),
         "league": league_name or "—",
         "is_laliga": is_laliga,
@@ -173,6 +176,18 @@ def _cash_side(operation: dict) -> dict:
     return max(candidates, key=lambda side: _money(side.get("amounts"))["eur"])
 
 
+def _unique_cards(cards: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    result = []
+    for card in cards:
+        key = str(card.get("asset_id") or card.get("card_slug") or id(card))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(card)
+    return result
+
+
 def _movement_from_group(
     entries: list[dict],
     current_slug: str,
@@ -187,6 +202,8 @@ def _movement_from_group(
     if typename in {"TokenOffer", "TokenPrimaryOffer"} and not operation.get("transactionDate"):
         return None
     cards = _cards_from_operation(operation, card_by_asset)
+    sent_cards: list[dict] = []
+    received_cards: list[dict] = []
     occurred_at = (
         operation.get("transactionDate")
         or (operation.get("auction") or {}).get("transactionDate")
@@ -194,6 +211,7 @@ def _movement_from_group(
         or entries[0].get("date")
     )
     direction = "other"
+    cash_direction = "other"
     market = "Movimiento"
     gross = _money(entries[0].get("amounts"))
     fee = {"eur": 0.0, "eth": 0.0, "currency": gross["currency"]}
@@ -201,16 +219,21 @@ def _movement_from_group(
 
     if typename == "TokenBid":
         direction, market = "purchase", "Subasta"
+        cash_direction = direction
         gross = _money(operation.get("amounts"))
         credits_eur = _money((operation.get("conversionCredit") or {}).get("totalDiscount"))["eur"]
+        received_cards = cards
     elif typename == "TokenPrimaryOffer":
         direction, market = "purchase", "Compra instantánea"
+        cash_direction = direction
         gross = _money(operation.get("price"))
+        received_cards = cards
     elif typename == "TokenOffer":
         buyer = str((operation.get("userBuyer") or {}).get("slug") or "").casefold()
         seller = str((operation.get("userSeller") or {}).get("slug") or "").casefold()
         own_slug = current_slug.casefold()
         direction = "sale" if seller == own_slug else "purchase" if buyer == own_slug else "other"
+        cash_direction = direction
         market = {
             "DIRECT_OFFER": "Oferta directa",
             "SINGLE_BUY_OFFER": "Oferta pública",
@@ -218,15 +241,45 @@ def _movement_from_group(
         }.get(operation.get("type"), "Oferta")
         gross = _money(_cash_side(operation).get("amounts"))
         fee = _money(operation.get("marketFeeAmounts"))
+        sender_cards = _cards_from_operation({
+            "__typename": "TokenPrimaryOffer",
+            "anyCards": (operation.get("senderSide") or {}).get("anyCards") or [],
+        }, card_by_asset)
+        receiver_cards = _cards_from_operation({
+            "__typename": "TokenPrimaryOffer",
+            "anyCards": (operation.get("receiverSide") or {}).get("anyCards") or [],
+        }, card_by_asset)
+        sender_slug = str((operation.get("sender") or {}).get("slug") or "").casefold()
+        receiver_slug = str((operation.get("receiver") or {}).get("slug") or "").casefold()
+        if sender_slug == own_slug:
+            sent_cards, received_cards = sender_cards, receiver_cards
+        elif receiver_slug == own_slug:
+            sent_cards, received_cards = receiver_cards, sender_cards
+        elif direction == "sale":
+            if sender_cards:
+                sent_cards, received_cards = sender_cards, receiver_cards
+            else:
+                sent_cards, received_cards = receiver_cards, sender_cards
+        elif direction == "purchase":
+            if sender_cards:
+                received_cards, sent_cards = sender_cards, receiver_cards
+            else:
+                received_cards, sent_cards = receiver_cards, sender_cards
+        cards = _unique_cards(sent_cards + received_cards)
+        if sent_cards and received_cards:
+            direction = "trade"
+            market = "Intercambio + dinero" if gross["eur"] else "Intercambio"
     elif typename in {"So5Reward", "TokenMonetaryReward"}:
         direction, market = "reward", "Recompensa"
+        cash_direction = direction
         gross = _money(operation.get("amount") or operation.get("amounts") or entries[0].get("amounts"))
+        received_cards = cards
     else:
         return None
 
     gross_eur = gross["eur"]
-    fee_eur = fee["eur"] if direction == "sale" else 0.0
-    if direction == "sale":
+    fee_eur = fee["eur"] if cash_direction == "sale" else 0.0
+    if cash_direction == "sale":
         net_eur = max(gross_eur - fee_eur, 0.0)
         fee_eur = max(gross_eur - net_eur, fee_eur)
     else:
@@ -237,9 +290,12 @@ def _movement_from_group(
         "id": str(operation_id),
         "occurred_at": occurred_at,
         "direction": direction,
+        "cash_direction": cash_direction,
         "market": market,
         "category": category,
         "cards": cards,
+        "sent_cards": sent_cards,
+        "received_cards": received_cards,
         "gross_eur": round(gross_eur, 2),
         "net_eur": round(net_eur, 2),
         "fee_eur": round(fee_eur, 2),
@@ -261,6 +317,8 @@ def _card_reward(node: dict) -> dict | None:
         "market": "Recompensa de carta",
         "category": "laliga_inseason" if card["is_laliga"] and card["in_season"] else "other",
         "cards": [card],
+        "sent_cards": [],
+        "received_cards": [card],
         "gross_eur": 0.0,
         "net_eur": 0.0,
         "fee_eur": 0.0,
@@ -269,6 +327,107 @@ def _card_reward(node: dict) -> dict | None:
         "eth": 0.0,
         "entry_types": ["REWARD"],
     }
+
+
+def _movement_timestamp(movement: dict) -> datetime:
+    value = movement.get("occurred_at")
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _player_card_key(card: dict) -> tuple:
+    return (
+        card.get("player_slug") or str(card.get("player") or "").casefold(),
+        card.get("rarity"),
+        card.get("season_year"),
+        bool(card.get("in_season")),
+    )
+
+
+def build_trade_cycles(movements: list[dict]) -> list[dict]:
+    """Empareja adquisiciones y ventas, priorizando el assetId exacto y FIFO."""
+    open_positions: list[dict] = []
+    cycles: list[dict] = []
+    for movement in sorted(movements, key=_movement_timestamp):
+        sent_cards = movement.get("sent_cards") or (
+            movement.get("cards") or [] if movement.get("direction") == "sale" else []
+        )
+        received_cards = movement.get("received_cards") or (
+            movement.get("cards") or [] if movement.get("direction") == "purchase" else []
+        )
+
+        for sold_card in sent_cards:
+            sold_asset = str(sold_card.get("asset_id") or "")
+            exact_index = next((
+                index for index, position in enumerate(open_positions)
+                if sold_asset and str(position["card"].get("asset_id") or "") == sold_asset
+            ), None)
+            match_index = exact_index
+            if match_index is None:
+                sold_key = _player_card_key(sold_card)
+                match_index = next((
+                    index for index, position in enumerate(open_positions)
+                    if _player_card_key(position["card"]) == sold_key
+                ), None)
+            if match_index is None:
+                continue
+
+            purchase = open_positions.pop(match_index)
+            exact_card = exact_index is not None
+            sale_cash_direction = movement.get("cash_direction") or movement.get("direction")
+            sale_net = Decimal(str(movement.get("net_eur") or 0)) if len(sent_cards) == 1 and sale_cash_direction == "sale" else None
+            purchase_cost = purchase.get("cost_eur")
+            balance = sale_net - purchase_cost if sale_net is not None and purchase_cost is not None else None
+            notes = []
+            if not exact_card:
+                buy_serial = purchase["card"].get("serial_number")
+                sell_serial = sold_card.get("serial_number")
+                notes.append(
+                    f"Cartas distintas: compra #{buy_serial or '—'} · venta #{sell_serial or '—'}"
+                )
+            received_in_trade = movement.get("received_cards") or []
+            if received_in_trade:
+                names = ", ".join(card.get("player") or "Carta" for card in received_in_trade)
+                notes.append(f"La venta incluyó recibir {names}; el balance mostrado solo contempla el efectivo")
+            if len(sent_cards) > 1:
+                notes.append("Venta conjunta: no se puede repartir el importe con precisión entre las cartas")
+            if purchase_cost is None:
+                notes.append("Coste de adquisición no determinable porque la carta llegó en un intercambio o lote")
+
+            cycles.append({
+                "id": f"cycle:{purchase['movement'].get('id')}:{movement.get('id')}:{sold_asset}",
+                "occurred_at": movement.get("occurred_at"),
+                "purchase_at": purchase["movement"].get("occurred_at"),
+                "sale_at": movement.get("occurred_at"),
+                "purchase": purchase["movement"],
+                "sale": movement,
+                "purchase_card": purchase["card"],
+                "sale_card": sold_card,
+                "exact_card": exact_card,
+                "purchase_cost_eur": purchase_cost,
+                "sale_net_eur": sale_net,
+                "balance_eur": balance,
+                "notes": notes,
+            })
+
+        for received_card in received_cards:
+            known_cost = (
+                Decimal(str(movement.get("net_eur") or 0))
+                if len(received_cards) == 1
+                and not sent_cards
+                and (movement.get("cash_direction") or movement.get("direction")) == "purchase"
+                else None
+            )
+            open_positions.append({
+                "card": received_card,
+                "movement": movement,
+                "cost_eur": known_cost,
+            })
+
+    cycles.sort(key=lambda cycle: str(cycle.get("sale_at") or ""), reverse=True)
+    return cycles
 
 
 def collect_movement_history(
