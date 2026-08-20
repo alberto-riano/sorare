@@ -27,7 +27,7 @@ from sorare_utils import get_latest_prices
 from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler, run_card_sale
 from web_services.sales_inventory import collection_display_name
 from web_services.movement_history import (
-    _movement_from_group, _operation_from_trade, build_trade_cycles,
+    _account_currency, _movement_from_group, _operation_from_trade, build_trade_cycles,
     collect_movement_history,
 )
 
@@ -750,7 +750,7 @@ class MovementHistoryTests(TestCase):
         operation = {
             "__typename": "TokenBid", "id": "bid-1", "createdAt": "2026-08-19T10:00:00Z",
             "fiatPayment": True, "amounts": {"eurCents": 650, "referenceCurrency": "EUR"},
-            "conversionCredit": None, "auction": {"transactionDate": "2026-08-19T10:00:00Z", "anyCards": [card]},
+            "conversionCredit": None, "auction": {"transactionDate": "2026-08-19T10:00:00Z", "currency": "EUR", "anyCards": [card]},
         }
         movement = _movement_from_group([{
             "id": "entry-2", "date": "2026-08-19T10:00:00Z", "entryType": "PAYMENT",
@@ -775,9 +775,10 @@ class MovementHistoryTests(TestCase):
     def test_completed_auction_uses_only_the_credit_actually_applied(self):
         trade = {
             "__typename": "TokenAuction", "id": "auction-won", "transactionDate": "2026-08-20T10:00:00Z",
+            "currency": "EUR",
             "anyCards": [self._api_card()],
             "bestBid": {
-                "id": "winning-bid", "fiatPayment": True,
+                "id": "winning-bid", "fiatPayment": False,
                 "amounts": {
                     "eurCents": 650, "wei": "3900000000000000",
                     "referenceCurrency": "WEI",
@@ -786,6 +787,7 @@ class MovementHistoryTests(TestCase):
             },
         }
         operation = _operation_from_trade(trade)
+        operation["paymentCurrency"] = "EUR"
         movement = _movement_from_group([{
             "id": "winning-bid", "date": trade["transactionDate"], "entryType": "PAYMENT",
             "amounts": operation["amounts"], "tokenOperation": operation,
@@ -799,12 +801,13 @@ class MovementHistoryTests(TestCase):
         operation = {
             "__typename": "TokenBid", "id": "crypto-bid", "createdAt": "2026-08-20T10:00:00Z",
             "fiatPayment": False,
+            "paymentCurrency": "ETH",
             "amounts": {
                 "eurCents": 650, "wei": "3900000000000000",
                 "referenceCurrency": "WEI",
             },
             "conversionCredit": None,
-            "auction": {"transactionDate": "2026-08-20T10:00:00Z", "anyCards": [self._api_card()]},
+            "auction": {"transactionDate": "2026-08-20T10:00:00Z", "currency": "WEI", "anyCards": [self._api_card()]},
         }
 
         movement = _movement_from_group([{
@@ -813,6 +816,17 @@ class MovementHistoryTests(TestCase):
         }], "burguis")
 
         self.assertEqual(movement["currency"], "ETH")
+
+    def test_payment_account_identifies_wallet_currency_without_using_reference_currency(self):
+        fiat_entry = {
+            "account": {"accountable": {"__typename": "FiatWalletAccount", "currency": "EUR"}},
+        }
+        eth_entry = {
+            "account": {"accountable": {"__typename": "StarkwareAccount"}},
+        }
+
+        self.assertEqual(_account_currency(fiat_entry), "EUR")
+        self.assertEqual(_account_currency(eth_entry), "ETH")
 
     def test_essence_reward_reports_quantity_instead_of_card_or_eur(self):
         operation = {
@@ -834,11 +848,14 @@ class MovementHistoryTests(TestCase):
 
         self.assertEqual(movement["essence_quantity"], 20)
         self.assertEqual(movement["essence_description"], "Rare")
+        self.assertEqual(movement["reward_type"], "essence")
+        self.assertEqual(movement["reward_rarity"], "rare")
         self.assertEqual(movement["currency"], "")
 
-        MovementSnapshot.objects.create(user=self.user, movements=[movement], source_version=5)
-        response = self.client.get(reverse("movements"), {"category": "reward"})
+        MovementSnapshot.objects.create(user=self.user, movements=[movement], source_version=6)
+        response = self.client.get(reverse("movements"), {"category": "reward", "reward_type": "essence"})
         self.assertContains(response, "+20 Esencia")
+        self.assertContains(response, "reward-kind reward-essence rarity-rare")
         self.assertNotContains(response, ">Carta<")
 
     def test_trade_cycles_match_exact_card_and_calculate_balance(self):
@@ -877,7 +894,8 @@ class MovementHistoryTests(TestCase):
         card = self._api_card()
         completed = {
             "__typename": "TokenAuction", "id": "auction-completed",
-            "transactionDate": "2026-08-20T10:00:00Z", "anyCards": [{"assetId": card["assetId"]}],
+            "transactionDate": "2026-08-20T10:00:00Z", "currency": "EUR",
+            "anyCards": [{"assetId": card["assetId"]}],
             "bestBid": {"id": "bid-completed", "fiatPayment": True, "amounts": {"eurCents": 650, "referenceCurrency": "EUR"}, "conversionCredit": None},
         }
         open_auction = dict(completed, id="auction-open", transactionDate=None)
@@ -885,6 +903,12 @@ class MovementHistoryTests(TestCase):
         def response(query, _variables, headers=None):
             if "CompletedTrades" in query:
                 return {"currentUser": {"slug": "burguis", "trades": {"nodes": [open_auction, completed], "pageInfo": {"hasNextPage": False}}}}
+            if "MovementPaymentAccounts" in query:
+                return {"currentUser": {"accountEntries": {"nodes": [{
+                    "id": "payment-entry", "provisional": False, "aasmState": "CONFIRMED",
+                    "account": {"accountable": {"__typename": "FiatWalletAccount", "currency": "EUR"}},
+                    "tokenOperation": {"__typename": "TokenBid", "id": "bid-completed"},
+                }], "pageInfo": {"hasNextPage": False}}}}
             if "GameweekRewards" in query:
                 return {"so5": {"allSo5Fixtures": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
             if "MovementCards" in query:
@@ -894,6 +918,7 @@ class MovementHistoryTests(TestCase):
         request.side_effect = response
         movements = collect_movement_history(headers={"Authorization": "test"})
         self.assertEqual([movement["id"] for movement in movements], ["bid-completed"])
+        self.assertEqual(movements[0]["currency"], "EUR")
 
     @patch("dashboard.management.commands.process_sales_queue.collect_movement_history")
     def test_background_sync_replaces_snapshot_only_after_success(self, collect):
@@ -904,7 +929,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
         snapshot = MovementSnapshot.objects.get(user=self.user)
         self.assertEqual(snapshot.movements[0]["id"], "movement-1")
-        self.assertEqual(snapshot.source_version, 5)
+        self.assertEqual(snapshot.source_version, 6)
 
     @patch("web_services.movement_history.graphql_request")
     def test_collector_adds_confirmed_gameweek_rewards(self, request):
@@ -924,6 +949,8 @@ class MovementHistoryTests(TestCase):
         def response(query, _variables, headers=None):
             if "CompletedTrades" in query:
                 return {"currentUser": {"slug": "burguis", "trades": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "MovementPaymentAccounts" in query:
+                return {"currentUser": {"accountEntries": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
             if "GameweekRewards" in query:
                 return {"so5": {"allSo5Fixtures": {"nodes": [{
                     "id": "fixture-12", "mySo5Rewards": [reward_operation],
@@ -940,8 +967,30 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(len(movements), 1)
         self.assertEqual(movements[0]["direction"], "reward")
         self.assertEqual(movements[0]["category"], "reward")
-        self.assertEqual(movements[0]["market"], "Recompensa de jornada · GW 12 · Rare · Puesto 25")
+        self.assertEqual(movements[0]["market"], "GW 12 · Rare · Puesto 25")
         self.assertEqual(movements[0]["gross_eur"], 5.0)
+
+    def test_reward_filter_separates_money_essence_and_cards(self):
+        base = {
+            "occurred_at": "2026-08-18T20:00:00Z", "direction": "reward",
+            "cash_direction": "reward", "market": "GW5", "category": "reward",
+            "gross_eur": 0, "eth": 0, "currency": "", "cards": [],
+            "essence": [], "essence_quantity": 0,
+        }
+        money = dict(base, id="money", reward_type="money", gross_eur=22.46, currency="ETH")
+        essence = dict(base, id="essence", reward_type="essence", reward_rarity="super_rare",
+                       essence=[{"quantity": 10, "rarity": "super_rare"}], essence_quantity=10)
+        card_data = {"asset_id": "reward-card", "player": "Carta premio", "team": "Equipo", "rarity": "limited"}
+        card = dict(base, id="card", reward_type="card", reward_rarity="limited", cards=[card_data])
+        MovementSnapshot.objects.create(user=self.user, movements=[money, essence, card], source_version=6)
+
+        response = self.client.get(reverse("movements"), {"category": "reward", "reward_type": "essence"})
+
+        self.assertEqual(response.context["total_rows"], 1)
+        self.assertContains(response, "+10 Esencia")
+        self.assertContains(response, "rarity-super_rare")
+        self.assertNotContains(response, "22,46 €")
+        self.assertNotContains(response, "Carta premio")
 
     def test_page_filters_category_rarity_and_calculates_totals(self):
         MovementSnapshot.objects.create(user=self.user, refreshed_at=datetime.now(tz=ZoneInfo("Europe/Madrid")), movements=[

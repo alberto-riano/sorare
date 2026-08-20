@@ -1314,7 +1314,7 @@ body.modal-open { overflow: hidden; }
 .is-in { color: var(--good) !important; }
 .movement-results { min-width: 0; }
 .movement-help { color: var(--muted); font-size: .82rem; }
-.movement-filters { display: grid; grid-template-columns: repeat(7,minmax(115px,1fr)); gap: .65rem; align-items: end; margin: 1rem 0; }
+.movement-filters { display: grid; grid-template-columns: repeat(auto-fit,minmax(135px,1fr)); gap: .65rem; align-items: end; margin: 1rem 0; }
 .movement-filters label { min-width: 0; }
 .movement-filters input, .movement-filters select { width: 100%; min-height: 44px; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); font: inherit; }
 .movement-clear { min-height: 44px; justify-content: center; }
@@ -1337,6 +1337,16 @@ body.modal-open { overflow: hidden; }
 .kind-sale { color: #166534; background: #dcfce7; }
 .kind-reward { color: #854d0e; background: #fef9c3; }
 .kind-trade { color: #5b21b6; background: #ede9fe; }
+.reward-object { display: flex; align-items: center; gap: .7rem; }
+.reward-object-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 auto; border-radius: 14px; font-size: 1.05rem; }
+.reward-object small { display: block; margin-top: .12rem; color: var(--muted); }
+.reward-money .reward-object-icon, .reward-kind.reward-money { color: #166534; background: #dcfce7; }
+.reward-card .reward-object-icon, .reward-kind.reward-card, .reward-card-value { color: #5b21b6; background: #ede9fe; }
+.reward-object.rarity-limited .reward-object-icon, .reward-kind.rarity-limited, .reward-value.rarity-limited { color: #854d0e; background: #fef3c7; }
+.reward-object.rarity-rare .reward-object-icon, .reward-kind.rarity-rare, .reward-value.rarity-rare { color: #991b1b; background: #fee2e2; }
+.reward-object.rarity-super_rare .reward-object-icon, .reward-kind.rarity-super_rare, .reward-value.rarity-super_rare { color: #1e40af; background: #dbeafe; }
+.reward-value { display: inline-flex; align-items: center; gap: .35rem; width: max-content; padding: .32rem .5rem; border-radius: 9px; }
+.reward-card-value { padding: .32rem .5rem; border-radius: 9px; }
 .movement-amount { min-width: 210px; }
 .movement-amount > span { display: inline-grid; gap: .08rem; margin-right: .9rem; }
 .movement-amount small { color: var(--muted); }

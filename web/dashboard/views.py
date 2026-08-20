@@ -124,7 +124,7 @@ def _movement_datetime(value):
 
 def movements(request):
     stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-    snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 5 else None
+    snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 6 else None
     active_sync = MovementSyncJob.objects.filter(
         user=request.user,
         status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -138,6 +138,9 @@ def movements(request):
         category = "laliga_inseason"
     direction = request.GET.get("direction", "")
     rarity = request.GET.get("rarity", "")
+    reward_type = request.GET.get("reward_type", "")
+    if reward_type not in {"money", "essence", "card"}:
+        reward_type = ""
     player = request.GET.get("player", "").strip().casefold()
     date_from = request.GET.get("date_from", "").strip()
     date_to = request.GET.get("date_to", "").strip()
@@ -148,13 +151,31 @@ def movements(request):
         row = dict(raw)
         cards = row.get("cards") or []
         rarities.update(card.get("rarity") for card in cards if card.get("rarity"))
+        essence = row.get("essence") or []
+        rarities.update(item.get("rarity") for item in essence if item.get("rarity"))
+        if row.get("direction") == "reward":
+            row["reward_type"] = row.get("reward_type") or (
+                "money" if row.get("gross_eur") or row.get("eth")
+                else "essence" if row.get("essence_quantity")
+                else "card" if cards
+                else ""
+            )
+            row["reward_rarity"] = row.get("reward_rarity") or (
+                str((essence[0] if essence else {}).get("rarity") or "")
+                or str((cards[0] if cards else {}).get("rarity") or "")
+            )
         occurred_at = _movement_datetime(row.get("occurred_at"))
         row["occurred_at_dt"] = occurred_at
         if category != "all" and row.get("category") != category:
             continue
         if direction and row.get("direction") != direction and row.get("cash_direction") != direction:
             continue
-        if rarity and not any(card.get("rarity") == rarity for card in cards):
+        if reward_type and row.get("reward_type") != reward_type:
+            continue
+        if rarity and not (
+            any(card.get("rarity") == rarity for card in cards)
+            or any(item.get("rarity") == rarity for item in essence)
+        ):
             continue
         if player and not any(player in str(card.get("player", "")).casefold() for card in cards):
             continue
@@ -225,6 +246,7 @@ def movements(request):
         "selected_category": category,
         "selected_direction": direction,
         "selected_rarity": rarity,
+        "selected_reward_type": reward_type,
         "date_from": date_from,
         "date_to": date_to,
         "per_page": per_page,

@@ -60,6 +60,31 @@ query CompletedTrades($first: Int!, $after: String) {
 }
 """
 
+PAYMENT_ACCOUNTS_QUERY = """
+query MovementPaymentAccounts($first: Int!, $after: String) {
+  currentUser {
+    accountEntries(first: $first, after: $after, entryType: [PAYMENT]) {
+      nodes {
+        id provisional aasmState
+        account {
+          accountable {
+            __typename
+            ... on FiatWalletAccount { currency }
+          }
+        }
+        tokenOperation {
+          __typename
+          ... on TokenBid { id }
+          ... on TokenOffer { id }
+          ... on TokenPrimaryOffer { id }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+
 REWARD_ENTRIES_QUERY = """
 query RewardEntries($first: Int!, $after: String) {
   currentUser {
@@ -158,13 +183,15 @@ def _money(amounts: dict | None) -> dict:
     }
 
 
-def _settlement_currency(values: list | None) -> str:
-    normalized = {
-        "ETH" if str(value).upper() == "WEI" else str(value).upper()
-        for value in values or []
-        if value
-    }
-    return next(iter(normalized)) if len(normalized) == 1 and normalized <= {"EUR", "ETH"} else ""
+def _account_currency(entry: dict) -> str:
+    accountable = ((entry.get("account") or {}).get("accountable") or {})
+    typename = str(accountable.get("__typename") or "")
+    if typename == "FiatWalletAccount":
+        currency = str(accountable.get("currency") or "").upper()
+        return currency if currency in {"EUR", "GBP", "USD"} else ""
+    if typename in {"EthereumAccount", "StarkwareAccount", "LoomAccount"}:
+        return "ETH"
+    return ""
 
 
 def _essence_from_operation(operation: dict) -> list[dict]:
@@ -310,19 +337,16 @@ def _movement_from_group(
         direction, market = "purchase", "Subasta"
         cash_direction = direction
         gross = _money(operation.get("amounts"))
-        if operation.get("fiatPayment") is True:
+        gross["currency"] = str(operation.get("paymentCurrency") or "")
+        if not gross["currency"] and operation.get("fiatPayment") is True:
             gross["currency"] = "EUR"
-        elif operation.get("fiatPayment") is False:
-            gross["currency"] = "ETH"
-        else:
-            gross["currency"] = ""
         credits_eur = _money((operation.get("conversionCredit") or {}).get("totalDiscount"))["eur"]
         received_cards = cards
     elif typename == "TokenPrimaryOffer":
         direction, market = "purchase", "Compra instantánea"
         cash_direction = direction
         gross = _money(operation.get("price"))
-        gross["currency"] = ""
+        gross["currency"] = str(operation.get("paymentCurrency") or "")
         received_cards = cards
     elif typename == "TokenOffer":
         buyer = str((operation.get("userBuyer") or {}).get("slug") or "").casefold()
@@ -343,7 +367,7 @@ def _movement_from_group(
                 "SINGLE_SALE_OFFER": "Compra instantánea",
             }.get(operation.get("type"), "Oferta")
         gross = _money(_cash_side(operation).get("amounts"))
-        gross["currency"] = _settlement_currency(operation.get("settlementCurrencies"))
+        gross["currency"] = str(operation.get("paymentCurrency") or "")
         fee = _money(operation.get("marketFeeAmounts"))
         sender_cards = _cards_from_operation({
             "__typename": "TokenPrimaryOffer",
@@ -405,6 +429,17 @@ def _movement_from_group(
         label = item["rarity"].replace("_", " ").title()
         if label and label not in essence_labels:
             essence_labels.append(label)
+    reward_type = ""
+    reward_rarity = ""
+    if direction == "reward":
+        if gross["eur"] or gross["eth"]:
+            reward_type = "money"
+        elif essence_quantity:
+            reward_type = "essence"
+            reward_rarity = str((essence[0] if essence else {}).get("rarity") or "")
+        elif cards:
+            reward_type = "card"
+            reward_rarity = str((cards[0] if cards else {}).get("rarity") or "")
     return {
         "id": str(operation_id),
         "occurred_at": occurred_at,
@@ -424,16 +459,18 @@ def _movement_from_group(
         "essence": essence,
         "essence_quantity": essence_quantity,
         "essence_description": " / ".join(essence_labels),
+        "reward_type": reward_type,
+        "reward_rarity": reward_rarity,
         "entry_types": sorted({entry.get("entryType") for entry in entries if entry.get("entryType")}),
     }
 
 
 def _reward_market(operation: dict) -> str:
     if operation.get("__typename") != "So5Reward":
-        return "Recompensa monetaria"
+        return "Premio monetario"
     fixture = operation.get("so5Fixture") or {}
     leaderboard = operation.get("so5Leaderboard") or {}
-    parts = ["Recompensa de jornada"]
+    parts = []
     if fixture.get("shortDisplayName"):
         parts.append(str(fixture["shortDisplayName"]))
     elif fixture.get("gameWeek") is not None:
@@ -443,7 +480,7 @@ def _reward_market(operation: dict) -> str:
     ranking = (operation.get("so5Ranking") or {}).get("ranking")
     if ranking is not None:
         parts.append(f"Puesto {ranking}")
-    return " · ".join(parts)
+    return " · ".join(parts) or "Jornada"
 
 
 def _movement_timestamp(movement: dict) -> datetime:
@@ -607,6 +644,33 @@ def collect_movement_history(
         cursor = page_info.get("endCursor")
 
     operations = [operation for trade in trades if (operation := _operation_from_trade(trade))]
+
+    payment_currencies: dict[str, set[str]] = {}
+    cursor = None
+    payment_page = 0
+    while True:
+        payment_page += 1
+        data = graphql_request(PAYMENT_ACCOUNTS_QUERY, {"first": 100, "after": cursor}, headers=headers)
+        connection = ((data.get("currentUser") or {}).get("accountEntries") or {})
+        for entry in connection.get("nodes") or []:
+            operation_id = str((entry.get("tokenOperation") or {}).get("id") or "")
+            currency = _account_currency(entry)
+            if (
+                operation_id
+                and currency
+                and not entry.get("provisional")
+                and entry.get("aasmState") == "CONFIRMED"
+            ):
+                payment_currencies.setdefault(operation_id, set()).add(currency)
+        if progress:
+            progress(len(trades), f"Verificando monedas de pago · página {payment_page}")
+        page_info = connection.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+    for operation in operations:
+        currencies = payment_currencies.get(str(operation.get("id") or ""), set())
+        operation["paymentCurrency"] = next(iter(currencies)) if len(currencies) == 1 else ""
 
     reward_entries: list[dict] = []
     cursor = None
