@@ -147,7 +147,7 @@ def movements(request):
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
         stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 8 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 9 else None
         active_sync = MovementSyncJob.objects.filter(
             user=request.user,
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -163,6 +163,9 @@ def movements(request):
     if reward_type not in {"money", "essence", "card"}:
         reward_type = ""
     player = request.GET.get("player", "").strip().casefold()
+    credit_usage = request.GET.get("credit_usage", "")
+    if credit_usage != "used":
+        credit_usage = ""
     requested_date_from = request.GET.get("date_from")
     date_from = "2026-08-13" if requested_date_from is None else requested_date_from.strip()
     date_to = request.GET.get("date_to", "").strip()
@@ -208,6 +211,9 @@ def movements(request):
             continue
         if player and not any(player in str(card.get("player", "")).casefold() for card in cards):
             continue
+        row_credits = Decimal(str(row.get("credits_eur") or 0))
+        if credit_usage == "used" and row_credits <= 0:
+            continue
         local_occurred_at = occurred_at.astimezone(ZoneInfo("Europe/Madrid")) if occurred_at else None
         iso_date = local_occurred_at.date().isoformat() if local_occurred_at else ""
         if date_from and iso_date < date_from:
@@ -226,6 +232,9 @@ def movements(request):
             if rarity and not any(card.get("rarity") == rarity for card in cycle_cards):
                 continue
             if player and not any(player in str(card.get("player") or "").casefold() for card in cycle_cards):
+                continue
+            cycle_credits = Decimal(str((cycle.get("purchase") or {}).get("credits_eur") or 0))
+            if credit_usage == "used" and cycle_credits <= 0:
                 continue
             local_cycle_at = cycle_at.astimezone(ZoneInfo("Europe/Madrid")) if cycle_at else None
             cycle_date = local_cycle_at.date().isoformat() if local_cycle_at else ""
@@ -301,6 +310,7 @@ def movements(request):
         "sales_net": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales),
         "fees": sum(Decimal(str(row.get("fee_eur") or 0)) for row in summary_rows),
         "credits": sum(Decimal(str(row.get("credits_eur") or 0)) for row in purchases),
+        "credit_purchase_count": sum(Decimal(str(row.get("credits_eur") or 0)) > 0 for row in purchases),
         "purchase_count": len(purchases),
         "purchases_inseason": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases_inseason),
         "purchases_classic": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases_classic),
@@ -348,6 +358,7 @@ def movements(request):
         "selected_direction": direction,
         "selected_rarity": rarity,
         "selected_reward_type": reward_type,
+        "selected_credit_usage": credit_usage,
         "selected_manager": selected_manager,
         "manager_nickname": manager_nickname,
         "public_rewards": public_rewards,

@@ -488,7 +488,7 @@ def _movement_from_group(
         "reward"
         if direction == "reward"
         else "laliga_inseason"
-        if cards and any(card["is_laliga"] and card["in_season"] for card in cards)
+        if cards and any(card["is_laliga"] for card in cards)
         else "other"
     )
     operation_id = operation.get("id") or entries[0].get("id")
@@ -686,7 +686,7 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
                     purchase["movement"].get("category"),
                     movement.get("category"),
                 } or any(
-                    bool(card.get("is_laliga") and card.get("in_season"))
+                    bool(card.get("is_laliga"))
                     for card in (purchase["card"], sold_card)
                 )
                 else "other"
@@ -950,7 +950,8 @@ def collect_movement_history(
         cursor = page_info.get("endCursor")
     for operation in operations:
         currencies = payment_currencies.get(str(operation.get("id") or ""), set())
-        operation["paymentCurrency"] = next(iter(currencies)) if len(currencies) == 1 else ""
+        payment_currency = next(iter(currencies)) if len(currencies) == 1 else ""
+        operation["paymentCurrency"] = payment_currency
         operation_id = str(operation.get("id") or "")
         if operation_id in payment_amounts_eur:
             operation["paidEur"] = float(payment_amounts_eur[operation_id])

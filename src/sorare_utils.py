@@ -9,6 +9,7 @@ import requests
 import sys
 import os
 import re
+import time
 
 SORARE_API_URL = "https://api.sorare.com/graphql"
 DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'config.txt')
@@ -59,7 +60,16 @@ def graphql_request(query, variables=None, headers=None):
     payload = {'query': query}
     if variables:
         payload['variables'] = variables
-    resp = requests.post(SORARE_API_URL, json=payload, headers=headers, timeout=30)
+    resp = None
+    for attempt in range(4):
+        resp = requests.post(SORARE_API_URL, json=payload, headers=headers, timeout=30)
+        if resp.status_code != 429 or attempt == 3:
+            break
+        try:
+            retry_after = float(resp.headers.get("Retry-After") or 5)
+        except (TypeError, ValueError):
+            retry_after = 5
+        time.sleep(max(1, min(retry_after, 60)))
     resp.raise_for_status()
     data = resp.json()
     if 'errors' in data:
