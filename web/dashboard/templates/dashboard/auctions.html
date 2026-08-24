@@ -1,4 +1,5 @@
 {% extends 'dashboard/base.html' %}
+{% load dashboard_filters %}
 
 {% block title %}Subastas Rare LaLiga 2026-2027 | Sorare{% endblock %}
 
@@ -35,7 +36,7 @@
   <div class="balance-heading"><i class="fas fa-wallet"></i><span>Disponible para pujar</span></div>
   {% if account_balances %}
     <div class="balance-item"><small>EUR</small><strong>{{ account_balances.eur|floatformat:2 }} €</strong></div>
-    <div class="balance-item"><small>ETH</small><strong>{{ account_balances.eth|floatformat:6 }} ETH</strong></div>
+    <div class="balance-item"><small>ETH</small><strong>{{ account_balances.eth|eth_amount }} ETH</strong></div>
     <div class="balance-item"><small>Créditos</small><strong>{{ account_balances.credits_eur|floatformat:2 }} €</strong></div>
   {% else %}
     <span class="balance-unavailable">{{ balance_error|default:"Saldo no disponible" }}</span>
@@ -226,7 +227,7 @@
       <div class="modal-balances">
         {% if account_balances %}
           <span><small>EUR</small><strong>{{ account_balances.eur|floatformat:2 }} €</strong></span>
-          <span><small>ETH</small><strong>{{ account_balances.eth|floatformat:6 }} ETH</strong></span>
+          <span><small>ETH</small><strong>{{ account_balances.eth|eth_amount }} ETH</strong></span>
           <span><small>Créditos</small><strong>{{ account_balances.credits_eur|floatformat:2 }} €</strong></span>
         {% else %}<span class="balance-unavailable">Saldo no disponible</span>{% endif %}
       </div>

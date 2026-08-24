@@ -1,4 +1,5 @@
 {% extends "dashboard/base.html" %}
+{% load dashboard_filters %}
 
 {% block title %}Ofertas Recibidas – Sorare Command Center{% endblock %}
 
@@ -71,7 +72,7 @@
         </div>
         <div class="price-right">
             <span class="price-eur">{{ offer.eur_they_send|floatformat:2 }} €</span>
-            <span class="price-eth">{{ offer.eth_they_send|floatformat:4 }} ETH</span>
+            <span class="price-eth">{{ offer.eth_they_send|eth_amount }} ETH</span>
         </div>
     </div>
     {% endif %}
@@ -83,7 +84,7 @@
         </div>
         <div class="price-right">
             <span class="price-eur">{{ offer.eur_they_ask|floatformat:2 }} €</span>
-            <span class="price-eth">{{ offer.eth_they_ask|floatformat:4 }} ETH</span>
+            <span class="price-eth">{{ offer.eth_they_ask|eth_amount }} ETH</span>
         </div>
     </div>
     {% endif %}

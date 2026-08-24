@@ -147,7 +147,7 @@ def movements(request):
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
         stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 9 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 10 else None
         active_sync = MovementSyncJob.objects.filter(
             user=request.user,
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -158,11 +158,16 @@ def movements(request):
 
     all_movements = list(snapshot.movements if snapshot else [])
     direction = request.GET.get("direction", "")
+    allowed_rarities = {"limited", "rare", "super_rare", "unique"}
     rarity = request.GET.get("rarity", "")
+    if rarity not in allowed_rarities:
+        rarity = ""
     reward_type = request.GET.get("reward_type", "")
     if reward_type not in {"money", "essence", "card"}:
         reward_type = ""
-    player = request.GET.get("player", "").strip().casefold()
+    seasonality = request.GET.get("seasonality", "")
+    if seasonality not in {"inseason", "classic"}:
+        seasonality = ""
     credit_usage = request.GET.get("credit_usage", "")
     if credit_usage != "used":
         credit_usage = ""
@@ -175,9 +180,9 @@ def movements(request):
     for raw in all_movements:
         row = dict(raw)
         cards = row.get("cards") or []
-        rarities.update(card.get("rarity") for card in cards if card.get("rarity"))
+        rarities.update(card.get("rarity") for card in cards if card.get("rarity") in allowed_rarities)
         essence = row.get("essence") or []
-        rarities.update(item.get("rarity") for item in essence if item.get("rarity"))
+        rarities.update(item.get("rarity") for item in essence if item.get("rarity") in allowed_rarities)
         if row.get("direction") == "reward":
             row["reward_type"] = row.get("reward_type") or (
                 "money" if row.get("gross_eur") or row.get("eth")
@@ -209,7 +214,9 @@ def movements(request):
             or any(item.get("rarity") == rarity for item in essence)
         ):
             continue
-        if player and not any(player in str(card.get("player", "")).casefold() for card in cards):
+        if seasonality == "inseason" and not any(bool(card.get("in_season")) for card in cards):
+            continue
+        if seasonality == "classic" and not any(not bool(card.get("in_season")) for card in cards):
             continue
         row_credits = Decimal(str(row.get("credits_eur") or 0))
         if credit_usage == "used" and row_credits <= 0:
@@ -231,7 +238,10 @@ def movements(request):
                 continue
             if rarity and not any(card.get("rarity") == rarity for card in cycle_cards):
                 continue
-            if player and not any(player in str(card.get("player") or "").casefold() for card in cycle_cards):
+            cycle_season_cards = cycle_cards + list(cycle.get("trade_received_cards") or [])
+            if seasonality == "inseason" and not any(bool(card.get("in_season")) for card in cycle_season_cards):
+                continue
+            if seasonality == "classic" and not any(not bool(card.get("in_season")) for card in cycle_season_cards):
                 continue
             cycle_credits = Decimal(str((cycle.get("purchase") or {}).get("credits_eur") or 0))
             if credit_usage == "used" and cycle_credits <= 0:
@@ -358,6 +368,7 @@ def movements(request):
         "selected_direction": direction,
         "selected_rarity": rarity,
         "selected_reward_type": reward_type,
+        "selected_seasonality": seasonality,
         "selected_credit_usage": credit_usage,
         "selected_manager": selected_manager,
         "manager_nickname": manager_nickname,

@@ -35,8 +35,22 @@ query CompletedTrades($first: Int!, $after: String) {
           bestBid {
             id fiatPayment
             amounts { eurCents wei referenceCurrency }
-            conversionCredit { totalDiscount { eurCents wei referenceCurrency } }
-            conversionCredits { id totalDiscount { eurCents wei referenceCurrency } }
+            conversionCredit {
+              id status totalDiscount { eurCents wei referenceCurrency }
+              purchase {
+                __typename
+                ... on TokenAuction { id }
+                ... on TokenPrimaryOffer { id }
+              }
+            }
+            conversionCredits {
+              id status totalDiscount { eurCents wei referenceCurrency }
+              purchase {
+                __typename
+                ... on TokenAuction { id }
+                ... on TokenPrimaryOffer { id }
+              }
+            }
           }
         }
         ... on TokenOffer {
@@ -338,26 +352,31 @@ def _cash_side(operation: dict) -> dict:
 
 def _bid_credit_eur(operation: dict, gross_eur: float) -> float:
     """Obtiene el descuento aplicado sin confundirlo con el saldo histórico del crédito."""
+    auction_id = str((operation.get("auction") or {}).get("id") or "")
+    credits = list(operation.get("conversionCredits") or [])
+    if not credits and operation.get("conversionCredit"):
+        credits = [operation["conversionCredit"]]
+
+    # totalDiscount pertenece al crédito, no necesariamente a esta compra. La
+    # referencia purchase demuestra que se consumió en esta subasta concreta.
+    matched_discount = 0.0
+    seen = set()
+    for credit in credits:
+        credit_id = str(credit.get("id") or id(credit))
+        purchase_id = str((credit.get("purchase") or {}).get("id") or "")
+        if credit_id in seen or not auction_id or purchase_id != auction_id:
+            continue
+        seen.add(credit_id)
+        matched_discount += _money(credit.get("totalDiscount"))["eur"]
+    if 0 < matched_discount <= gross_eur:
+        return matched_discount
+
     paid_eur = operation.get("paidEur")
     if paid_eur is not None:
         account_discount = max(gross_eur - float(paid_eur), 0.0)
         if 0 < account_discount <= gross_eur:
             return account_discount
-
-    credits = list(operation.get("conversionCredits") or [])
-    if not credits and operation.get("conversionCredit"):
-        credits = [operation["conversionCredit"]]
-    seen = set()
-    reported_discount = 0.0
-    for credit in credits:
-        credit_id = str(credit.get("id") or id(credit))
-        if credit_id in seen:
-            continue
-        seen.add(credit_id)
-        reported_discount += _money(credit.get("totalDiscount"))["eur"]
-    # Los créditos reutilizables pueden exponer un total acumulado. Si supera
-    # el precio de esta compra no es posible atribuirlo con seguridad.
-    return reported_discount if 0 < reported_discount <= gross_eur else 0.0
+    return 0.0
 
 
 def _unique_cards(cards: list[dict]) -> list[dict]:
