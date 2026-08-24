@@ -147,7 +147,7 @@ def movements(request):
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
         stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 7 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 8 else None
         active_sync = MovementSyncJob.objects.filter(
             user=request.user,
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -271,6 +271,18 @@ def movements(request):
     trade_cash_out = sum(
         Decimal(str(row.get("net_eur") or 0)) for row in trades if row.get("cash_direction") == "purchase"
     )
+
+    def purchase_seasonality(row):
+        purchase_cards = row.get("received_cards") or row.get("cards") or []
+        if purchase_cards and all(bool(card.get("in_season")) for card in purchase_cards):
+            return "inseason"
+        if purchase_cards and all(not bool(card.get("in_season")) for card in purchase_cards):
+            return "classic"
+        return "mixed"
+
+    purchases_inseason = [row for row in purchases if purchase_seasonality(row) == "inseason"]
+    purchases_classic = [row for row in purchases if purchase_seasonality(row) == "classic"]
+    purchases_mixed = [row for row in purchases if purchase_seasonality(row) == "mixed"]
     essence_totals = {"limited": 0, "rare": 0, "super_rare": 0}
     for reward in rewards:
         essence_items = reward.get("essence") or []
@@ -290,6 +302,9 @@ def movements(request):
         "fees": sum(Decimal(str(row.get("fee_eur") or 0)) for row in summary_rows),
         "credits": sum(Decimal(str(row.get("credits_eur") or 0)) for row in purchases),
         "purchase_count": len(purchases),
+        "purchases_inseason": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases_inseason),
+        "purchases_classic": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases_classic),
+        "purchases_mixed": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases_mixed),
         "sale_count": len(sales),
         "trade_count": len(trades),
         "movement_count": len(summary_rows),

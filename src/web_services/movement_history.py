@@ -36,6 +36,7 @@ query CompletedTrades($first: Int!, $after: String) {
             id fiatPayment
             amounts { eurCents wei referenceCurrency }
             conversionCredit { totalDiscount { eurCents wei referenceCurrency } }
+            conversionCredits { id totalDiscount { eurCents wei referenceCurrency } }
           }
         }
         ... on TokenOffer {
@@ -65,7 +66,7 @@ query MovementPaymentAccounts($first: Int!, $after: String) {
   currentUser {
     accountEntries(first: $first, after: $after, entryType: [PAYMENT]) {
       nodes {
-        id provisional aasmState
+        id provisional aasmState amounts { eurCents wei referenceCurrency }
         account {
           accountable {
             __typename
@@ -318,6 +319,7 @@ def _operation_from_trade(trade: dict) -> dict | None:
             "fiatPayment": best_bid.get("fiatPayment"),
             "amounts": best_bid.get("amounts") or {},
             "conversionCredit": best_bid.get("conversionCredit"),
+            "conversionCredits": best_bid.get("conversionCredits") or [],
             "auction": {
                 "id": trade.get("id"),
                 "transactionDate": trade.get("transactionDate"),
@@ -332,6 +334,30 @@ def _cash_side(operation: dict) -> dict:
     money_only = [side for side in sides if not (side.get("anyCards") or [])]
     candidates = money_only or sides
     return max(candidates, key=lambda side: _money(side.get("amounts"))["eur"])
+
+
+def _bid_credit_eur(operation: dict, gross_eur: float) -> float:
+    """Obtiene el descuento aplicado sin confundirlo con el saldo histórico del crédito."""
+    paid_eur = operation.get("paidEur")
+    if paid_eur is not None:
+        account_discount = max(gross_eur - float(paid_eur), 0.0)
+        if 0 < account_discount <= gross_eur:
+            return account_discount
+
+    credits = list(operation.get("conversionCredits") or [])
+    if not credits and operation.get("conversionCredit"):
+        credits = [operation["conversionCredit"]]
+    seen = set()
+    reported_discount = 0.0
+    for credit in credits:
+        credit_id = str(credit.get("id") or id(credit))
+        if credit_id in seen:
+            continue
+        seen.add(credit_id)
+        reported_discount += _money(credit.get("totalDiscount"))["eur"]
+    # Los créditos reutilizables pueden exponer un total acumulado. Si supera
+    # el precio de esta compra no es posible atribuirlo con seguridad.
+    return reported_discount if 0 < reported_discount <= gross_eur else 0.0
 
 
 def _unique_cards(cards: list[dict]) -> list[dict]:
@@ -383,7 +409,7 @@ def _movement_from_group(
         gross["currency"] = str(operation.get("paymentCurrency") or "")
         if not gross["currency"] and operation.get("fiatPayment") is True:
             gross["currency"] = "EUR"
-        credits_eur = _money((operation.get("conversionCredit") or {}).get("totalDiscount"))["eur"]
+        credits_eur = _bid_credit_eur(operation, gross["eur"])
         received_cards = cards
     elif typename == "TokenPrimaryOffer":
         direction, market = "purchase", "Compra instantánea"
@@ -894,6 +920,7 @@ def collect_movement_history(
     operations = [operation for trade in trades if (operation := _operation_from_trade(trade))]
 
     payment_currencies: dict[str, set[str]] = {}
+    payment_amounts_eur: dict[str, Decimal] = {}
     cursor = None
     payment_page = 0
     while True:
@@ -910,6 +937,11 @@ def collect_movement_history(
                 and entry.get("aasmState") == "CONFIRMED"
             ):
                 payment_currencies.setdefault(operation_id, set()).add(currency)
+                if entry.get("amounts") is not None:
+                    payment_amounts_eur[operation_id] = (
+                        payment_amounts_eur.get(operation_id, Decimal("0"))
+                        + Decimal(str(_money(entry.get("amounts"))["eur"]))
+                    )
         if progress:
             progress(len(trades), f"Verificando monedas de pago · página {payment_page}")
         page_info = connection.get("pageInfo") or {}
@@ -919,6 +951,9 @@ def collect_movement_history(
     for operation in operations:
         currencies = payment_currencies.get(str(operation.get("id") or ""), set())
         operation["paymentCurrency"] = next(iter(currencies)) if len(currencies) == 1 else ""
+        operation_id = str(operation.get("id") or "")
+        if operation_id in payment_amounts_eur:
+            operation["paidEur"] = float(payment_amounts_eur[operation_id])
 
     reward_entries: list[dict] = []
     cursor = None

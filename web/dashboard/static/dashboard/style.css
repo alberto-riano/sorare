@@ -1322,6 +1322,11 @@ body.modal-open { overflow: hidden; }
 .movement-kpis span, .movement-kpis small { color: var(--muted); }
 .movement-kpis strong { font: 700 1.45rem "IBM Plex Mono",monospace; }
 .movement-kpis article > span i { width: 1.1rem; color: var(--accent); }
+.spend-split-kpi > div { display: flex; flex-wrap: wrap; gap: .45rem; }
+.spend-split-kpi > div strong { display: grid; gap: .08rem; min-width: 105px; padding: .32rem .5rem; border-radius: 9px; background: #f7f5ef; font-size: 1rem; }
+.spend-split-kpi > div strong:first-child { color: #b91c1c; }
+.spend-split-kpi > div strong:last-child { color: #475569; }
+.spend-split-kpi > div small { font: 700 .61rem Inter,sans-serif; letter-spacing: .04em; text-transform: uppercase; }
 .essence-kpi-values { display: flex; flex-wrap: wrap; gap: .4rem; margin: .08rem 0; }
 .essence-kpi-values strong { display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .55rem; border-radius: 10px; font-size: 1rem; }
 .essence-kpi-values .rarity-limited { color: #854d0e; background: #fef3c7; }
@@ -1394,6 +1399,12 @@ body.modal-open { overflow: hidden; }
 .movement-inline-cycle > i { color: var(--accent); }
 .movement-inline-cycle aside { border: 1px solid #99d8cf; background: #f0fdfa; }
 .movement-inline-cycle aside > strong { font-size: 1.08rem; }
+.movement-balance-value { display: flex; align-items: center; flex-wrap: wrap; gap: .28rem; }
+.movement-balance-value > strong { font: 700 1.08rem "IBM Plex Mono",monospace; }
+.movement-balance-value > b { color: var(--good); font-size: 1rem; }
+.movement-balance-value > div { display: flex; flex-wrap: wrap; gap: .22rem; }
+.movement-balance-value em { display: inline-flex; align-items: center; padding: .16rem .3rem; border-radius: 999px; background: #fff; color: var(--ink); font-size: .61rem; font-style: normal; box-shadow: inset 0 0 0 1px #bcded7; }
+.movement-balance-value .card-rarity-dot { width: .42rem; height: .42rem; margin-right: .24rem; box-shadow: none; }
 .movement-chain { display: grid; grid-template-columns: minmax(185px,1fr) minmax(185px,1fr) minmax(115px,.55fr); gap: .45rem; margin-top: .45rem; padding: .45rem; border: 1px solid #d9e6e2; border-radius: 10px; background: #f8fffd; }
 .movement-chain section, .movement-chain aside { min-width: 0; }
 .movement-chain section > span, .movement-chain aside > span { display: block; margin-bottom: .25rem; color: var(--muted); font-size: .62rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
