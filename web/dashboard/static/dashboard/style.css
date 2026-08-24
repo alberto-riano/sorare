@@ -1327,6 +1327,10 @@ body.modal-open { overflow: hidden; }
 .spend-split-kpi > div strong:first-child { color: #b91c1c; }
 .spend-split-kpi > div strong:last-child { color: #475569; }
 .spend-split-kpi > div small { font: 700 .61rem Inter,sans-serif; letter-spacing: .04em; text-transform: uppercase; }
+.sale-split-kpi > div { display: flex; flex-wrap: wrap; gap: .45rem; }
+.sale-split-kpi > div strong { display: grid; gap: .08rem; min-width: 105px; padding: .32rem .5rem; border-radius: 9px; background: #f0fdf4; color: var(--good); font-size: 1rem; }
+.sale-split-kpi > div strong:last-child { color: #166534; }
+.sale-split-kpi > div small { font: 700 .61rem Inter,sans-serif; letter-spacing: .04em; text-transform: uppercase; }
 .essence-kpi-values { display: flex; flex-wrap: wrap; gap: .4rem; margin: .08rem 0; }
 .essence-kpi-values strong { display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .55rem; border-radius: 10px; font-size: 1rem; }
 .essence-kpi-values .rarity-limited { color: #854d0e; background: #fef3c7; }
@@ -1358,7 +1362,6 @@ body.modal-open { overflow: hidden; }
 .season-mark { display: inline-flex; align-items: center; width: max-content; margin-left: .28rem; padding: .1rem .3rem; border-radius: 999px; font-size: .56rem; font-weight: 800; letter-spacing: .035em; line-height: 1.25; text-transform: uppercase; vertical-align: .12rem; }
 .season-mark.is-inseason { color: #065f46; background: #d1fae5; box-shadow: inset 0 0 0 1px #6ee7b7; }
 .season-mark.is-classic { color: #475569; background: #f1f5f9; box-shadow: inset 0 0 0 1px #cbd5e1; }
-.movement-credit-mark { display: block; width: max-content; max-width: 100%; margin-top: .25rem; padding: .18rem .38rem; border-radius: 999px; color: #854d0e; background: #fef3c7; font-size: .66rem; font-style: normal; font-weight: 700; }
 .movement-card small { display: flex; align-items: center; gap: .25rem; margin-top: .12rem; color: var(--muted); }
 .movement-side { display: grid; gap: .35rem; padding: .45rem .55rem; border-left: 3px solid var(--good); border-radius: 8px; background: #f0fdf4; }
 .movement-side.is-sent { border-left-color: #dc2626; background: #fff1f2; }

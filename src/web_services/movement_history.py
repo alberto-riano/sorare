@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation
 from typing import Callable
 
 from sorare_utils import build_headers, graphql_request
@@ -13,10 +13,6 @@ CARD_FIELDS = """
   anyTeam {
     name pictureUrl
     ... on Club { domesticLeague { slug displayName } }
-  }
-  tokenOwner {
-    from settleAt settlementDelayReason
-    user { slug }
   }
 """
 
@@ -39,22 +35,6 @@ query CompletedTrades($first: Int!, $after: String) {
           bestBid {
             id fiatPayment
             amounts { eurCents wei referenceCurrency }
-            conversionCredit {
-              id status totalDiscount { eurCents wei referenceCurrency }
-              purchase {
-                __typename
-                ... on TokenAuction { id }
-                ... on TokenPrimaryOffer { id }
-              }
-            }
-            conversionCredits {
-              id status totalDiscount { eurCents wei referenceCurrency }
-              purchase {
-                __typename
-                ... on TokenAuction { id }
-                ... on TokenPrimaryOffer { id }
-              }
-            }
           }
         }
         ... on TokenOffer {
@@ -109,24 +89,6 @@ query MovementPaymentAccounts(
           __typename
           ... on TokenBid { id }
           ... on TokenOffer { id }
-          ... on TokenPrimaryOffer { id }
-        }
-      }
-      pageInfo { hasNextPage endCursor }
-    }
-  }
-}
-"""
-
-CONVERSION_CREDITS_QUERY = """
-query MovementConversionCredits($first: Int!, $after: String) {
-  currentUser {
-    sportConversionCredits(first: $first, after: $after, sport: FOOTBALL, includeUsing: true) {
-      nodes {
-        id status totalDiscount { eurCents wei referenceCurrency }
-        purchase {
-          __typename
-          ... on TokenAuction { id }
           ... on TokenPrimaryOffer { id }
         }
       }
@@ -311,7 +273,6 @@ def _card(card: dict) -> dict:
     league_slug = str(league.get("slug") or "").casefold()
     league_name = str(league.get("displayName") or "")
     is_laliga = "laliga" in league_slug or "laliga" in league_name.casefold()
-    token_owner = card.get("tokenOwner") or {}
     return {
         "asset_id": card.get("assetId") or "",
         "card_slug": card.get("slug") or "",
@@ -326,10 +287,6 @@ def _card(card: dict) -> dict:
         "in_season": bool(card.get("inSeasonEligible")),
         "league": league_name or "—",
         "is_laliga": is_laliga,
-        "credit_purchase_restricted": token_owner.get("settlementDelayReason") == "CONVERSION_CREDIT_USED",
-        "owner_since": token_owner.get("from"),
-        "settle_at": token_owner.get("settleAt"),
-        "owner_slug": str((token_owner.get("user") or {}).get("slug") or ""),
     }
 
 
@@ -373,8 +330,6 @@ def _operation_from_trade(trade: dict) -> dict | None:
             "createdAt": trade.get("transactionDate"),
             "fiatPayment": best_bid.get("fiatPayment"),
             "amounts": best_bid.get("amounts") or {},
-            "conversionCredit": best_bid.get("conversionCredit"),
-            "conversionCredits": best_bid.get("conversionCredits") or [],
             "auction": {
                 "id": trade.get("id"),
                 "transactionDate": trade.get("transactionDate"),
@@ -389,40 +344,6 @@ def _cash_side(operation: dict) -> dict:
     money_only = [side for side in sides if not (side.get("anyCards") or [])]
     candidates = money_only or sides
     return max(candidates, key=lambda side: _money(side.get("amounts"))["eur"])
-
-
-def _purchase_credit_eur(operation: dict, gross_eur: float) -> float:
-    """Obtiene el descuento aplicado sin confundirlo con el saldo histórico del crédito."""
-    # El apunte confirmado de la cuenta EUR es la prueba más precisa: refleja
-    # lo que realmente salió del saldo después de aplicar créditos. Es
-    # preferible a ``totalDiscount``, que en créditos reutilizables puede ser
-    # un acumulado de varias compras.
-    paid_eur = operation.get("paidEur")
-    if paid_eur is not None and operation.get("paymentCurrency") == "EUR":
-        account_discount = max(gross_eur - float(paid_eur), 0.0)
-        if 0 < account_discount <= gross_eur:
-            return account_discount
-
-    purchase_id = str((operation.get("auction") or {}).get("id") or operation.get("id") or "")
-    credits = list(operation.get("conversionCredits") or [])
-    if not credits and operation.get("conversionCredit"):
-        credits = [operation["conversionCredit"]]
-
-    # totalDiscount pertenece al crédito, no necesariamente a esta compra. La
-    # referencia purchase demuestra que se consumió en esta subasta concreta.
-    matched_discount = 0.0
-    seen = set()
-    for credit in credits:
-        credit_id = str(credit.get("id") or id(credit))
-        credit_purchase_id = str((credit.get("purchase") or {}).get("id") or "")
-        if credit_id in seen or not purchase_id or credit_purchase_id != purchase_id:
-            continue
-        seen.add(credit_id)
-        matched_discount += _money(credit.get("totalDiscount"))["eur"]
-    if 0 < matched_discount <= gross_eur:
-        return matched_discount
-
-    return 0.0
 
 
 def _unique_cards(cards: list[dict]) -> list[dict]:
@@ -474,14 +395,12 @@ def _movement_from_group(
         gross["currency"] = str(operation.get("paymentCurrency") or "")
         if not gross["currency"] and operation.get("fiatPayment") is True:
             gross["currency"] = "EUR"
-        credits_eur = _purchase_credit_eur(operation, gross["eur"])
         received_cards = cards
     elif typename == "TokenPrimaryOffer":
         direction, market = "purchase", "Compra instantánea"
         cash_direction = direction
         gross = _money(operation.get("price"))
         gross["currency"] = str(operation.get("paymentCurrency") or "")
-        credits_eur = _purchase_credit_eur(operation, gross["eur"])
         received_cards = cards
     elif typename == "TokenOffer":
         buyer = str((operation.get("userBuyer") or {}).get("slug") or "").casefold()
@@ -549,7 +468,7 @@ def _movement_from_group(
         net_eur = max(gross_eur - fee_eur, 0.0)
         fee_eur = max(gross_eur - net_eur, fee_eur)
     else:
-        net_eur = max(gross_eur - credits_eur, 0.0)
+        net_eur = gross_eur
     category = (
         "reward"
         if direction == "reward"
@@ -591,7 +510,6 @@ def _movement_from_group(
         "net_eur": round(net_eur, 2),
         "fee_eur": round(fee_eur, 2),
         "credits_eur": round(credits_eur, 2),
-        "used_credit": credits_eur > 0 or any(card.get("credit_purchase_restricted") for card in received_cards),
         "currency": gross["currency"],
         "eth": gross["eth"],
         "essence": essence,
@@ -601,69 +519,6 @@ def _movement_from_group(
         "reward_rarity": reward_rarity,
         "entry_types": sorted({entry.get("entryType") for entry in entries if entry.get("entryType")}),
     }
-
-
-def apply_purchase_payment_evidence(
-    movements: list[dict],
-    *,
-    local_bids: dict[str, dict] | None = None,
-    stored_evidence: dict[str, dict] | None = None,
-) -> list[dict]:
-    """Completa pagos que Sorare deja de exponer usando pruebas persistidas.
-
-    Los importes exactos devueltos por Sorare siempre tienen prioridad. Las
-    fuentes locales solo rellenan huecos y nunca sustituyen un dato privado
-    confirmado por la API.
-    """
-    local_bids = local_bids or {}
-    stored_evidence = stored_evidence or {}
-    cent = Decimal("0.01")
-
-    for movement in movements:
-        if movement.get("direction") != "purchase" or movement.get("market") != "Subasta":
-            continue
-        auction_id = str(movement.get("auction_id") or "")
-        if not auction_id:
-            continue
-
-        stored = stored_evidence.get(auction_id) or {}
-        local = local_bids.get(auction_id) or {}
-        card_proof = any(
-            card.get("credit_purchase_restricted")
-            for card in movement.get("received_cards") or movement.get("cards") or []
-        )
-        used_credit = bool(
-            movement.get("used_credit")
-            or movement.get("credits_eur")
-            or stored.get("used_credit")
-            or local.get("use_credit")
-            or card_proof
-        )
-        movement["used_credit"] = used_credit
-
-        if not movement.get("currency"):
-            currency = str(stored.get("currency") or local.get("currency") or "").upper()
-            if currency in {"EUR", "ETH"}:
-                movement["currency"] = currency
-
-        if used_credit and not movement.get("credits_eur"):
-            percentage = stored.get("credit_percentage")
-            if percentage is not None:
-                gross = Decimal(str(movement.get("gross_eur") or 0))
-                discount = (gross * Decimal(str(percentage)) / Decimal("100")).quantize(
-                    cent,
-                    rounding=ROUND_HALF_UP,
-                )
-                movement["credits_eur"] = float(discount)
-                movement["net_eur"] = float(max(gross - discount, Decimal("0")))
-
-        if stored:
-            movement["payment_evidence_source"] = stored.get("source") or "stored"
-        elif local:
-            movement["payment_evidence_source"] = "local_bid"
-        elif card_proof:
-            movement["payment_evidence_source"] = "card_restriction"
-    return movements
 
 
 def _reward_market(operation: dict) -> str:
@@ -715,8 +570,11 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
         )
 
         for received_card in received_cards:
+            purchase_price = movement.get("gross_eur")
+            if purchase_price is None:
+                purchase_price = movement.get("net_eur") or 0
             known_cost = (
-                Decimal(str(movement.get("net_eur") or 0))
+                Decimal(str(purchase_price))
                 if len(received_cards) == 1
                 and not sent_cards
                 and (movement.get("cash_direction") or movement.get("direction")) == "purchase"
@@ -1051,40 +909,7 @@ def collect_movement_history(
 
     operations = [operation for trade in trades if (operation := _operation_from_trade(trade))]
 
-    # La lista global conserva la relación crédito -> compra también cuando el
-    # crédito no aparece dentro de bestBid (y para Instant Buy).
-    credits_by_purchase: dict[str, list[dict]] = {}
-    cursor = None
-    credit_page = 0
-    while True:
-        credit_page += 1
-        data = graphql_request(CONVERSION_CREDITS_QUERY, {"first": 100, "after": cursor}, headers=headers)
-        connection = ((data.get("currentUser") or {}).get("sportConversionCredits") or {})
-        for credit in connection.get("nodes") or []:
-            purchase_id = str((credit.get("purchase") or {}).get("id") or "")
-            if purchase_id:
-                credits_by_purchase.setdefault(purchase_id, []).append(credit)
-        if progress:
-            progress(len(trades), f"Verificando créditos usados · página {credit_page}")
-        page_info = connection.get("pageInfo") or {}
-        if not page_info.get("hasNextPage"):
-            break
-        cursor = page_info.get("endCursor")
-
-    for operation in operations:
-        purchase_id = str((operation.get("auction") or {}).get("id") or operation.get("id") or "")
-        related_credits = credits_by_purchase.get(purchase_id) or []
-        if related_credits:
-            existing = list(operation.get("conversionCredits") or [])
-            if not existing and operation.get("conversionCredit"):
-                existing = [operation["conversionCredit"]]
-            operation["conversionCredits"] = list({
-                str(credit.get("id") or id(credit)): credit
-                for credit in existing + related_credits
-            }.values())
-
     payment_currencies: dict[str, set[str]] = {}
-    payment_amounts_eur: dict[str, Decimal] = {}
     # ``account.accountable`` puede ser CommonAccount y no identifica la
     # divisa. Consultar la conexión una vez por moneda sí lo hace: Sorare solo
     # devuelve en cada pasada los apuntes que realmente se pagaron con ese
@@ -1110,11 +935,6 @@ def collect_movement_history(
                     and entry.get("aasmState") == "CONFIRMED"
                 ):
                     payment_currencies.setdefault(operation_id, set()).add(display_currency)
-                    if display_currency == "EUR" and entry.get("amounts") is not None:
-                        payment_amounts_eur[operation_id] = (
-                            payment_amounts_eur.get(operation_id, Decimal("0"))
-                            + Decimal(str(_money(entry.get("amounts"))["eur"]))
-                        )
             if progress:
                 progress(
                     len(trades),
@@ -1128,9 +948,6 @@ def collect_movement_history(
         currencies = payment_currencies.get(str(operation.get("id") or ""), set())
         payment_currency = next(iter(currencies)) if len(currencies) == 1 else ""
         operation["paymentCurrency"] = payment_currency
-        operation_id = str(operation.get("id") or "")
-        if operation_id in payment_amounts_eur:
-            operation["paidEur"] = float(payment_amounts_eur[operation_id])
 
     reward_entries: list[dict] = []
     cursor = None

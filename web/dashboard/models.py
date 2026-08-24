@@ -95,7 +95,7 @@ class MovementSnapshot(models.Model):
     )
     movements = models.JSONField(default=list)
     refreshed_at = models.DateTimeField(null=True, blank=True)
-    source_version = models.PositiveSmallIntegerField(default=13)
+    source_version = models.PositiveSmallIntegerField(default=14)
 
 
 class MovementSyncJob(models.Model):
@@ -121,18 +121,6 @@ class MovementSyncJob(models.Model):
 
     class Meta:
         ordering = ("created_at",)
-
-
-class MovementPaymentEvidence(models.Model):
-    """Prueba persistente de moneda/créditos cuando Sorare purga el detalle."""
-
-    auction_id = models.CharField(max_length=200, unique=True)
-    currency = models.CharField(max_length=3, choices=(("EUR", "EUR"), ("ETH", "ETH")), blank=True)
-    used_credit = models.BooleanField(default=False)
-    credit_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    source = models.CharField(max_length=40, default="manual")
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
 
 class PublicRewardSnapshot(models.Model):

@@ -20,7 +20,7 @@ from dashboard.management.commands.process_sales_queue import (
 )
 from dashboard.models import (
     AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer,
-    MovementPaymentEvidence, MovementSnapshot, MovementSyncJob, PublicRewardSnapshot, PublicRewardSyncJob,
+    MovementSnapshot, MovementSyncJob, PublicRewardSnapshot, PublicRewardSyncJob,
     SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob,
 )
 from dashboard.views import auction_price_history, auctions_list
@@ -28,7 +28,7 @@ from sorare_utils import get_latest_prices
 from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler, run_card_sale
 from web_services.sales_inventory import collection_display_name
 from web_services.movement_history import (
-    _account_currency, _movement_from_group, _operation_from_trade, apply_purchase_payment_evidence, build_trade_cycles,
+    _account_currency, _movement_from_group, _operation_from_trade, build_trade_cycles,
     collect_movement_history, collect_public_reward_history,
 )
 
@@ -837,7 +837,7 @@ class MovementHistoryTests(TestCase):
         }], "burguis")
         self.assertIsNone(movement)
 
-    def test_completed_auction_uses_only_the_credit_actually_applied(self):
+    def test_completed_auction_uses_full_price_without_credit_estimates(self):
         trade = {
             "__typename": "TokenAuction", "id": "auction-won", "transactionDate": "2026-08-20T10:00:00Z",
             "currency": "EUR",
@@ -862,11 +862,11 @@ class MovementHistoryTests(TestCase):
             "amounts": operation["amounts"], "tokenOperation": operation,
         }], "burguis")
         self.assertEqual(movement["gross_eur"], 6.5)
-        self.assertEqual(movement["credits_eur"], 1.0)
-        self.assertEqual(movement["net_eur"], 5.5)
+        self.assertEqual(movement["credits_eur"], 0)
+        self.assertEqual(movement["net_eur"], 6.5)
         self.assertEqual(movement["currency"], "EUR")
 
-    def test_completed_auction_reads_multiple_credits_and_rejects_historical_totals(self):
+    def test_completed_auction_ignores_incomplete_credit_metadata(self):
         operation = {
             "__typename": "TokenBid", "id": "credits-bid", "createdAt": "2026-08-20T10:00:00Z",
             "fiatPayment": True, "paymentCurrency": "EUR", "paidEur": 7,
@@ -885,8 +885,8 @@ class MovementHistoryTests(TestCase):
         }], "burguis")
 
         self.assertEqual(movement["gross_eur"], 10)
-        self.assertEqual(movement["credits_eur"], 3)
-        self.assertEqual(movement["net_eur"], 7)
+        self.assertEqual(movement["credits_eur"], 0)
+        self.assertEqual(movement["net_eur"], 10)
 
         operation.pop("paidEur")
         operation["auction"]["id"] = "auction-credits"
@@ -906,8 +906,8 @@ class MovementHistoryTests(TestCase):
             "id": "credits-bid", "date": operation["createdAt"], "entryType": "PAYMENT",
             "amounts": operation["amounts"], "tokenOperation": operation,
         }], "burguis")
-        self.assertEqual(movement["credits_eur"], 2)
-        self.assertEqual(movement["net_eur"], 8)
+        self.assertEqual(movement["credits_eur"], 0)
+        self.assertEqual(movement["net_eur"], 10)
 
         operation["conversionCredits"] = [{
             "id": "reusable-credit",
@@ -939,59 +939,6 @@ class MovementHistoryTests(TestCase):
         }], "burguis")
 
         self.assertEqual(movement["currency"], "ETH")
-
-    def test_card_restriction_and_stored_evidence_restore_lost_credit_purchase(self):
-        rioja = self._api_card(player="L. Rioja")
-        rioja["tokenOwner"] = {
-            "from": "2026-08-12T19:40:36Z",
-            "settleAt": "2026-08-26T19:40:36Z",
-            "settlementDelayReason": "CONVERSION_CREDIT_USED",
-            "user": {"slug": "burguis"},
-        }
-        operation = {
-            "__typename": "TokenBid",
-            "id": "rioja-bid",
-            "createdAt": "2026-08-12T19:40:36Z",
-            "amounts": {"eurCents": 1901, "wei": "11600000000000000", "referenceCurrency": "WEI"},
-            "conversionCredit": None,
-            "auction": {
-                "id": "EnglishAuction:rioja",
-                "transactionDate": "2026-08-12T19:40:36Z",
-                "anyCards": [rioja],
-            },
-        }
-        movement = _movement_from_group([{
-            "id": operation["id"], "date": operation["createdAt"], "entryType": "PAYMENT",
-            "amounts": operation["amounts"], "tokenOperation": operation,
-        }], "burguis")
-
-        self.assertTrue(movement["used_credit"])
-        self.assertTrue(movement["cards"][0]["credit_purchase_restricted"])
-        apply_purchase_payment_evidence([movement], stored_evidence={
-            "EnglishAuction:rioja": {
-                "currency": "EUR", "used_credit": True,
-                "credit_percentage": Decimal("50.00"), "source": "confirmed",
-            },
-        })
-
-        self.assertEqual(movement["currency"], "EUR")
-        self.assertEqual(movement["credits_eur"], 9.51)
-        self.assertEqual(movement["net_eur"], 9.5)
-
-    def test_local_winning_bid_restores_currency_and_credit_flag(self):
-        movement = {
-            "id": "rodrygo-bid", "auction_id": "EnglishAuction:rodrygo",
-            "direction": "purchase", "market": "Subasta", "currency": "",
-            "gross_eur": 24.03, "net_eur": 24.03, "credits_eur": 0,
-            "used_credit": False, "cards": [], "received_cards": [],
-        }
-        apply_purchase_payment_evidence([movement], local_bids={
-            "EnglishAuction:rodrygo": {"currency": "EUR", "use_credit": True},
-        })
-
-        self.assertEqual(movement["currency"], "EUR")
-        self.assertTrue(movement["used_credit"])
-        self.assertEqual(movement["payment_evidence_source"], "local_bid")
 
     def test_payment_account_identifies_wallet_currency_without_using_reference_currency(self):
         fiat_entry = {
@@ -1028,7 +975,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(movement["reward_rarity"], "rare")
         self.assertEqual(movement["currency"], "")
 
-        MovementSnapshot.objects.create(user=self.user, movements=[movement], source_version=13)
+        MovementSnapshot.objects.create(user=self.user, movements=[movement], source_version=14)
         response = self.client.get(reverse("movements"), {"category": "reward", "reward_type": "essence"})
         self.assertContains(response, "+20 Esencia")
         self.assertContains(response, "reward-kind reward-essence rarity-rare")
@@ -1149,11 +1096,11 @@ class MovementHistoryTests(TestCase):
         movements = collect_movement_history(headers={"Authorization": "test"})
         self.assertEqual([movement["id"] for movement in movements], ["bid-completed"])
         self.assertEqual(movements[0]["currency"], "EUR")
-        self.assertEqual(movements[0]["credits_eur"], 1)
-        self.assertEqual(movements[0]["net_eur"], 5.5)
+        self.assertEqual(movements[0]["credits_eur"], 0)
+        self.assertEqual(movements[0]["net_eur"], 6.5)
 
     @patch("web_services.movement_history.graphql_request")
-    def test_collector_recovers_real_eur_payments_and_credits_for_rodrygo_and_rioja(self, request):
+    def test_collector_recovers_real_eur_currency_without_estimating_credits(self, request):
         rodrygo = self._api_card(player="Rodrygo")
         rodrygo.update({"assetId": "rodrygo-16", "seasonYear": 2026, "serialNumber": 16})
         rioja = self._api_card(player="L. Rioja")
@@ -1222,11 +1169,11 @@ class MovementHistoryTests(TestCase):
         by_player = {movement["cards"][0]["player"]: movement for movement in movements}
 
         self.assertEqual(by_player["Rodrygo"]["currency"], "EUR")
-        self.assertEqual(by_player["Rodrygo"]["credits_eur"], 12.01)
-        self.assertEqual(by_player["Rodrygo"]["net_eur"], 12.02)
+        self.assertEqual(by_player["Rodrygo"]["credits_eur"], 0)
+        self.assertEqual(by_player["Rodrygo"]["net_eur"], 24.03)
         self.assertEqual(by_player["L. Rioja"]["currency"], "EUR")
-        self.assertEqual(by_player["L. Rioja"]["credits_eur"], 9.51)
-        self.assertEqual(by_player["L. Rioja"]["net_eur"], 9.5)
+        self.assertEqual(by_player["L. Rioja"]["credits_eur"], 0)
+        self.assertEqual(by_player["L. Rioja"]["net_eur"], 19.01)
 
     @patch("dashboard.management.commands.process_sales_queue.collect_movement_history")
     def test_background_sync_replaces_snapshot_only_after_success(self, collect):
@@ -1237,30 +1184,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
         snapshot = MovementSnapshot.objects.get(user=self.user)
         self.assertEqual(snapshot.movements[0]["id"], "movement-1")
-        self.assertEqual(snapshot.source_version, 13)
-
-    @patch("dashboard.management.commands.process_sales_queue.collect_movement_history")
-    def test_background_sync_applies_persistent_payment_evidence(self, collect):
-        auction_id = "EnglishAuction:historical-credit"
-        collect.return_value = [{
-            "id": "historical-bid", "auction_id": auction_id,
-            "direction": "purchase", "market": "Subasta", "category": "laliga_inseason",
-            "currency": "", "gross_eur": 24.03, "net_eur": 24.03,
-            "credits_eur": 0, "used_credit": False, "cards": [], "received_cards": [],
-        }]
-        MovementPaymentEvidence.objects.create(
-            auction_id=auction_id, currency="EUR", used_credit=True,
-            credit_percentage=Decimal("50.00"), source="confirmed",
-        )
-        MovementSyncJob.objects.create(user=self.user)
-
-        process_next_movement_sync()
-
-        movement = MovementSnapshot.objects.get(user=self.user).movements[0]
-        self.assertEqual(movement["currency"], "EUR")
-        self.assertEqual(movement["credits_eur"], 12.02)
-        self.assertEqual(movement["net_eur"], 12.01)
-        self.assertTrue(movement["used_credit"])
+        self.assertEqual(snapshot.source_version, 14)
 
     @patch("web_services.movement_history.graphql_request")
     def test_collector_adds_confirmed_gameweek_rewards(self, request):
@@ -1394,7 +1318,7 @@ class MovementHistoryTests(TestCase):
                        essence=[{"quantity": 10, "rarity": "super_rare"}], essence_quantity=10)
         card_data = {"asset_id": "reward-card", "player": "Carta premio", "team": "Equipo", "rarity": "limited"}
         card = dict(base, id="card", reward_type="card", reward_rarity="limited", cards=[card_data])
-        MovementSnapshot.objects.create(user=self.user, movements=[money, essence, card], source_version=13)
+        MovementSnapshot.objects.create(user=self.user, movements=[money, essence, card], source_version=14)
 
         response = self.client.get(reverse("movements"), {"category": "reward", "reward_type": "essence"})
 
@@ -1420,7 +1344,7 @@ class MovementHistoryTests(TestCase):
         money = dict(base, id="money", reward_type="money", gross_eur=22.46, currency="ETH")
         cards = dict(base, id="cards", reward_type="card", cards=[{"player": "Uno"}, {"player": "Dos"}])
         MovementSnapshot.objects.create(
-            user=self.user, source_version=13,
+            user=self.user, source_version=14,
             movements=[limited, rare, super_rare, money, cards],
         )
 
@@ -1436,7 +1360,7 @@ class MovementHistoryTests(TestCase):
         self.assertContains(response, "Cartas recibidas")
 
     def test_default_history_starts_on_current_season_date_but_can_be_cleared(self):
-        MovementSnapshot.objects.create(user=self.user, source_version=13, movements=[
+        MovementSnapshot.objects.create(user=self.user, source_version=14, movements=[
             {"id": "before", "occurred_at": "2026-08-11T21:59:00Z", "direction": "purchase", "category": "other", "cards": [{"player": "Antes de temporada"}]},
             {"id": "current", "occurred_at": "2026-08-11T22:00:00Z", "direction": "purchase", "category": "other", "cards": [{"player": "Temporada actual"}]},
         ])
@@ -1453,7 +1377,7 @@ class MovementHistoryTests(TestCase):
         carvalho = {"asset_id": "carvalho", "player": "Vítor Carvalho", "rarity": "rare", "in_season": False}
         espino = {"asset_id": "espino", "player": "Alfonso Espino", "rarity": "super_rare", "in_season": False}
         moncayola = {"asset_id": "moncayola", "player": "Moncayola", "rarity": "super_rare", "in_season": False}
-        MovementSnapshot.objects.create(user=self.user, source_version=13, movements=[
+        MovementSnapshot.objects.create(user=self.user, source_version=14, movements=[
             {"id": "carvalho-buy", "occurred_at": "2026-01-29T18:20:00Z", "direction": "purchase", "cash_direction": "purchase", "category": "other", "cards": [carvalho], "received_cards": [carvalho], "gross_eur": 2.36, "net_eur": 0, "credits_eur": 2.36},
             {"id": "carvalho-trade", "occurred_at": "2026-05-27T11:13:00Z", "direction": "trade", "cash_direction": "other", "category": "other", "cards": [carvalho, espino], "sent_cards": [carvalho], "received_cards": [espino], "gross_eur": 0, "net_eur": 0},
             {"id": "espino-trade", "occurred_at": "2026-08-19T09:57:00Z", "direction": "trade", "cash_direction": "other", "category": "other", "cards": [espino, moncayola], "sent_cards": [espino], "received_cards": [moncayola], "gross_eur": 0, "net_eur": 0},
@@ -1483,20 +1407,12 @@ class MovementHistoryTests(TestCase):
         response = self.client.get(reverse("movements"), {"category": "laliga_inseason", "rarity": "rare"})
         self.assertContains(response, "Carles Aleñá")
         self.assertNotContains(response, ">Take<")
-        self.assertEqual(response.context["totals"]["purchases"], Decimal("8"))
-        self.assertEqual(response.context["totals"]["credits"], Decimal("2"))
-        self.assertEqual(response.context["totals"]["purchases_inseason"], Decimal("8"))
+        self.assertEqual(response.context["totals"]["purchases"], Decimal("10"))
+        self.assertEqual(response.context["totals"]["purchases_inseason"], Decimal("10"))
         self.assertEqual(response.context["totals"]["purchases_classic"], Decimal("0"))
         self.assertContains(response, "season-mark is-inseason")
-
-        credit_response = self.client.get(reverse("movements"), {
-            "category": "all", "credit_usage": "used", "date_from": "",
-        })
-        self.assertContains(credit_response, "Carles Aleñá")
-        self.assertNotContains(credit_response, ">Take<")
-        self.assertContains(credit_response, "2,00 € créditos")
-        self.assertEqual(credit_response.context["selected_credit_usage"], "used")
-        self.assertEqual(credit_response.context["totals"]["credit_purchase_count"], 1)
+        self.assertNotContains(response, "Créditos usados")
+        self.assertNotContains(response, "2,00 € créditos")
 
         inseason_response = self.client.get(reverse("movements"), {
             "category": "all", "seasonality": "inseason", "date_from": "",
@@ -1533,7 +1449,7 @@ class MovementHistoryTests(TestCase):
             "team": "Real Madrid", "rarity": "rare", "season_year": 2021, "in_season": False,
             "is_laliga": True, "serial_number": 73,
         }
-        MovementSnapshot.objects.create(user=self.user, source_version=13, movements=[{
+        MovementSnapshot.objects.create(user=self.user, source_version=14, movements=[{
             "id": "camavinga-buy", "occurred_at": "2026-08-23T08:19:25Z", "direction": "purchase",
             "cash_direction": "purchase", "market": "Oferta pública", "category": "laliga_inseason",
             "cards": [camavinga], "received_cards": [camavinga], "sent_cards": [],
@@ -1617,7 +1533,7 @@ class MovementHistoryTests(TestCase):
             "team": "Espanyol", "rarity": "limited", "season_year": 2026, "in_season": True,
             "is_laliga": True, "serial_number": 110,
         }
-        MovementSnapshot.objects.create(user=self.user, source_version=13, movements=[
+        MovementSnapshot.objects.create(user=self.user, source_version=14, movements=[
             {"id": "yangel-buy", "occurred_at": "2026-08-20T20:21:25Z", "direction": "purchase", "cash_direction": "purchase", "market": "Subasta", "category": "laliga_inseason", "cards": [yangel], "received_cards": [yangel], "sent_cards": [], "gross_eur": 20, "net_eur": 20},
             {"id": "yangel-trade", "occurred_at": "2026-08-20T21:44:44Z", "direction": "trade", "cash_direction": "sale", "market": "Intercambio + dinero", "category": "laliga_inseason", "cards": [yangel, hugo, ruben], "received_cards": [hugo, ruben], "sent_cards": [yangel], "gross_eur": 4.48, "net_eur": 4.26, "fee_eur": .22},
             {"id": "hugo-sale", "occurred_at": "2026-08-22T10:00:00Z", "direction": "sale", "cash_direction": "sale", "market": "Oferta pública", "category": "other", "cards": [hugo], "received_cards": [], "sent_cards": [hugo], "gross_eur": 3.2, "net_eur": 3.04, "fee_eur": .16},
@@ -1640,6 +1556,8 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(response.context["totals"]["purchases"], Decimal("20"))
         self.assertEqual(response.context["totals"]["trade_cash_in"], Decimal("4.26"))
         self.assertEqual(response.context["totals"]["sales_net"], Decimal("3.04"))
+        self.assertEqual(response.context["totals"]["sales_inseason"], Decimal("3.04"))
+        self.assertEqual(response.context["totals"]["sales_classic"], Decimal("0"))
         self.assertEqual(response.context["totals"]["balance"], Decimal("-12.70"))
 
     def test_first_visit_enqueues_background_sync(self):

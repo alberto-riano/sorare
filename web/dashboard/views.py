@@ -147,7 +147,7 @@ def movements(request):
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
         stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 13 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 14 else None
         active_sync = MovementSyncJob.objects.filter(
             user=request.user,
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -170,9 +170,6 @@ def movements(request):
     seasonality = request.GET.get("seasonality", "")
     if category == "reward" or seasonality not in {"inseason", "classic"}:
         seasonality = ""
-    credit_usage = request.GET.get("credit_usage", "")
-    if category == "reward" or credit_usage != "used":
-        credit_usage = ""
     requested_date_from = request.GET.get("date_from")
     date_from = "2026-08-12" if requested_date_from is None else requested_date_from.strip()
     date_to = request.GET.get("date_to", "").strip()
@@ -236,9 +233,6 @@ def movements(request):
             continue
         if seasonality == "classic" and not any(not bool(card.get("in_season")) for card in cards):
             continue
-        row_credits = Decimal(str(row.get("credits_eur") or 0))
-        if credit_usage == "used" and row_credits <= 0 and not row.get("used_credit"):
-            continue
         if not in_selected_window(row):
             continue
         rows.append(row)
@@ -256,10 +250,6 @@ def movements(request):
             if seasonality == "inseason" and not any(bool(card.get("in_season")) for card in cycle_season_cards):
                 continue
             if seasonality == "classic" and not any(not bool(card.get("in_season")) for card in cycle_season_cards):
-                continue
-            cycle_purchase = cycle.get("purchase") or {}
-            cycle_credits = Decimal(str(cycle_purchase.get("credits_eur") or 0))
-            if credit_usage == "used" and cycle_credits <= 0 and not cycle_purchase.get("used_credit"):
                 continue
             local_cycle_at = cycle_at.astimezone(ZoneInfo("Europe/Madrid")) if cycle_at else None
             cycle_date = local_cycle_at.date().isoformat() if local_cycle_at else ""
@@ -306,17 +296,23 @@ def movements(request):
         Decimal(str(row.get("net_eur") or 0)) for row in trades if row.get("cash_direction") == "purchase"
     )
 
-    def purchase_seasonality(row):
-        purchase_cards = row.get("received_cards") or row.get("cards") or []
-        if purchase_cards and all(bool(card.get("in_season")) for card in purchase_cards):
+    def movement_seasonality(row, *, sale=False):
+        if sale:
+            cards = row.get("sent_cards") or row.get("cards") or []
+        else:
+            cards = row.get("received_cards") or row.get("cards") or []
+        if cards and all(bool(card.get("in_season")) for card in cards):
             return "inseason"
-        if purchase_cards and all(not bool(card.get("in_season")) for card in purchase_cards):
+        if cards and all(not bool(card.get("in_season")) for card in cards):
             return "classic"
         return "mixed"
 
-    purchases_inseason = [row for row in purchases if purchase_seasonality(row) == "inseason"]
-    purchases_classic = [row for row in purchases if purchase_seasonality(row) == "classic"]
-    purchases_mixed = [row for row in purchases if purchase_seasonality(row) == "mixed"]
+    purchases_inseason = [row for row in purchases if movement_seasonality(row) == "inseason"]
+    purchases_classic = [row for row in purchases if movement_seasonality(row) == "classic"]
+    purchases_mixed = [row for row in purchases if movement_seasonality(row) == "mixed"]
+    sales_inseason = [row for row in sales if movement_seasonality(row, sale=True) == "inseason"]
+    sales_classic = [row for row in sales if movement_seasonality(row, sale=True) == "classic"]
+    sales_mixed = [row for row in sales if movement_seasonality(row, sale=True) == "mixed"]
     essence_totals = {"limited": 0, "rare": 0, "super_rare": 0}
     for reward in rewards:
         essence_items = reward.get("essence") or []
@@ -330,19 +326,17 @@ def movements(request):
             if reward_rarity in essence_totals:
                 essence_totals[reward_rarity] += int(reward.get("essence_quantity") or 0)
     totals = {
-        "purchases": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases),
+        "purchases": sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases),
         "sales_gross": sum(Decimal(str(row.get("gross_eur") or 0)) for row in sales),
         "sales_net": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales),
         "fees": sum(Decimal(str(row.get("fee_eur") or 0)) for row in summary_rows),
-        "credits": sum(Decimal(str(row.get("credits_eur") or 0)) for row in purchases),
-        "credit_purchase_count": sum(
-            Decimal(str(row.get("credits_eur") or 0)) > 0 or bool(row.get("used_credit"))
-            for row in purchases
-        ),
         "purchase_count": len(purchases),
-        "purchases_inseason": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases_inseason),
-        "purchases_classic": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases_classic),
-        "purchases_mixed": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases_mixed),
+        "purchases_inseason": sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases_inseason),
+        "purchases_classic": sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases_classic),
+        "purchases_mixed": sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases_mixed),
+        "sales_inseason": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales_inseason),
+        "sales_classic": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales_classic),
+        "sales_mixed": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales_mixed),
         "sale_count": len(sales),
         "trade_count": len(trades),
         "movement_count": len(summary_rows),
@@ -357,7 +351,7 @@ def movements(request):
         "balance": (
             sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
             + trade_cash_in
-            - sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases)
+            - sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases)
             - trade_cash_out
         ),
     }
@@ -387,7 +381,6 @@ def movements(request):
         "selected_rarity": rarity,
         "selected_reward_type": reward_type,
         "selected_seasonality": seasonality,
-        "selected_credit_usage": credit_usage,
         "selected_manager": selected_manager,
         "manager_nickname": manager_nickname,
         "public_rewards": public_rewards,

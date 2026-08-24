@@ -6,13 +6,11 @@ from django.db import transaction
 from django.utils import timezone
 
 from dashboard.models import (
-    BidBatchItem, MovementPaymentEvidence, MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
+    BidBatchItem, MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
     PublicRewardSnapshot, PublicRewardSyncJob, SalesInventory, SalesRefreshJob,
 )
 from dashboard.views import PATHS
-from web_services.movement_history import (
-    apply_purchase_payment_evidence, collect_movement_history, collect_public_reward_history,
-)
+from web_services.movement_history import collect_movement_history, collect_public_reward_history
 from web_services.process_runner import run_card_sale, sale_error_message
 from web_services.sales_inventory import collect_sales_inventory
 
@@ -89,46 +87,14 @@ def process_next_movement_sync():
                 "currency": item.currency,
                 "use_credit": item.use_credit,
             })
-        stored_evidence = {
-            item.auction_id: {
-                "currency": item.currency,
-                "used_credit": item.used_credit,
-                "credit_percentage": item.credit_percentage,
-                "source": item.source,
-            }
-            for item in MovementPaymentEvidence.objects.filter(auction_id__in=auction_ids)
-        }
-        apply_purchase_payment_evidence(
-            movements,
-            local_bids=local_bids,
-            stored_evidence=stored_evidence,
-        )
-
-        # Conserva nuevas pruebas locales/restricciones antes de que Sorare las
-        # purgue. Nunca sobrescribe una corrección manual o un porcentaje ya
-        # confirmado.
         for movement in movements:
             auction_id = str(movement.get("auction_id") or "")
-            if not auction_id or auction_id in stored_evidence:
-                continue
             local = local_bids.get(auction_id) or {}
-            card_proof = any(
-                card.get("credit_purchase_restricted")
-                for card in movement.get("received_cards") or movement.get("cards") or []
-            )
-            if not local and not card_proof:
-                continue
-            MovementPaymentEvidence.objects.get_or_create(
-                auction_id=auction_id,
-                defaults={
-                    "currency": str(local.get("currency") or movement.get("currency") or ""),
-                    "used_credit": bool(local.get("use_credit") or card_proof),
-                    "source": "local_bid" if local else "sorare_card_restriction",
-                },
-            )
+            if not movement.get("currency") and str(local.get("currency") or "") in {"EUR", "ETH"}:
+                movement["currency"] = local["currency"]
         MovementSnapshot.objects.update_or_create(
             user=job.user,
-            defaults={"movements": movements, "refreshed_at": timezone.now(), "source_version": 13},
+            defaults={"movements": movements, "refreshed_at": timezone.now(), "source_version": 14},
         )
         job.movement_count = len(movements)
         job.progress_label = "Historial actualizado"
