@@ -462,7 +462,7 @@ def _movement_from_group(
         "reward"
         if direction == "reward"
         else "laliga_inseason"
-        if cards and all(card["is_laliga"] and card["in_season"] for card in cards)
+        if cards and any(card["is_laliga"] and card["in_season"] for card in cards)
         else "other"
     )
     operation_id = operation.get("id") or entries[0].get("id")
@@ -634,7 +634,7 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
         received_in_trade = movement.get("received_cards") or []
         if received_in_trade:
             names = ", ".join(card.get("player") or "Carta" for card in received_in_trade)
-            notes.append(f"La venta incluyó recibir {names}; el balance mostrado solo contempla el efectivo")
+            notes.append(f"El intercambio incluyó recibir {names}")
         if disposal["sent_count"] > 1:
             notes.append("Venta conjunta: no se puede repartir el importe con precisión entre las cartas")
         if purchase_cost is None:
@@ -654,11 +654,117 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
             "purchase_cost_eur": purchase_cost,
             "sale_net_eur": sale_net,
             "balance_eur": balance,
+            "category": (
+                "laliga_inseason"
+                if "laliga_inseason" in {
+                    purchase["movement"].get("category"),
+                    movement.get("category"),
+                } or any(
+                    bool(card.get("is_laliga") and card.get("in_season"))
+                    for card in (purchase["card"], sold_card)
+                )
+                else "other"
+            ),
+            "movement_ids": list(dict.fromkeys(filter(None, (
+                str(purchase["movement"].get("id") or ""),
+                str(movement.get("id") or ""),
+            )))),
+            "trade_received_cards": list(received_in_trade),
+            "derived_sales": [],
+            "derived_sale_net_eur": Decimal("0"),
+            "realized_proceeds_eur": sale_net,
+            "pending_received_cards": list(received_in_trade),
+            "has_unknown_proceeds": sale_net is None,
+            "is_complete": not received_in_trade and sale_net is not None,
             "notes": notes,
         })
 
-    cycles.sort(key=lambda cycle: str(cycle.get("occurred_at") or ""), reverse=True)
-    return cycles
+    child_cycle_by_origin: dict[tuple[str, str], int] = {}
+    for index, cycle in enumerate(cycles):
+        # A downstream sale belongs to the original operation only when the exact
+        # card received in the trade is the one disposed of later. Player-level
+        # fallback matching is useful for standalone summaries, but would
+        # otherwise attribute a different serial's proceeds to this chain.
+        if not cycle.get("exact_card"):
+            continue
+        purchase_movement_id = str((cycle.get("purchase") or {}).get("id") or "")
+        purchase_asset_id = str((cycle.get("purchase_card") or {}).get("asset_id") or "")
+        if purchase_movement_id and purchase_asset_id:
+            child_cycle_by_origin[(purchase_movement_id, purchase_asset_id)] = index
+
+    merged_cycle_indexes: set[int] = set()
+    enriched_cycle_indexes: set[int] = set()
+
+    def enrich_cycle(index: int, ancestry: set[int] | None = None) -> dict:
+        cycle = cycles[index]
+        if index in enriched_cycle_indexes:
+            return cycle
+        ancestry = set(ancestry or ())
+        if index in ancestry:
+            return cycle
+        ancestry.add(index)
+
+        immediate = cycle.get("sale_net_eur")
+        realized = immediate if immediate is not None else Decimal("0")
+        unknown = immediate is None
+        pending = []
+        derived_sales = []
+        latest_timestamp = _movement_timestamp({"occurred_at": cycle.get("occurred_at")})
+        sale_movement_id = str((cycle.get("sale") or {}).get("id") or "")
+
+        for received_card in cycle.get("trade_received_cards") or []:
+            received_asset_id = str(received_card.get("asset_id") or "")
+            child_index = child_cycle_by_origin.get((sale_movement_id, received_asset_id))
+            if child_index is None or child_index in ancestry:
+                pending.append(received_card)
+                continue
+
+            child = enrich_cycle(child_index, ancestry)
+            merged_cycle_indexes.add(child_index)
+            child_net = child.get("sale_net_eur")
+            child_sale_at = child.get("sale_at")
+            derived_sales.append({
+                "card": child.get("sale_card") or received_card,
+                "occurred_at": child_sale_at,
+                "market": (child.get("sale") or {}).get("market") or "Venta",
+                "net_eur": child_net,
+                "received_cards": child.get("trade_received_cards") or [],
+            })
+            derived_sales.extend(child.get("derived_sales") or [])
+            child_realized = child.get("realized_proceeds_eur")
+            if child_realized is not None:
+                realized += Decimal(str(child_realized))
+            unknown = unknown or bool(child.get("has_unknown_proceeds"))
+            pending.extend(child.get("pending_received_cards") or [])
+            cycle["movement_ids"] = list(dict.fromkeys(
+                (cycle.get("movement_ids") or []) + (child.get("movement_ids") or [])
+            ))
+            child_timestamp = _movement_timestamp({"occurred_at": child.get("occurred_at")})
+            latest_timestamp = max(latest_timestamp, child_timestamp)
+
+        cycle["derived_sales"] = derived_sales
+        cycle["derived_sale_net_eur"] = realized - (immediate if immediate is not None else Decimal("0"))
+        cycle["realized_proceeds_eur"] = realized
+        cycle["pending_received_cards"] = pending
+        cycle["has_unknown_proceeds"] = unknown
+        cycle["is_complete"] = not pending and not unknown
+        purchase_cost = cycle.get("purchase_cost_eur")
+        cycle["balance_eur"] = realized - purchase_cost if purchase_cost is not None else None
+        cycle["occurred_at"] = latest_timestamp.isoformat()
+        if pending:
+            cycle["notes"].append(
+                f"{len(pending)} carta{'s' if len(pending) != 1 else ''} recibida"
+                f"{'s' if len(pending) != 1 else ''} sigue{'n' if len(pending) != 1 else ''} sin venta contabilizada"
+            )
+        enriched_cycle_indexes.add(index)
+        return cycle
+
+    for cycle_index in range(len(cycles)):
+        enrich_cycle(cycle_index)
+
+    result = [cycle for index, cycle in enumerate(cycles) if index not in merged_cycle_indexes]
+    result.sort(key=lambda cycle: str(cycle.get("occurred_at") or ""), reverse=True)
+    return result
 
 
 def collect_public_reward_history(

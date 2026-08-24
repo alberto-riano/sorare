@@ -39,7 +39,7 @@ class LaLigaAuctionTests(TestCase):
     def test_cache_refresh_always_rebuilds_full_public_feed(self, _headers, _teams, _positions):
         card = self._card("new-market-card", "rare", 2026, "real-madrid-madrid")
         auction = self._auction(card)
-        auction["endDate"] = "2026-08-20T12:00:00Z"
+        auction["endDate"] = "2099-08-20T12:00:00Z"
         response = {
             "currentUser": {"nickname": "burguis"},
             "tokens": {"liveAuctions": {
@@ -745,6 +745,25 @@ class MovementHistoryTests(TestCase):
         self.assertEqual([card["player"] for card in movement["received_cards"]], ["Matías Dituro"])
         self.assertEqual((movement["gross_eur"], movement["net_eur"]), (45.0, 42.75))
 
+    def test_mixed_trade_stays_in_laliga_when_one_card_is_relevant(self):
+        yangel = self._api_card(player="Yangel Herrera")
+        classic = self._api_card(player="Carta Classic", in_season=False, league="j1-league")
+        operation = {
+            "__typename": "TokenOffer", "id": "yangel-trade", "transactionDate": "2026-08-20T21:44:44Z",
+            "type": "DIRECT_OFFER", "userBuyer": {"slug": "other"}, "userSeller": {"slug": "burguis"},
+            "sender": {"slug": "burguis"}, "receiver": {"slug": "other"},
+            "marketFeeAmounts": {"eurCents": 22, "referenceCurrency": "EUR"},
+            "senderSide": {"amounts": {"eurCents": 0}, "anyCards": [yangel]},
+            "receiverSide": {"amounts": {"eurCents": 448, "referenceCurrency": "EUR"}, "anyCards": [classic]},
+        }
+
+        movement = _movement_from_group([{
+            "id": "yangel-trade", "date": operation["transactionDate"], "entryType": "PAYMENT",
+            "amounts": operation["receiverSide"]["amounts"], "tokenOperation": operation,
+        }], "burguis")
+
+        self.assertEqual(movement["category"], "laliga_inseason")
+
     def test_classic_card_goes_to_other_movements(self):
         card = self._api_card(player="Take", in_season=False)
         operation = {
@@ -852,7 +871,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(movement["reward_rarity"], "rare")
         self.assertEqual(movement["currency"], "")
 
-        MovementSnapshot.objects.create(user=self.user, movements=[movement], source_version=6)
+        MovementSnapshot.objects.create(user=self.user, movements=[movement], source_version=7)
         response = self.client.get(reverse("movements"), {"category": "reward", "reward_type": "essence"})
         self.assertContains(response, "+20 Esencia")
         self.assertContains(response, "reward-kind reward-essence rarity-rare")
@@ -888,6 +907,51 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(cycle["balance_eur"], Decimal("1.80"))
         self.assertIn("compra #19 · venta #16", cycle["notes"][0])
         self.assertIn("compra es posterior", cycle["notes"][1])
+
+    def test_trade_cycle_includes_later_sales_of_received_cards(self):
+        yangel = {
+            "asset_id": "yangel-23", "player": "Yangel Herrera", "player_slug": "yangel-herrera",
+            "team": "Girona FC", "rarity": "rare", "season_year": 2026, "in_season": True,
+            "is_laliga": True, "serial_number": 23,
+        }
+        hugo = {
+            "asset_id": "hugo-17", "player": "Hugo Cuenca", "player_slug": "hugo-cuenca",
+            "team": "Genoa", "rarity": "rare", "season_year": 2026, "in_season": True,
+            "is_laliga": False, "serial_number": 17,
+        }
+        ruben = {
+            "asset_id": "ruben-110", "player": "Rubén Sánchez", "player_slug": "ruben-sanchez",
+            "team": "Espanyol", "rarity": "limited", "season_year": 2026, "in_season": True,
+            "is_laliga": True, "serial_number": 110,
+        }
+        purchase = {
+            "id": "yangel-buy", "occurred_at": "2026-08-20T20:21:25Z", "direction": "purchase",
+            "cash_direction": "purchase", "market": "Subasta", "category": "laliga_inseason",
+            "cards": [yangel], "received_cards": [yangel], "sent_cards": [], "net_eur": 20,
+        }
+        trade = {
+            "id": "yangel-trade", "occurred_at": "2026-08-20T21:44:44Z", "direction": "trade",
+            "cash_direction": "sale", "market": "Intercambio + dinero", "category": "laliga_inseason",
+            "cards": [yangel, hugo, ruben], "received_cards": [hugo, ruben], "sent_cards": [yangel],
+            "gross_eur": 4.48, "net_eur": 4.26, "fee_eur": .22,
+        }
+        hugo_sale = {
+            "id": "hugo-sale", "occurred_at": "2026-08-22T10:00:00Z", "direction": "sale",
+            "cash_direction": "sale", "market": "Oferta pública", "category": "other",
+            "cards": [hugo], "received_cards": [], "sent_cards": [hugo], "gross_eur": 3.2,
+            "net_eur": 3.04, "fee_eur": .16,
+        }
+
+        cycles = build_trade_cycles([purchase, trade, hugo_sale])
+
+        self.assertEqual(len(cycles), 1)
+        self.assertEqual(cycles[0]["sale_card"]["player"], "Yangel Herrera")
+        self.assertEqual(cycles[0]["realized_proceeds_eur"], Decimal("7.30"))
+        self.assertEqual(cycles[0]["balance_eur"], Decimal("-12.70"))
+        self.assertEqual([item["card"]["player"] for item in cycles[0]["derived_sales"]], ["Hugo Cuenca"])
+        self.assertEqual([card["player"] for card in cycles[0]["pending_received_cards"]], ["Rubén Sánchez"])
+        self.assertEqual(set(cycles[0]["movement_ids"]), {"yangel-buy", "yangel-trade", "hugo-sale"})
+        self.assertFalse(cycles[0]["is_complete"])
 
     @patch("web_services.movement_history.graphql_request")
     def test_collector_uses_completed_trades_and_discards_open_auctions(self, request):
@@ -929,7 +993,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
         snapshot = MovementSnapshot.objects.get(user=self.user)
         self.assertEqual(snapshot.movements[0]["id"], "movement-1")
-        self.assertEqual(snapshot.source_version, 6)
+        self.assertEqual(snapshot.source_version, 7)
 
     @patch("web_services.movement_history.graphql_request")
     def test_collector_adds_confirmed_gameweek_rewards(self, request):
@@ -1061,7 +1125,7 @@ class MovementHistoryTests(TestCase):
                        essence=[{"quantity": 10, "rarity": "super_rare"}], essence_quantity=10)
         card_data = {"asset_id": "reward-card", "player": "Carta premio", "team": "Equipo", "rarity": "limited"}
         card = dict(base, id="card", reward_type="card", reward_rarity="limited", cards=[card_data])
-        MovementSnapshot.objects.create(user=self.user, movements=[money, essence, card], source_version=6)
+        MovementSnapshot.objects.create(user=self.user, movements=[money, essence, card], source_version=7)
 
         response = self.client.get(reverse("movements"), {"category": "reward", "reward_type": "essence"})
 
@@ -1087,7 +1151,7 @@ class MovementHistoryTests(TestCase):
         money = dict(base, id="money", reward_type="money", gross_eur=22.46, currency="ETH")
         cards = dict(base, id="cards", reward_type="card", cards=[{"player": "Uno"}, {"player": "Dos"}])
         MovementSnapshot.objects.create(
-            user=self.user, source_version=6,
+            user=self.user, source_version=7,
             movements=[limited, rare, super_rare, money, cards],
         )
 
@@ -1103,7 +1167,7 @@ class MovementHistoryTests(TestCase):
         self.assertContains(response, "Cartas recibidas")
 
     def test_default_history_starts_on_current_season_date_but_can_be_cleared(self):
-        MovementSnapshot.objects.create(user=self.user, source_version=6, movements=[
+        MovementSnapshot.objects.create(user=self.user, source_version=7, movements=[
             {"id": "before", "occurred_at": "2026-08-12T21:59:00Z", "direction": "purchase", "category": "other", "cards": [{"player": "Antes de temporada"}]},
             {"id": "current", "occurred_at": "2026-08-12T22:00:00Z", "direction": "purchase", "category": "other", "cards": [{"player": "Temporada actual"}]},
         ])
@@ -1126,6 +1190,26 @@ class MovementHistoryTests(TestCase):
         self.assertNotContains(response, ">Take<")
         self.assertEqual(response.context["totals"]["purchases"], Decimal("8"))
         self.assertEqual(response.context["totals"]["credits"], Decimal("2"))
+
+    def test_default_page_includes_classic_purchases_and_rarity_indicator(self):
+        camavinga = {
+            "asset_id": "camavinga-73", "player": "Eduardo Camavinga", "player_slug": "eduardo-camavinga",
+            "team": "Real Madrid", "rarity": "rare", "season_year": 2021, "in_season": False,
+            "is_laliga": True, "serial_number": 73,
+        }
+        MovementSnapshot.objects.create(user=self.user, source_version=7, movements=[{
+            "id": "camavinga-buy", "occurred_at": "2026-08-23T08:19:25Z", "direction": "purchase",
+            "cash_direction": "purchase", "market": "Oferta pública", "category": "other",
+            "cards": [camavinga], "received_cards": [camavinga], "sent_cards": [],
+            "gross_eur": 5.52, "net_eur": 5.52, "currency": "EUR",
+        }])
+
+        response = self.client.get(reverse("movements"))
+
+        self.assertEqual(response.context["selected_category"], "all")
+        self.assertContains(response, "Eduardo Camavinga")
+        self.assertContains(response, "Classic")
+        self.assertContains(response, "card-rarity-dot rarity-rare")
 
     def test_page_inlines_purchase_sale_cycles_and_keeps_unmatched_movements(self):
         mathew = {
@@ -1174,6 +1258,39 @@ class MovementHistoryTests(TestCase):
         self.assertContains(response, "45,00 €")
         self.assertContains(response, "42,75 €")
         self.assertContains(response, "−2,25 € comisión")
+
+    def test_yangel_chain_is_one_row_and_summary_includes_later_card_sale(self):
+        yangel = {
+            "asset_id": "yangel-23", "player": "Yangel Herrera", "player_slug": "yangel-herrera",
+            "team": "Girona FC", "rarity": "rare", "season_year": 2026, "in_season": True,
+            "is_laliga": True, "serial_number": 23,
+        }
+        hugo = {
+            "asset_id": "hugo-17", "player": "Hugo Cuenca", "player_slug": "hugo-cuenca",
+            "team": "Genoa", "rarity": "rare", "season_year": 2026, "in_season": True,
+            "is_laliga": False, "serial_number": 17,
+        }
+        MovementSnapshot.objects.create(user=self.user, source_version=7, movements=[
+            {"id": "yangel-buy", "occurred_at": "2026-08-20T20:21:25Z", "direction": "purchase", "cash_direction": "purchase", "market": "Subasta", "category": "laliga_inseason", "cards": [yangel], "received_cards": [yangel], "sent_cards": [], "gross_eur": 20, "net_eur": 20},
+            {"id": "yangel-trade", "occurred_at": "2026-08-20T21:44:44Z", "direction": "trade", "cash_direction": "sale", "market": "Intercambio + dinero", "category": "laliga_inseason", "cards": [yangel, hugo], "received_cards": [hugo], "sent_cards": [yangel], "gross_eur": 4.48, "net_eur": 4.26, "fee_eur": .22},
+            {"id": "hugo-sale", "occurred_at": "2026-08-22T10:00:00Z", "direction": "sale", "cash_direction": "sale", "market": "Oferta pública", "category": "other", "cards": [hugo], "received_cards": [], "sent_cards": [hugo], "gross_eur": 3.2, "net_eur": 3.04, "fee_eur": .16},
+            {"id": "unrelated", "occurred_at": "2026-08-21T10:00:00Z", "direction": "purchase", "cash_direction": "purchase", "market": "Subasta", "category": "other", "cards": [{"asset_id": "other", "player": "Otro jugador", "rarity": "limited"}], "received_cards": [{"asset_id": "other", "player": "Otro jugador", "rarity": "limited"}], "sent_cards": [], "gross_eur": 100, "net_eur": 100},
+        ])
+
+        response = self.client.get(reverse("movements"), {
+            "category": "all", "player": "Yangel", "date_from": "",
+        })
+
+        self.assertEqual(response.context["total_rows"], 1)
+        self.assertContains(response, "Yangel Herrera")
+        self.assertContains(response, "Hugo Cuenca")
+        self.assertContains(response, "Ventas posteriores")
+        self.assertContains(response, "+7,30 €")
+        self.assertNotContains(response, "Otro jugador")
+        self.assertEqual(response.context["totals"]["purchases"], Decimal("20"))
+        self.assertEqual(response.context["totals"]["trade_cash_in"], Decimal("4.26"))
+        self.assertEqual(response.context["totals"]["sales_net"], Decimal("3.04"))
+        self.assertEqual(response.context["totals"]["balance"], Decimal("-12.70"))
 
     def test_first_visit_enqueues_background_sync(self):
         response = self.client.get(reverse("movements"))

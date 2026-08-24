@@ -95,7 +95,7 @@ class MovementSnapshot(models.Model):
     )
     movements = models.JSONField(default=list)
     refreshed_at = models.DateTimeField(null=True, blank=True)
-    source_version = models.PositiveSmallIntegerField(default=6)
+    source_version = models.PositiveSmallIntegerField(default=7)
 
 
 class MovementSyncJob(models.Model):

@@ -124,9 +124,9 @@ def _movement_datetime(value):
 
 
 def movements(request):
-    category = request.GET.get("category", "laliga_inseason")
+    category = request.GET.get("category", "all")
     if category not in {"laliga_inseason", "reward", "other", "all"}:
-        category = "laliga_inseason"
+        category = "all"
     selected_manager = request.GET.get("manager", "me") if category == "reward" else "me"
     if selected_manager not in {"me", PUBLIC_REWARD_MANAGER_SLUG}:
         selected_manager = "me"
@@ -147,7 +147,7 @@ def movements(request):
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
         stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 6 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 7 else None
         active_sync = MovementSyncJob.objects.filter(
             user=request.user,
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -167,7 +167,7 @@ def movements(request):
     date_from = "2026-08-13" if requested_date_from is None else requested_date_from.strip()
     date_to = request.GET.get("date_to", "").strip()
 
-    rows = []
+    prepared_rows = []
     rarities = set()
     for raw in all_movements:
         row = dict(raw)
@@ -188,6 +188,13 @@ def movements(request):
             )
         occurred_at = _movement_datetime(row.get("occurred_at"))
         row["occurred_at_dt"] = occurred_at
+        prepared_rows.append(row)
+
+    rows = []
+    for row in prepared_rows:
+        cards = row.get("cards") or []
+        essence = row.get("essence") or []
+        occurred_at = row.get("occurred_at_dt")
         if category != "all" and row.get("category") != category:
             continue
         if direction and row.get("direction") != direction and row.get("cash_direction") != direction:
@@ -209,17 +216,32 @@ def movements(request):
             continue
         rows.append(row)
 
-    cycles = build_trade_cycles(rows) if not direction else []
+    cycles = []
+    if not direction and category != "reward":
+        for cycle in build_trade_cycles(prepared_rows):
+            cycle_cards = [cycle.get("purchase_card") or {}, cycle.get("sale_card") or {}]
+            cycle_at = _movement_datetime(cycle.get("occurred_at"))
+            if category != "all" and cycle.get("category") != category:
+                continue
+            if rarity and not any(card.get("rarity") == rarity for card in cycle_cards):
+                continue
+            if player and not any(player in str(card.get("player") or "").casefold() for card in cycle_cards):
+                continue
+            local_cycle_at = cycle_at.astimezone(ZoneInfo("Europe/Madrid")) if cycle_at else None
+            cycle_date = local_cycle_at.date().isoformat() if local_cycle_at else ""
+            if date_from and cycle_date < date_from:
+                continue
+            if date_to and cycle_date > date_to:
+                continue
+            cycles.append(cycle)
+
     consumed_movement_ids = set()
     for cycle in cycles:
         cycle["row_type"] = "cycle"
         cycle["purchase_at_dt"] = _movement_datetime(cycle.get("purchase_at"))
         cycle["sale_at_dt"] = _movement_datetime(cycle.get("sale_at"))
         cycle["occurred_at_dt"] = _movement_datetime(cycle.get("occurred_at"))
-        consumed_movement_ids.update({
-            str(cycle.get("purchase", {}).get("id") or ""),
-            str(cycle.get("sale", {}).get("id") or ""),
-        })
+        consumed_movement_ids.update(str(value) for value in cycle.get("movement_ids") or [] if value)
     for row in rows:
         row["row_type"] = "movement"
 
@@ -232,9 +254,23 @@ def movements(request):
         reverse=True,
     )
 
-    purchases = [row for row in rows if (row.get("cash_direction") or row.get("direction")) == "purchase"]
-    sales = [row for row in rows if (row.get("cash_direction") or row.get("direction")) == "sale"]
-    rewards = [row for row in rows if row.get("direction") == "reward"]
+    summary_rows_by_id = {str(row.get("id") or id(row)): row for row in rows}
+    prepared_rows_by_id = {str(row.get("id") or ""): row for row in prepared_rows if row.get("id")}
+    for movement_id in consumed_movement_ids:
+        if movement_id in prepared_rows_by_id:
+            summary_rows_by_id[movement_id] = prepared_rows_by_id[movement_id]
+    summary_rows = list(summary_rows_by_id.values())
+
+    purchases = [row for row in summary_rows if row.get("direction") == "purchase"]
+    sales = [row for row in summary_rows if row.get("direction") == "sale"]
+    trades = [row for row in summary_rows if row.get("direction") == "trade"]
+    rewards = [row for row in summary_rows if row.get("direction") == "reward"]
+    trade_cash_in = sum(
+        Decimal(str(row.get("net_eur") or 0)) for row in trades if row.get("cash_direction") == "sale"
+    )
+    trade_cash_out = sum(
+        Decimal(str(row.get("net_eur") or 0)) for row in trades if row.get("cash_direction") == "purchase"
+    )
     essence_totals = {"limited": 0, "rare": 0, "super_rare": 0}
     for reward in rewards:
         essence_items = reward.get("essence") or []
@@ -251,16 +287,26 @@ def movements(request):
         "purchases": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases),
         "sales_gross": sum(Decimal(str(row.get("gross_eur") or 0)) for row in sales),
         "sales_net": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales),
-        "fees": sum(Decimal(str(row.get("fee_eur") or 0)) for row in sales),
+        "fees": sum(Decimal(str(row.get("fee_eur") or 0)) for row in summary_rows),
         "credits": sum(Decimal(str(row.get("credits_eur") or 0)) for row in purchases),
+        "purchase_count": len(purchases),
+        "sale_count": len(sales),
+        "trade_count": len(trades),
+        "movement_count": len(summary_rows),
+        "trade_cash_in": trade_cash_in,
+        "trade_cash_out": trade_cash_out,
         "rewards": len(rewards),
         "reward_money": sum(Decimal(str(row.get("gross_eur") or 0)) for row in rewards if row.get("reward_type") == "money"),
         "reward_cards": sum(len(row.get("cards") or []) for row in rewards if row.get("reward_type") == "card"),
         "essence_limited": essence_totals["limited"],
         "essence_rare": essence_totals["rare"],
         "essence_super_rare": essence_totals["super_rare"],
-        "balance": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
-        - sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases),
+        "balance": (
+            sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
+            + trade_cash_in
+            - sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases)
+            - trade_cash_out
+        ),
     }
     try:
         per_page = int(request.GET.get("per_page", 25))
