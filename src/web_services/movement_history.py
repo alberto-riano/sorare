@@ -75,10 +75,24 @@ query CompletedTrades($first: Int!, $after: String) {
 }
 """
 
+PAYMENT_HISTORY_START = "2026-08-11T22:00:00Z"  # 12/08/2026 00:00 en Madrid
+
 PAYMENT_ACCOUNTS_QUERY = """
-query MovementPaymentAccounts($first: Int!, $after: String) {
+query MovementPaymentAccounts(
+  $first: Int!
+  $after: String
+  $currencies: [SupportedCurrency!]
+  $startDate: ISO8601DateTime
+) {
   currentUser {
-    accountEntries(first: $first, after: $after, entryType: [PAYMENT]) {
+    accountEntries(
+      first: $first
+      after: $after
+      entryType: [PAYMENT]
+      currencies: $currencies
+      startDate: $startDate
+      sortType: DESC
+    ) {
       nodes {
         id provisional aasmState amounts { eurCents wei referenceCurrency }
         account {
@@ -370,6 +384,16 @@ def _cash_side(operation: dict) -> dict:
 
 def _purchase_credit_eur(operation: dict, gross_eur: float) -> float:
     """Obtiene el descuento aplicado sin confundirlo con el saldo histórico del crédito."""
+    # El apunte confirmado de la cuenta EUR es la prueba más precisa: refleja
+    # lo que realmente salió del saldo después de aplicar créditos. Es
+    # preferible a ``totalDiscount``, que en créditos reutilizables puede ser
+    # un acumulado de varias compras.
+    paid_eur = operation.get("paidEur")
+    if paid_eur is not None and operation.get("paymentCurrency") == "EUR":
+        account_discount = max(gross_eur - float(paid_eur), 0.0)
+        if 0 < account_discount <= gross_eur:
+            return account_discount
+
     purchase_id = str((operation.get("auction") or {}).get("id") or operation.get("id") or "")
     credits = list(operation.get("conversionCredits") or [])
     if not credits and operation.get("conversionCredit"):
@@ -389,11 +413,6 @@ def _purchase_credit_eur(operation: dict, gross_eur: float) -> float:
     if 0 < matched_discount <= gross_eur:
         return matched_discount
 
-    paid_eur = operation.get("paidEur")
-    if paid_eur is not None:
-        account_discount = max(gross_eur - float(paid_eur), 0.0)
-        if 0 < account_discount <= gross_eur:
-            return account_discount
     return 0.0
 
 
@@ -991,33 +1010,45 @@ def collect_movement_history(
 
     payment_currencies: dict[str, set[str]] = {}
     payment_amounts_eur: dict[str, Decimal] = {}
-    cursor = None
-    payment_page = 0
-    while True:
-        payment_page += 1
-        data = graphql_request(PAYMENT_ACCOUNTS_QUERY, {"first": 100, "after": cursor}, headers=headers)
-        connection = ((data.get("currentUser") or {}).get("accountEntries") or {})
-        for entry in connection.get("nodes") or []:
-            operation_id = str((entry.get("tokenOperation") or {}).get("id") or "")
-            currency = _account_currency(entry)
-            if (
-                operation_id
-                and currency
-                and not entry.get("provisional")
-                and entry.get("aasmState") == "CONFIRMED"
-            ):
-                payment_currencies.setdefault(operation_id, set()).add(currency)
-                if entry.get("amounts") is not None:
-                    payment_amounts_eur[operation_id] = (
-                        payment_amounts_eur.get(operation_id, Decimal("0"))
-                        + Decimal(str(_money(entry.get("amounts"))["eur"]))
-                    )
-        if progress:
-            progress(len(trades), f"Verificando monedas de pago · página {payment_page}")
-        page_info = connection.get("pageInfo") or {}
-        if not page_info.get("hasNextPage"):
-            break
-        cursor = page_info.get("endCursor")
+    # ``account.accountable`` puede ser CommonAccount y no identifica la
+    # divisa. Consultar la conexión una vez por moneda sí lo hace: Sorare solo
+    # devuelve en cada pasada los apuntes que realmente se pagaron con ese
+    # saldo. Esto también corrige subastas denominadas en ETH pero abonadas con
+    # EUR (fiatPayment puede ser false en esos casos).
+    for api_currency, display_currency in (("EUR", "EUR"), ("WEI", "ETH")):
+        cursor = None
+        payment_page = 0
+        while True:
+            payment_page += 1
+            data = graphql_request(PAYMENT_ACCOUNTS_QUERY, {
+                "first": 100,
+                "after": cursor,
+                "currencies": [api_currency],
+                "startDate": PAYMENT_HISTORY_START,
+            }, headers=headers)
+            connection = ((data.get("currentUser") or {}).get("accountEntries") or {})
+            for entry in connection.get("nodes") or []:
+                operation_id = str((entry.get("tokenOperation") or {}).get("id") or "")
+                if (
+                    operation_id
+                    and not entry.get("provisional")
+                    and entry.get("aasmState") == "CONFIRMED"
+                ):
+                    payment_currencies.setdefault(operation_id, set()).add(display_currency)
+                    if display_currency == "EUR" and entry.get("amounts") is not None:
+                        payment_amounts_eur[operation_id] = (
+                            payment_amounts_eur.get(operation_id, Decimal("0"))
+                            + Decimal(str(_money(entry.get("amounts"))["eur"]))
+                        )
+            if progress:
+                progress(
+                    len(trades),
+                    f"Verificando pagos en {display_currency} · página {payment_page}",
+                )
+            page_info = connection.get("pageInfo") or {}
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
     for operation in operations:
         currencies = payment_currencies.get(str(operation.get("id") or ""), set())
         payment_currency = next(iter(currencies)) if len(currencies) == 1 else ""

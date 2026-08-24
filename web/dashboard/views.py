@@ -147,7 +147,7 @@ def movements(request):
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
         stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 11 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 12 else None
         active_sync = MovementSyncJob.objects.filter(
             user=request.user,
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -174,7 +174,7 @@ def movements(request):
     if category == "reward" or credit_usage != "used":
         credit_usage = ""
     requested_date_from = request.GET.get("date_from")
-    date_from = "2026-08-13" if requested_date_from is None else requested_date_from.strip()
+    date_from = "2026-08-12" if requested_date_from is None else requested_date_from.strip()
     date_to = request.GET.get("date_to", "").strip()
 
     prepared_rows = []
