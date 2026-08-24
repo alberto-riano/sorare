@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Callable
 
 from sorare_utils import build_headers, graphql_request
@@ -13,6 +13,10 @@ CARD_FIELDS = """
   anyTeam {
     name pictureUrl
     ... on Club { domesticLeague { slug displayName } }
+  }
+  tokenOwner {
+    from settleAt settlementDelayReason
+    user { slug }
   }
 """
 
@@ -307,6 +311,7 @@ def _card(card: dict) -> dict:
     league_slug = str(league.get("slug") or "").casefold()
     league_name = str(league.get("displayName") or "")
     is_laliga = "laliga" in league_slug or "laliga" in league_name.casefold()
+    token_owner = card.get("tokenOwner") or {}
     return {
         "asset_id": card.get("assetId") or "",
         "card_slug": card.get("slug") or "",
@@ -321,6 +326,10 @@ def _card(card: dict) -> dict:
         "in_season": bool(card.get("inSeasonEligible")),
         "league": league_name or "—",
         "is_laliga": is_laliga,
+        "credit_purchase_restricted": token_owner.get("settlementDelayReason") == "CONVERSION_CREDIT_USED",
+        "owner_since": token_owner.get("from"),
+        "settle_at": token_owner.get("settleAt"),
+        "owner_slug": str((token_owner.get("user") or {}).get("slug") or ""),
     }
 
 
@@ -549,6 +558,7 @@ def _movement_from_group(
         else "other"
     )
     operation_id = operation.get("id") or entries[0].get("id")
+    auction_id = str((operation.get("auction") or {}).get("id") or "") if typename == "TokenBid" else ""
     essence_quantity = sum(item["quantity"] for item in essence)
     essence_labels = []
     for item in essence:
@@ -568,6 +578,7 @@ def _movement_from_group(
             reward_rarity = str((cards[0] if cards else {}).get("rarity") or "")
     return {
         "id": str(operation_id),
+        "auction_id": auction_id,
         "occurred_at": occurred_at,
         "direction": direction,
         "cash_direction": cash_direction,
@@ -580,6 +591,7 @@ def _movement_from_group(
         "net_eur": round(net_eur, 2),
         "fee_eur": round(fee_eur, 2),
         "credits_eur": round(credits_eur, 2),
+        "used_credit": credits_eur > 0 or any(card.get("credit_purchase_restricted") for card in received_cards),
         "currency": gross["currency"],
         "eth": gross["eth"],
         "essence": essence,
@@ -589,6 +601,69 @@ def _movement_from_group(
         "reward_rarity": reward_rarity,
         "entry_types": sorted({entry.get("entryType") for entry in entries if entry.get("entryType")}),
     }
+
+
+def apply_purchase_payment_evidence(
+    movements: list[dict],
+    *,
+    local_bids: dict[str, dict] | None = None,
+    stored_evidence: dict[str, dict] | None = None,
+) -> list[dict]:
+    """Completa pagos que Sorare deja de exponer usando pruebas persistidas.
+
+    Los importes exactos devueltos por Sorare siempre tienen prioridad. Las
+    fuentes locales solo rellenan huecos y nunca sustituyen un dato privado
+    confirmado por la API.
+    """
+    local_bids = local_bids or {}
+    stored_evidence = stored_evidence or {}
+    cent = Decimal("0.01")
+
+    for movement in movements:
+        if movement.get("direction") != "purchase" or movement.get("market") != "Subasta":
+            continue
+        auction_id = str(movement.get("auction_id") or "")
+        if not auction_id:
+            continue
+
+        stored = stored_evidence.get(auction_id) or {}
+        local = local_bids.get(auction_id) or {}
+        card_proof = any(
+            card.get("credit_purchase_restricted")
+            for card in movement.get("received_cards") or movement.get("cards") or []
+        )
+        used_credit = bool(
+            movement.get("used_credit")
+            or movement.get("credits_eur")
+            or stored.get("used_credit")
+            or local.get("use_credit")
+            or card_proof
+        )
+        movement["used_credit"] = used_credit
+
+        if not movement.get("currency"):
+            currency = str(stored.get("currency") or local.get("currency") or "").upper()
+            if currency in {"EUR", "ETH"}:
+                movement["currency"] = currency
+
+        if used_credit and not movement.get("credits_eur"):
+            percentage = stored.get("credit_percentage")
+            if percentage is not None:
+                gross = Decimal(str(movement.get("gross_eur") or 0))
+                discount = (gross * Decimal(str(percentage)) / Decimal("100")).quantize(
+                    cent,
+                    rounding=ROUND_HALF_UP,
+                )
+                movement["credits_eur"] = float(discount)
+                movement["net_eur"] = float(max(gross - discount, Decimal("0")))
+
+        if stored:
+            movement["payment_evidence_source"] = stored.get("source") or "stored"
+        elif local:
+            movement["payment_evidence_source"] = "local_bid"
+        elif card_proof:
+            movement["payment_evidence_source"] = "card_restriction"
+    return movements
 
 
 def _reward_market(operation: dict) -> str:

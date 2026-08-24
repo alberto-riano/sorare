@@ -147,7 +147,7 @@ def movements(request):
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
         stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 12 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 13 else None
         active_sync = MovementSyncJob.objects.filter(
             user=request.user,
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -237,7 +237,7 @@ def movements(request):
         if seasonality == "classic" and not any(not bool(card.get("in_season")) for card in cards):
             continue
         row_credits = Decimal(str(row.get("credits_eur") or 0))
-        if credit_usage == "used" and row_credits <= 0:
+        if credit_usage == "used" and row_credits <= 0 and not row.get("used_credit"):
             continue
         if not in_selected_window(row):
             continue
@@ -257,8 +257,9 @@ def movements(request):
                 continue
             if seasonality == "classic" and not any(not bool(card.get("in_season")) for card in cycle_season_cards):
                 continue
-            cycle_credits = Decimal(str((cycle.get("purchase") or {}).get("credits_eur") or 0))
-            if credit_usage == "used" and cycle_credits <= 0:
+            cycle_purchase = cycle.get("purchase") or {}
+            cycle_credits = Decimal(str(cycle_purchase.get("credits_eur") or 0))
+            if credit_usage == "used" and cycle_credits <= 0 and not cycle_purchase.get("used_credit"):
                 continue
             local_cycle_at = cycle_at.astimezone(ZoneInfo("Europe/Madrid")) if cycle_at else None
             cycle_date = local_cycle_at.date().isoformat() if local_cycle_at else ""
@@ -334,7 +335,10 @@ def movements(request):
         "sales_net": sum(Decimal(str(row.get("net_eur") or 0)) for row in sales),
         "fees": sum(Decimal(str(row.get("fee_eur") or 0)) for row in summary_rows),
         "credits": sum(Decimal(str(row.get("credits_eur") or 0)) for row in purchases),
-        "credit_purchase_count": sum(Decimal(str(row.get("credits_eur") or 0)) > 0 for row in purchases),
+        "credit_purchase_count": sum(
+            Decimal(str(row.get("credits_eur") or 0)) > 0 or bool(row.get("used_credit"))
+            for row in purchases
+        ),
         "purchase_count": len(purchases),
         "purchases_inseason": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases_inseason),
         "purchases_classic": sum(Decimal(str(row.get("net_eur") or 0)) for row in purchases_classic),
