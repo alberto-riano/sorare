@@ -147,7 +147,7 @@ def movements(request):
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
         stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 10 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 11 else None
         active_sync = MovementSyncJob.objects.filter(
             user=request.user,
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -158,18 +158,20 @@ def movements(request):
 
     all_movements = list(snapshot.movements if snapshot else [])
     direction = request.GET.get("direction", "")
+    if category == "reward" or direction not in {"", "purchase", "sale", "trade"}:
+        direction = ""
     allowed_rarities = {"limited", "rare", "super_rare", "unique"}
     rarity = request.GET.get("rarity", "")
     if rarity not in allowed_rarities:
         rarity = ""
     reward_type = request.GET.get("reward_type", "")
-    if reward_type not in {"money", "essence", "card"}:
+    if category != "reward" or reward_type not in {"money", "essence", "card"}:
         reward_type = ""
     seasonality = request.GET.get("seasonality", "")
-    if seasonality not in {"inseason", "classic"}:
+    if category == "reward" or seasonality not in {"inseason", "classic"}:
         seasonality = ""
     credit_usage = request.GET.get("credit_usage", "")
-    if credit_usage != "used":
+    if category == "reward" or credit_usage != "used":
         credit_usage = ""
     requested_date_from = request.GET.get("date_from")
     date_from = "2026-08-13" if requested_date_from is None else requested_date_from.strip()
@@ -198,11 +200,27 @@ def movements(request):
         row["occurred_at_dt"] = occurred_at
         prepared_rows.append(row)
 
+    def in_selected_window(row):
+        occurred_at = row.get("occurred_at_dt")
+        local_occurred_at = occurred_at.astimezone(ZoneInfo("Europe/Madrid")) if occurred_at else None
+        iso_date = local_occurred_at.date().isoformat() if local_occurred_at else ""
+        if date_from and iso_date < date_from:
+            return False
+        if date_to and iso_date > date_to:
+            return False
+        return True
+
+    # El inicio del intervalo es el estado de partida: una adquisición anterior
+    # no debe arrastrar su coste ni formar un ciclo con movimientos posteriores.
+    cycle_source_rows = [row for row in prepared_rows if in_selected_window(row)]
+
     rows = []
     for row in prepared_rows:
         cards = row.get("cards") or []
         essence = row.get("essence") or []
         occurred_at = row.get("occurred_at_dt")
+        if category == "all" and row.get("category") == "reward":
+            continue
         if category != "all" and row.get("category") != category:
             continue
         if direction and row.get("direction") != direction and row.get("cash_direction") != direction:
@@ -221,17 +239,13 @@ def movements(request):
         row_credits = Decimal(str(row.get("credits_eur") or 0))
         if credit_usage == "used" and row_credits <= 0:
             continue
-        local_occurred_at = occurred_at.astimezone(ZoneInfo("Europe/Madrid")) if occurred_at else None
-        iso_date = local_occurred_at.date().isoformat() if local_occurred_at else ""
-        if date_from and iso_date < date_from:
-            continue
-        if date_to and iso_date > date_to:
+        if not in_selected_window(row):
             continue
         rows.append(row)
 
     cycles = []
     if not direction and category != "reward":
-        for cycle in build_trade_cycles(prepared_rows):
+        for cycle in build_trade_cycles(cycle_source_rows):
             cycle_cards = [cycle.get("purchase_card") or {}, cycle.get("sale_card") or {}]
             cycle_at = _movement_datetime(cycle.get("occurred_at"))
             if category != "all" and cycle.get("category") != category:
@@ -274,7 +288,7 @@ def movements(request):
     )
 
     summary_rows_by_id = {str(row.get("id") or id(row)): row for row in rows}
-    prepared_rows_by_id = {str(row.get("id") or ""): row for row in prepared_rows if row.get("id")}
+    prepared_rows_by_id = {str(row.get("id") or ""): row for row in cycle_source_rows if row.get("id")}
     for movement_id in consumed_movement_ids:
         if movement_id in prepared_rows_by_id:
             summary_rows_by_id[movement_id] = prepared_rows_by_id[movement_id]
@@ -358,7 +372,7 @@ def movements(request):
         "active_sync": active_sync,
         "page_obj": page_obj,
         "total_rows": len(display_rows),
-        "all_count": len(all_movements),
+        "all_count": sum(row.get("category") != "reward" for row in all_movements),
         "laliga_count": sum(row.get("category") == "laliga_inseason" for row in all_movements),
         "reward_count": sum(row.get("category") == "reward" for row in all_movements),
         "other_count": sum(row.get("category") == "other" for row in all_movements),

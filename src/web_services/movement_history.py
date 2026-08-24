@@ -100,6 +100,24 @@ query MovementPaymentAccounts($first: Int!, $after: String) {
 }
 """
 
+CONVERSION_CREDITS_QUERY = """
+query MovementConversionCredits($first: Int!, $after: String) {
+  currentUser {
+    sportConversionCredits(first: $first, after: $after, sport: FOOTBALL, includeUsing: true) {
+      nodes {
+        id status totalDiscount { eurCents wei referenceCurrency }
+        purchase {
+          __typename
+          ... on TokenAuction { id }
+          ... on TokenPrimaryOffer { id }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+
 REWARD_ENTRIES_QUERY = """
 query RewardEntries($first: Int!, $after: String) {
   currentUser {
@@ -350,9 +368,9 @@ def _cash_side(operation: dict) -> dict:
     return max(candidates, key=lambda side: _money(side.get("amounts"))["eur"])
 
 
-def _bid_credit_eur(operation: dict, gross_eur: float) -> float:
+def _purchase_credit_eur(operation: dict, gross_eur: float) -> float:
     """Obtiene el descuento aplicado sin confundirlo con el saldo histórico del crédito."""
-    auction_id = str((operation.get("auction") or {}).get("id") or "")
+    purchase_id = str((operation.get("auction") or {}).get("id") or operation.get("id") or "")
     credits = list(operation.get("conversionCredits") or [])
     if not credits and operation.get("conversionCredit"):
         credits = [operation["conversionCredit"]]
@@ -363,8 +381,8 @@ def _bid_credit_eur(operation: dict, gross_eur: float) -> float:
     seen = set()
     for credit in credits:
         credit_id = str(credit.get("id") or id(credit))
-        purchase_id = str((credit.get("purchase") or {}).get("id") or "")
-        if credit_id in seen or not auction_id or purchase_id != auction_id:
+        credit_purchase_id = str((credit.get("purchase") or {}).get("id") or "")
+        if credit_id in seen or not purchase_id or credit_purchase_id != purchase_id:
             continue
         seen.add(credit_id)
         matched_discount += _money(credit.get("totalDiscount"))["eur"]
@@ -428,13 +446,14 @@ def _movement_from_group(
         gross["currency"] = str(operation.get("paymentCurrency") or "")
         if not gross["currency"] and operation.get("fiatPayment") is True:
             gross["currency"] = "EUR"
-        credits_eur = _bid_credit_eur(operation, gross["eur"])
+        credits_eur = _purchase_credit_eur(operation, gross["eur"])
         received_cards = cards
     elif typename == "TokenPrimaryOffer":
         direction, market = "purchase", "Compra instantánea"
         cash_direction = direction
         gross = _money(operation.get("price"))
         gross["currency"] = str(operation.get("paymentCurrency") or "")
+        credits_eur = _purchase_credit_eur(operation, gross["eur"])
         received_cards = cards
     elif typename == "TokenOffer":
         buyer = str((operation.get("userBuyer") or {}).get("slug") or "").casefold()
@@ -937,6 +956,38 @@ def collect_movement_history(
         cursor = page_info.get("endCursor")
 
     operations = [operation for trade in trades if (operation := _operation_from_trade(trade))]
+
+    # La lista global conserva la relación crédito -> compra también cuando el
+    # crédito no aparece dentro de bestBid (y para Instant Buy).
+    credits_by_purchase: dict[str, list[dict]] = {}
+    cursor = None
+    credit_page = 0
+    while True:
+        credit_page += 1
+        data = graphql_request(CONVERSION_CREDITS_QUERY, {"first": 100, "after": cursor}, headers=headers)
+        connection = ((data.get("currentUser") or {}).get("sportConversionCredits") or {})
+        for credit in connection.get("nodes") or []:
+            purchase_id = str((credit.get("purchase") or {}).get("id") or "")
+            if purchase_id:
+                credits_by_purchase.setdefault(purchase_id, []).append(credit)
+        if progress:
+            progress(len(trades), f"Verificando créditos usados · página {credit_page}")
+        page_info = connection.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+
+    for operation in operations:
+        purchase_id = str((operation.get("auction") or {}).get("id") or operation.get("id") or "")
+        related_credits = credits_by_purchase.get(purchase_id) or []
+        if related_credits:
+            existing = list(operation.get("conversionCredits") or [])
+            if not existing and operation.get("conversionCredit"):
+                existing = [operation["conversionCredit"]]
+            operation["conversionCredits"] = list({
+                str(credit.get("id") or id(credit)): credit
+                for credit in existing + related_credits
+            }.values())
 
     payment_currencies: dict[str, set[str]] = {}
     payment_amounts_eur: dict[str, Decimal] = {}
