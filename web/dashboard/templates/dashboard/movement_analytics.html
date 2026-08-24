@@ -53,19 +53,23 @@
       <div class="table-head"><div><p class="kicker">Desglose</p><h2>In-Season frente a Classic</h2></div></div>
       <div class="analytics-type-list">
         {% for row in breakdown %}<section class="analytics-type-row type-{{ row.key }}">
-          <header><span>{{ row.label }}</span><strong class="{% if row.balance < 0 %}is-out{% else %}is-in{% endif %}">{% if row.balance > 0 %}+{% endif %}{{ row.balance|floatformat:2 }} €</strong></header>
-          <dl><div><dt>Compras</dt><dd>−{{ row.spent|floatformat:2 }} €</dd></div><div><dt>Ventas</dt><dd>+{{ row.received|floatformat:2 }} €</dd></div><div><dt>Beneficio realizado</dt><dd>{% if row.realized > 0 %}+{% endif %}{{ row.realized|floatformat:2 }} €</dd></div><div><dt>Invertido</dt><dd>{{ row.invested|floatformat:2 }} € <small>({{ row.held_count }} cartas)</small></dd></div></dl>
+          <header><div><span>{{ row.label }}</span><small>Flujo de caja del periodo</small></div><strong class="{% if row.balance < 0 %}is-out{% else %}is-in{% endif %}">{% if row.balance > 0 %}+{% endif %}{{ row.balance|floatformat:2 }} €</strong></header>
+          <div class="analytics-equation">
+            <div><small>Recibido en ventas</small><strong class="is-in">+{{ row.received|floatformat:2 }} €</strong></div><b>−</b><div><small>Gastado en compras</small><strong class="is-out">{{ row.spent|floatformat:2 }} €</strong></div><b>=</b><div class="is-result"><small>Balance de caja</small><strong class="{% if row.balance < 0 %}is-out{% else %}is-in{% endif %}">{% if row.balance > 0 %}+{% endif %}{{ row.balance|floatformat:2 }} €</strong></div>
+          </div>
+          <div class="analytics-secondary-metrics"><div><span><i class="fas fa-circle-check"></i> Beneficio de operaciones cerradas</span><strong class="{% if row.realized < 0 %}is-out{% else %}is-in{% endif %}">{% if row.realized > 0 %}+{% endif %}{{ row.realized|floatformat:2 }} €</strong><small>Solo compras y ventas que ya forman un ciclo completo.</small></div><div><span><i class="fas fa-wallet"></i> Coste todavía en cartera</span><strong>{{ row.invested|floatformat:2 }} €</strong><small>{{ row.held_count }} cartas compradas todavía sin salida.</small></div></div>
         </section>{% endfor %}
       </div>
     </article>
 
     <article class="panel analytics-flow">
-      <div class="table-head"><div><p class="kicker">Evolución</p><h2>Entradas y salidas</h2></div><div class="analytics-legend"><span><i class="is-purchase"></i> Compras</span><span><i class="is-sale"></i> Ventas</span></div></div>
+      <div class="table-head"><div><p class="kicker">Evolución</p><h2>Balance por periodo</h2></div><div class="analytics-legend"><span><i class="is-purchase"></i> Balance negativo</span><span><i class="is-sale"></i> Balance positivo</span></div></div>
       <div class="analytics-flow-list">
         {% for row in timeline %}<div class="analytics-flow-row">
           <strong>{{ row.label }}</strong>
-          <div><span class="is-purchase" style="width:{% widthratio row.purchase_width 1 1 %}%"></span></div><em>−{{ row.purchases|floatformat:2 }} €</em>
-          <div><span class="is-sale" style="width:{% widthratio row.sales_width 1 1 %}%"></span></div><em>+{{ row.sales|floatformat:2 }} €</em>
+          <div class="analytics-net-track"><i></i>{% if row.balance < 0 %}<span class="is-purchase" style="width:{% widthratio row.balance_width 1 1 %}%"></span>{% elif row.balance > 0 %}<span class="is-sale" style="width:{% widthratio row.balance_width 1 1 %}%"></span>{% endif %}</div>
+          <em class="{% if row.balance < 0 %}is-out{% else %}is-in{% endif %}">{% if row.balance > 0 %}+{% endif %}{{ row.balance|floatformat:2 }} €</em>
+          <small>Compras {{ row.purchases|floatformat:2 }} € · Ventas {{ row.sales|floatformat:2 }} €</small>
         </div>{% empty %}<p class="sales-empty">No hay importes en este periodo.</p>{% endfor %}
       </div>
     </article>

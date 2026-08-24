@@ -1560,6 +1560,12 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(response.context["totals"]["sales_classic"], Decimal("0"))
         self.assertEqual(response.context["totals"]["balance"], Decimal("-12.70"))
 
+        classic_only = self.client.get(reverse("movements"), {
+            "category": "laliga_inseason", "seasonality": "classic", "date_from": "",
+        })
+        self.assertNotContains(classic_only, "Yangel Herrera")
+        self.assertEqual(classic_only.context["total_rows"], 0)
+
     def test_trade_type_follows_the_card_bought_or_sold_not_the_payment_cards(self):
         juan = {
             "asset_id": "juan-is", "player": "Juan Iglesias", "rarity": "rare",
@@ -1605,8 +1611,15 @@ class MovementHistoryTests(TestCase):
         by_type = {row["key"]: row for row in analytics.context["breakdown"]}
         self.assertEqual(by_type["inseason"]["received"], Decimal("15.92"))
         self.assertEqual(by_type["classic"]["spent"], Decimal("5"))
+        self.assertEqual(analytics.context["timeline"][0]["balance"], Decimal("10.92"))
         self.assertContains(analytics, "Capital aún invertido")
         self.assertContains(analytics, "Beneficio realizado")
+
+        classic_only = self.client.get(reverse("movements"), {
+            "category": "all", "seasonality": "classic", "date_from": "",
+        })
+        self.assertNotContains(classic_only, "Juan Iglesias")
+        self.assertContains(classic_only, "Objetivo Classic")
 
     def test_first_visit_enqueues_background_sync(self):
         response = self.client.get(reverse("movements"))

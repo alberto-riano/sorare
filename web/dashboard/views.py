@@ -238,6 +238,7 @@ def movements(request):
     rows = []
     for row in prepared_rows:
         cards = row.get("cards") or []
+        main_cards = _movement_main_cards(row)
         essence = row.get("essence") or []
         occurred_at = row.get("occurred_at_dt")
         if category == "all" and row.get("category") == "reward":
@@ -249,13 +250,13 @@ def movements(request):
         if reward_type and row.get("reward_type") != reward_type:
             continue
         if rarity and not (
-            any(card.get("rarity") == rarity for card in cards)
+            any(card.get("rarity") == rarity for card in main_cards)
             or any(item.get("rarity") == rarity for item in essence)
         ):
             continue
-        if seasonality == "inseason" and not any(bool(card.get("in_season")) for card in cards):
+        if seasonality == "inseason" and _movement_seasonality(row) != "inseason":
             continue
-        if seasonality == "classic" and not any(not bool(card.get("in_season")) for card in cards):
+        if seasonality == "classic" and _movement_seasonality(row) != "classic":
             continue
         if not in_selected_window(row):
             continue
@@ -270,10 +271,10 @@ def movements(request):
                 continue
             if rarity and not any(card.get("rarity") == rarity for card in cycle_cards):
                 continue
-            cycle_season_cards = cycle_cards + list(cycle.get("trade_received_cards") or [])
-            if seasonality == "inseason" and not any(bool(card.get("in_season")) for card in cycle_season_cards):
+            principal_card = cycle.get("sale_card") or cycle.get("purchase_card") or {}
+            if seasonality == "inseason" and not bool(principal_card.get("in_season")):
                 continue
-            if seasonality == "classic" and not any(not bool(card.get("in_season")) for card in cycle_season_cards):
+            if seasonality == "classic" and bool(principal_card.get("in_season")):
                 continue
             local_cycle_at = cycle_at.astimezone(ZoneInfo("Europe/Madrid")) if cycle_at else None
             cycle_date = local_cycle_at.date().isoformat() if local_cycle_at else ""
@@ -579,15 +580,16 @@ def movement_analytics(request):
             bucket["sales"] += Decimal(str(row.get("net_eur") or 0))
     timeline_rows = []
     scale = max(
-        [max(values["purchases"], values["sales"]) for values in timeline.values()] or [Decimal("1")]
+        [abs(values["sales"] - values["purchases"]) for values in timeline.values()] or [Decimal("1")]
     ) or Decimal("1")
     for (key, label), values in sorted(timeline.items()):
+        balance = values["sales"] - values["purchases"]
         timeline_rows.append({
             "label": label,
             "purchases": values["purchases"],
             "sales": values["sales"],
-            "purchase_width": float(values["purchases"] * 100 / scale),
-            "sales_width": float(values["sales"] * 100 / scale),
+            "balance": balance,
+            "balance_width": float(abs(balance) * 50 / scale),
         })
 
     totals = {
