@@ -518,11 +518,21 @@ textarea {
 .market-tags { gap: .45rem; }
 .market-tags span { display: inline-flex; align-items: center; gap: .35rem; padding: .42rem .68rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; font-size: .78rem; font-weight: 600; }
 .market-tags .fa-gem { color: #dc2626; }
-.market-refresh-form { justify-content: flex-end; gap: .75rem; }
+.market-refresh-form { justify-content: flex-end; gap: .75rem; flex-wrap: wrap; }
+.market-refresh-actions { display: flex; align-items: center; gap: .45rem; }
 .market-sync-status { display: grid; gap: .2rem; color: var(--muted); }
 .market-sync-status small { display: flex; align-items: center; gap: .35rem; white-space: nowrap; }
 .market-sync-status i { width: .9rem; color: var(--accent); text-align: center; }
 .market-sync-status strong { color: var(--ink); font-weight: 600; }
+.market-refresh-progress { flex: 1 0 100%; min-width: 280px; padding: .55rem .7rem; border: 1px solid #99f6e4; border-radius: 10px; background: #f0fdfa; }
+.market-refresh-progress > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .35rem; color: var(--muted); font-size: .75rem; }
+.market-refresh-progress strong { color: var(--accent); font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
+.market-refresh-track { height: 7px; overflow: hidden; border-radius: 999px; background: #dbe8e5; }
+.market-refresh-track span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #14b8a6, #0f766e); transition: width .25s ease; }
+.market-refresh-progress.is-indeterminate .market-refresh-track span { animation: market-progress-pulse 1.2s ease-in-out infinite alternate; }
+.market-refresh-progress.is-error { border-color: #fecaca; background: #fef2f2; }
+.market-refresh-progress.is-error strong, .market-refresh-progress.is-error #market-refresh-label { color: #b91c1c; }
+@keyframes market-progress-pulse { from { width: 4%; } to { width: 45%; } }
 .account-balance-strip { display: flex; align-items: stretch; gap: .65rem; margin-bottom: 1rem; }
 .balance-heading, .balance-item, .balance-unavailable { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: .65rem .9rem; }
 .balance-heading { gap: .5rem; color: var(--muted); font-weight: 700; }
@@ -768,6 +778,9 @@ textarea {
 @media (max-width: 620px) {
   .market-toolbar-main, .market-refresh-form { align-items: flex-start; flex-direction: column; gap: .65rem; }
   .market-tags { flex-wrap: wrap; }
+  .market-refresh-actions { width: 100%; flex-direction: column; align-items: stretch; }
+  .market-refresh-progress { min-width: 0; width: 100%; box-sizing: border-box; }
+  .market-refresh-progress > div:first-child { align-items: flex-start; flex-direction: column; gap: .2rem; }
 }
 
 .inline-bid-amount {

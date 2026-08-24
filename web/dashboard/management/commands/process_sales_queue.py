@@ -6,13 +6,61 @@ from django.db import transaction
 from django.utils import timezone
 
 from dashboard.models import (
-    BidBatchItem, MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
+    AuctionRefreshJob, BidBatchItem, MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
     PublicRewardSnapshot, PublicRewardSyncJob, SalesInventory, SalesRefreshJob,
 )
 from dashboard.views import PATHS
 from web_services.movement_history import collect_movement_history, collect_public_reward_history
 from web_services.process_runner import run_card_sale, sale_error_message
 from web_services.sales_inventory import collect_sales_inventory
+
+
+def process_next_auction_refresh():
+    with transaction.atomic():
+        job = AuctionRefreshJob.objects.select_for_update().filter(
+            status=AuctionRefreshJob.Status.QUEUED,
+        ).first()
+        if not job:
+            return None
+        job.status = AuctionRefreshJob.Status.RUNNING
+        job.started_at = timezone.now()
+        job.progress_label = (
+            "Preparando el barrido completo" if job.mode == AuctionRefreshJob.Mode.FULL
+            else "Preparando la actualización de pujas"
+        )
+        job.save(update_fields=("status", "started_at", "progress_label"))
+
+    try:
+        import listar_subastas
+
+        def save_progress(processed, total, label):
+            AuctionRefreshJob.objects.filter(pk=job.pk).update(
+                processed_count=processed,
+                total_count=total,
+                progress_label=label,
+            )
+
+        if job.mode == AuctionRefreshJob.Mode.FULL:
+            payload = listar_subastas.refresh_auction_cache(force_full=True, progress=save_progress)
+            job.progress_label = "Mercado completo actualizado"
+        else:
+            payload = listar_subastas.refresh_cached_auction_prices(progress=save_progress)
+            job.progress_label = "Pujas actuales actualizadas"
+        job.refresh_from_db(fields=("processed_count", "total_count"))
+        job.auction_count = len(payload.get("auctions") or [])
+        job.new_cards_count = payload.get("new_cards_count", 0) if job.mode == AuctionRefreshJob.Mode.FULL else 0
+        job.processed_count = max(job.processed_count, job.total_count)
+        job.status = AuctionRefreshJob.Status.SUCCEEDED
+    except Exception as exc:
+        job.status = AuctionRefreshJob.Status.FAILED
+        job.progress_label = "Actualización interrumpida"
+        job.error = f"No se pudo actualizar el mercado: {exc}"[:2000]
+    job.finished_at = timezone.now()
+    job.save(update_fields=(
+        "status", "processed_count", "total_count", "auction_count", "new_cards_count",
+        "progress_label", "error", "finished_at",
+    ))
+    return job
 
 
 def process_next_refresh():
@@ -226,12 +274,17 @@ def process_next_sale():
 
 
 class Command(BaseCommand):
-    help = "Actualiza inventario e historial y procesa ventas en segundo plano"
+    help = "Actualiza mercado, inventario e historial y procesa ventas en segundo plano"
 
     def add_arguments(self, parser):
         parser.add_argument("--watch", action="store_true", help="Permanecer escuchando nuevos trabajos")
 
     def handle(self, *args, **options):
+        AuctionRefreshJob.objects.filter(status=AuctionRefreshJob.Status.RUNNING).update(
+            status=AuctionRefreshJob.Status.FAILED,
+            error="La actualización se interrumpió; el mercado anterior sigue disponible.",
+            finished_at=timezone.now(),
+        )
         interrupted_refreshes = SalesRefreshJob.objects.filter(status=SalesRefreshJob.Status.RUNNING)
         interrupted_refreshes.update(
             status=SalesRefreshJob.Status.FAILED,
@@ -260,7 +313,8 @@ class Command(BaseCommand):
 
         while True:
             processed = (
-                process_next_refresh()
+                process_next_auction_refresh()
+                or process_next_refresh()
                 or process_next_movement_sync()
                 or process_next_public_reward_sync()
                 or process_next_sale()

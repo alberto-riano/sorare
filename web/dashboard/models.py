@@ -30,6 +30,38 @@ class AuctionFilterPreset(models.Model):
         constraints = [models.UniqueConstraint(fields=("user", "name"), name="unique_user_auction_filter_name")]
 
 
+class AuctionRefreshJob(models.Model):
+    class Mode(models.TextChoices):
+        QUICK = "quick", "Actualizar pujas"
+        FULL = "full", "Buscar nuevas subastas"
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "En cola"
+        RUNNING = "running", "Actualizando"
+        SUCCEEDED = "succeeded", "Completada"
+        FAILED = "failed", "Fallida"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sorare_auction_refresh_jobs",
+    )
+    mode = models.CharField(max_length=8, choices=Mode.choices)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    processed_count = models.PositiveIntegerField(default=0)
+    total_count = models.PositiveIntegerField(default=0)
+    auction_count = models.PositiveIntegerField(default=0)
+    new_cards_count = models.PositiveIntegerField(default=0)
+    progress_label = models.CharField(max_length=180, blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("created_at",)
+
+
 class BidBatchJob(models.Model):
     class Status(models.TextChoices):
         QUEUED = "queued", "En cola"

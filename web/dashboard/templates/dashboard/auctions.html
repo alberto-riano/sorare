@@ -21,15 +21,21 @@
       <span><i class="fas fa-calendar"></i> {{ season_label }}</span>
     </div>
   </div>
-  <form method="post" class="market-refresh-form">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="refresh_market">
-    <button type="submit" class="btn btn-accent"><i class="fas fa-sync"></i> Actualizar mercado</button>
+  <div class="market-refresh-form">
+    <div class="market-refresh-actions">
+      <button type="button" class="btn btn-accent market-refresh-button" data-mode="quick"><i class="fas fa-bolt"></i> Actualizar pujas</button>
+      <button type="button" class="btn btn-secondary market-refresh-button" data-mode="full"><i class="fas fa-magnifying-glass-plus"></i> Buscar nuevas</button>
+    </div>
     <div class="market-sync-status">
-      <small><i class="fas fa-arrows-rotate"></i> Sincronizado: <strong>{{ market_updated_at|default:"Pendiente" }}</strong></small>
+      <small><i class="fas fa-bolt"></i> Pujas: <strong>{{ market_updated_at|default:"Pendiente" }}</strong></small>
+      <small><i class="fas fa-globe"></i> Mercado completo: <strong>{{ full_market_updated_at|default:"Pendiente" }}</strong></small>
       <small><i class="fas fa-plus"></i> Nuevas cartas: <strong>{% if last_new_cards_at %}{{ last_new_cards_at }}{% if last_new_cards_count %} (+{{ last_new_cards_count }}){% endif %}{% else %}Todavía ninguna{% endif %}</strong></small>
     </div>
-  </form>
+    <div id="market-refresh-progress" class="market-refresh-progress" role="status" aria-live="polite" hidden>
+      <div><strong id="market-refresh-percent">Preparando…</strong><span id="market-refresh-label">Añadiendo la actualización a la cola</span></div>
+      <div class="market-refresh-track"><span id="market-refresh-bar"></span></div>
+    </div>
+  </div>
 </section>
 
 <section class="account-balance-strip reveal" style="animation-delay: 150ms;" aria-label="Saldo disponible para pujar">
@@ -272,6 +278,98 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+  var marketRefreshButtons = Array.from(document.querySelectorAll('.market-refresh-button'));
+  var marketRefreshProgress = document.getElementById('market-refresh-progress');
+  var marketRefreshPercent = document.getElementById('market-refresh-percent');
+  var marketRefreshLabel = document.getElementById('market-refresh-label');
+  var marketRefreshBar = document.getElementById('market-refresh-bar');
+  var marketRefreshStorageKey = 'sorare.market.refreshJob';
+  var marketRefreshTimer = null;
+
+  function setMarketRefreshBusy(busy) {
+    marketRefreshButtons.forEach(function (button) {
+      button.disabled = busy;
+      button.querySelector('i').classList.toggle('fa-spin', busy);
+    });
+  }
+
+  function showMarketRefreshProgress(job) {
+    marketRefreshProgress.hidden = false;
+    var percent = job.total_count ? Math.min(job.percent, 100) : 0;
+    marketRefreshPercent.textContent = job.total_count
+      ? percent + '% · ' + job.processed_count + '/' + job.total_count
+      : 'Preparando…';
+    marketRefreshLabel.textContent = job.progress_label || (job.mode === 'full' ? 'Preparando el barrido completo' : 'Preparando la actualización de pujas');
+    marketRefreshBar.style.width = (job.total_count ? Math.max(percent, 2) : 4) + '%';
+    marketRefreshProgress.classList.toggle('is-indeterminate', !job.total_count);
+  }
+
+  async function pollMarketRefresh(jobId) {
+    window.clearTimeout(marketRefreshTimer);
+    try {
+      var response = await fetch('{% url "auction_refresh_status" %}?id=' + jobId, {headers: {'X-Requested-With': 'XMLHttpRequest'}});
+      var payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'No se pudo consultar la actualización.');
+      var job = payload.job;
+      showMarketRefreshProgress(job);
+      if (job.status === 'queued' || job.status === 'running') {
+        setMarketRefreshBusy(true);
+        marketRefreshTimer = window.setTimeout(function () { pollMarketRefresh(jobId); }, 1500);
+        return;
+      }
+      window.localStorage.removeItem(marketRefreshStorageKey);
+      setMarketRefreshBusy(false);
+      if (job.status === 'succeeded') {
+        marketRefreshPercent.textContent = '100%';
+        marketRefreshBar.style.width = '100%';
+        marketRefreshLabel.textContent = job.mode === 'full'
+          ? 'Mercado actualizado: ' + job.auction_count + ' activas · ' + job.new_cards_count + ' nuevas'
+          : 'Pujas actualizadas: ' + job.auction_count + ' subastas siguen abiertas';
+        window.setTimeout(function () { window.location.reload(); }, 900);
+      } else {
+        marketRefreshProgress.classList.add('is-error');
+        marketRefreshLabel.textContent = job.error || 'No se pudo completar la actualización.';
+      }
+    } catch (error) {
+      window.localStorage.removeItem(marketRefreshStorageKey);
+      setMarketRefreshBusy(false);
+      marketRefreshProgress.hidden = false;
+      marketRefreshProgress.classList.add('is-error');
+      marketRefreshPercent.textContent = 'Error';
+      marketRefreshLabel.textContent = error.message;
+    }
+  }
+
+  marketRefreshButtons.forEach(function (button) {
+    button.addEventListener('click', async function () {
+      setMarketRefreshBusy(true);
+      marketRefreshProgress.classList.remove('is-error');
+      showMarketRefreshProgress({mode: button.dataset.mode, total_count: 0, processed_count: 0});
+      var body = new URLSearchParams({mode: button.dataset.mode});
+      try {
+        var response = await fetch('{% url "enqueue_auction_refresh" %}', {
+          method: 'POST',
+          headers: {'X-CSRFToken': '{{ csrf_token }}', 'X-Requested-With': 'XMLHttpRequest'},
+          body: body
+        });
+        var payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'No se pudo iniciar la actualización.');
+        window.localStorage.setItem(marketRefreshStorageKey, String(payload.job_id));
+        pollMarketRefresh(payload.job_id);
+      } catch (error) {
+        setMarketRefreshBusy(false);
+        marketRefreshProgress.classList.add('is-error');
+        marketRefreshPercent.textContent = 'Error';
+        marketRefreshLabel.textContent = error.message;
+      }
+    });
+  });
+  var pendingMarketRefresh = Number(window.localStorage.getItem(marketRefreshStorageKey));
+  if (pendingMarketRefresh) {
+    setMarketRefreshBusy(true);
+    pollMarketRefresh(pendingMarketRefresh);
+  }
+
   var savedFilterSelect = document.getElementById('saved-filter-select');
   if (savedFilterSelect) savedFilterSelect.addEventListener('change', function () {
     if (savedFilterSelect.value) window.location.assign(savedFilterSelect.value);

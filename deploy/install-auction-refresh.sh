@@ -17,7 +17,7 @@ Type=oneshot
 User=$SERVICE_USER
 WorkingDirectory=$PROJECT_DIR/web
 EnvironmentFile=$ENV_FILE
-ExecStart=$VENV_DIR/bin/python $PROJECT_DIR/web/manage.py refresh_auction_cache
+ExecStart=$VENV_DIR/bin/python $PROJECT_DIR/web/manage.py refresh_auction_cache --full
 Nice=10
 EOF
 

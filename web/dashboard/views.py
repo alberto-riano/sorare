@@ -26,7 +26,7 @@ from web_services.movement_history import build_trade_cycles
 from web_services.sales_inventory import collection_display_name
 from .forms import BatchBidForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
 from .models import (
-    AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer,
+    AuctionFilterPreset, AuctionRefreshJob, BidBatchItem, BidBatchJob, FavoritePlayer,
     MovementSnapshot, MovementSyncJob, PublicRewardSnapshot, PublicRewardSyncJob,
     SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob,
 )
@@ -1050,16 +1050,12 @@ def auctions_list(request):
         messages.error(request, "No se envió la puja: revisa el importe y la confirmación.")
 
     try:
-        if request.method == "POST" and request.POST.get("action") == "refresh_market":
-            listar_subastas.refresh_auction_cache(force_full=True)
         auctions = listar_subastas.fetch_la_liga_rare_auctions(
             team_filters=None,
             rarity="rare",
             season_year=2026,
         )
         loading = False
-        if request.method == "POST" and request.POST.get("action") == "refresh_market":
-            messages.success(request, f"Mercado completo actualizado: {len(auctions)} subastas activas")
     except Exception as e:
         error = str(e)
         messages.error(request, f"Error al cargar subastas: {error}")
@@ -1180,6 +1176,8 @@ def auctions_list(request):
             "loading": loading,
             "season_label": "2026-2027",
             "market_updated_at": market_timestamp(cache_metadata.get('updated_at')),
+            "full_market_updated_at": market_timestamp(cache_metadata.get('full_refreshed_at')),
+            "quick_market_updated_at": market_timestamp(cache_metadata.get('quick_refreshed_at')),
             "last_new_cards_at": market_timestamp(cache_metadata.get('last_new_cards_at')),
             "last_new_cards_count": cache_metadata.get('new_cards_count', 0),
             "account_balances": account_balances,
@@ -1188,6 +1186,54 @@ def auctions_list(request):
             "saved_filters": saved_filters,
         },
     )
+
+
+@require_POST
+def enqueue_auction_refresh(request):
+    """Encola un refresco rápido o un barrido completo sin bloquear la página."""
+    import listar_subastas
+
+    mode = request.POST.get("mode", "quick").strip()
+    if mode not in {AuctionRefreshJob.Mode.QUICK, AuctionRefreshJob.Mode.FULL}:
+        return JsonResponse({"error": "Tipo de actualización no válido."}, status=400)
+    if mode == AuctionRefreshJob.Mode.QUICK and not listar_subastas.load_auction_cache():
+        return JsonResponse({"error": "Primero hay que realizar una búsqueda completa del mercado."}, status=409)
+
+    active = AuctionRefreshJob.objects.filter(
+        user=request.user,
+        status__in=(AuctionRefreshJob.Status.QUEUED, AuctionRefreshJob.Status.RUNNING),
+    ).order_by("created_at").first()
+    if active and (active.mode == AuctionRefreshJob.Mode.FULL or active.mode == mode):
+        job = active
+    else:
+        job = AuctionRefreshJob.objects.create(user=request.user, mode=mode)
+    return JsonResponse({"job_id": job.id, "mode": job.mode, "status": job.status}, status=202)
+
+
+@require_GET
+def auction_refresh_status(request):
+    try:
+        job_id = int(request.GET.get("id", ""))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "Identificador no válido."}, status=400)
+    job = AuctionRefreshJob.objects.filter(pk=job_id, user=request.user).first()
+    if not job:
+        return JsonResponse({"error": "Actualización no encontrada."}, status=404)
+    percent = round(job.processed_count * 100 / job.total_count) if job.total_count else 0
+    return JsonResponse({
+        "job": {
+            "id": job.id,
+            "mode": job.mode,
+            "status": job.status,
+            "processed_count": job.processed_count,
+            "total_count": job.total_count,
+            "percent": min(percent, 100),
+            "auction_count": job.auction_count,
+            "new_cards_count": job.new_cards_count,
+            "progress_label": job.progress_label,
+            "error": job.error,
+        },
+    })
 
 
 @require_POST

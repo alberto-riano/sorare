@@ -16,7 +16,9 @@ Uso:
 import sys
 import os
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, timezone
+import fcntl
 import json
 from pathlib import Path
 import time
@@ -28,6 +30,7 @@ LA_LIGA_COMPETITION_SLUG = "primera-division-es"
 DEFAULT_SEASON_YEAR = 2026
 CACHE_PATH = Path(__file__).resolve().parents[1] / "output" / "la_liga_rare_2026_auctions.json"
 REQUEST_INTERVAL_SECONDS = 1.1
+QUICK_REFRESH_BATCH_SIZE = 40
 
 LA_LIGA_TEAMS_QUERY = '''
 query GetLaLigaTeams($competition: String!, $seasonYear: Int!) {
@@ -277,8 +280,32 @@ def load_auction_cache():
         return None
 
 
-def refresh_auction_cache(force_full=False):
-    """Reconstruye siempre el mercado completo para no perder subastas nuevas."""
+@contextmanager
+def _auction_cache_lock():
+    """Evita que el barrido automático y un refresco manual se pisen."""
+    lock_path = CACHE_PATH.with_suffix('.lock')
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open('w') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _save_auction_cache(payload):
+    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = CACHE_PATH.with_suffix('.tmp')
+    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
+    temporary.replace(CACHE_PATH)
+
+
+def _report_progress(progress, processed, total, label):
+    if progress:
+        progress(processed, total, label)
+
+
+def _refresh_auction_cache_full(progress=None):
     headers = build_headers()
     teams = fetch_la_liga_teams(headers, season_year=DEFAULT_SEASON_YEAR)
     previous = load_auction_cache()
@@ -309,7 +336,10 @@ def refresh_auction_cache(force_full=False):
         changed_nodes.extend(nodes)
         scanned += len(nodes)
         page += 1
-        print(f"Página {page}: {scanned}/{connection['totalCount']} subastas revisadas", flush=True)
+        total_count = connection['totalCount']
+        label = f"Página {page}: {scanned}/{total_count} subastas revisadas"
+        print(label, flush=True)
+        _report_progress(progress, scanned, total_count, label)
         if not connection['pageInfo']['hasNextPage']:
             break
         cursor = connection['pageInfo']['endCursor']
@@ -335,18 +365,119 @@ def refresh_auction_cache(force_full=False):
     payload = {
         'updated_at': now.isoformat(),
         'full_refreshed_at': now.isoformat(),
+        'last_refresh_mode': 'full',
         'my_nickname': my_nickname,
         'scanned_count': scanned,
         'new_cards_count': new_cards_count,
         'last_new_cards_at': last_new_cards_at,
         'auctions': merged,
     }
-    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    temporary = CACHE_PATH.with_suffix('.tmp')
-    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
-    temporary.replace(CACHE_PATH)
+    _save_auction_cache(payload)
     print(f"Caché actualizada: {len(merged)} subastas Rare de LaLiga 2026-2027 ({new_cards_count} nuevas)")
     return payload
+
+
+def refresh_auction_cache(force_full=False, progress=None):
+    """Reconstruye el mercado completo para descubrir subastas nuevas."""
+    with _auction_cache_lock():
+        return _refresh_auction_cache_full(progress=progress)
+
+
+def _fetch_known_auction_details(headers, auction_ids, progress=None):
+    """Consulta por lotes el estado actual de subastas que ya están en caché."""
+    details = {}
+    total = len(auction_ids)
+    for offset in range(0, total, QUICK_REFRESH_BATCH_SIZE):
+        batch = auction_ids[offset:offset + QUICK_REFRESH_BATCH_SIZE]
+        variables = {}
+        declarations = []
+        selections = []
+        for index, auction_id in enumerate(batch):
+            key = f"id{index}"
+            variables[key] = auction_id.replace('EnglishAuction:', '')
+            declarations.append(f"${key}: String!")
+            selections.append(
+                f"""a{index}: auction(id: ${key}) {{
+                  id open endDate
+                  bestBid {{ amounts {{ eurCents }} userBidder {{ nickname }} }}
+                  myLastBid {{ amounts {{ eurCents }} maximumAmounts {{ eurCents }} }}
+                }}"""
+            )
+        query = (
+            "query(" + ", ".join(declarations) + ") { "
+            "currentUser { nickname } tokens { " + " ".join(selections) + " } }"
+        )
+        data = graphql_request(query, variables, headers=headers)
+        nickname = ((data.get('currentUser') or {}).get('nickname') or '').strip()
+        tokens = data.get('tokens') or {}
+        for index, auction_id in enumerate(batch):
+            details[auction_id] = tokens.get(f"a{index}")
+        processed = min(offset + len(batch), total)
+        _report_progress(progress, processed, total, f"Pujas revisadas: {processed}/{total}")
+        if processed < total:
+            time.sleep(REQUEST_INTERVAL_SECONDS)
+    return details, nickname
+
+
+def refresh_cached_auction_prices(progress=None):
+    """Actualiza precios y posiciones sin recorrer el mercado completo."""
+    with _auction_cache_lock():
+        previous = load_auction_cache()
+        if not previous:
+            raise RuntimeError("Todavía no existe una caché de mercado; realiza primero una búsqueda completa.")
+        previous_rows = previous.get('auctions') or []
+        auction_ids = list(dict.fromkeys(row.get('auction_id') for row in previous_rows if row.get('auction_id')))
+        if not auction_ids:
+            raise RuntimeError("No hay subastas guardadas que se puedan actualizar.")
+
+        headers = build_headers()
+        details, fetched_nickname = _fetch_known_auction_details(headers, auction_ids, progress=progress)
+        my_nickname = fetched_nickname or previous.get('my_nickname', '')
+        now = datetime.now(timezone.utc)
+        refreshed = []
+        for old_row in previous_rows:
+            detail = details.get(old_row.get('auction_id'))
+            if not detail or not detail.get('open'):
+                continue
+            end_date = detail.get('endDate') or old_row.get('end_date')
+            if not end_date or datetime.fromisoformat(end_date.replace('Z', '+00:00')) <= now:
+                continue
+            row = dict(old_row)
+            best_bid = detail.get('bestBid') or {}
+            bidder = ((best_bid.get('userBidder') or {}).get('nickname') or '').strip() or None
+            eur_cents = (best_bid.get('amounts') or {}).get('eurCents')
+            my_last_bid = detail.get('myLastBid') or {}
+            my_max_cents = (my_last_bid.get('maximumAmounts') or {}).get('eurCents')
+            row.update({
+                'bid_eur': eur_cents / 100 if eur_cents is not None else None,
+                'bidder': bidder,
+                'is_winning': bool(bidder and my_nickname and bidder.casefold() == my_nickname.casefold()),
+                'has_bid': bool(my_last_bid),
+                'my_bid_eur': my_max_cents / 100 if my_max_cents is not None else None,
+                'end_date': end_date,
+            })
+            row['is_outbid'] = row['has_bid'] and not row['is_winning']
+            row['bid_position'] = 1 if row['is_winning'] else None
+            refreshed.append(row)
+
+        outbid = [row for row in refreshed if row['is_outbid']]
+        positions = fetch_bid_positions(headers, outbid, my_nickname)
+        for row in outbid:
+            row['bid_position'] = positions.get(row['auction_id'])
+        refreshed.sort(key=lambda row: row['end_date'])
+
+        payload = dict(previous)
+        payload.update({
+            'updated_at': now.isoformat(),
+            'quick_refreshed_at': now.isoformat(),
+            'last_refresh_mode': 'quick',
+            'my_nickname': my_nickname,
+            'quick_refreshed_count': len(auction_ids),
+            'auctions': refreshed,
+        })
+        _save_auction_cache(payload)
+        print(f"Pujas actualizadas: {len(refreshed)} subastas siguen abiertas")
+        return payload
 
 
 def match_team_slug(partial, team_slugs):

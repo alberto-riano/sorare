@@ -16,10 +16,11 @@ import sorare_utils
 from dashboard.forms import BatchBidForm, BatchSaleForm, InlineBidForm
 from dashboard.management.commands.process_bid_queue import process_next_job
 from dashboard.management.commands.process_sales_queue import (
-    process_next_movement_sync, process_next_public_reward_sync, process_next_refresh, process_next_sale,
+    process_next_auction_refresh, process_next_movement_sync, process_next_public_reward_sync,
+    process_next_refresh, process_next_sale,
 )
 from dashboard.models import (
-    AuctionFilterPreset, BidBatchItem, BidBatchJob, FavoritePlayer,
+    AuctionFilterPreset, AuctionRefreshJob, BidBatchItem, BidBatchJob, FavoritePlayer,
     MovementSnapshot, MovementSyncJob, PublicRewardSnapshot, PublicRewardSyncJob,
     SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob,
 )
@@ -71,6 +72,46 @@ class LaLigaAuctionTests(TestCase):
 
         self.assertEqual([row["asset_id"] for row in payload["auctions"]], ["new-market-card"])
         self.assertIsNone(request.call_args.args[1]["updatedAfter"])
+
+    @patch.object(listar_subastas, "fetch_bid_positions", return_value={"EnglishAuction:known": 2})
+    @patch.object(listar_subastas, "build_headers", return_value={})
+    def test_quick_refresh_only_updates_known_auctions(self, _headers, _positions):
+        old_cache = {
+            "updated_at": "2026-08-13T00:00:00+00:00",
+            "full_refreshed_at": "2026-08-13T00:00:00+00:00",
+            "my_nickname": "burguis",
+            "new_cards_count": 3,
+            "auctions": [{
+                "auction_id": "EnglishAuction:known", "asset_id": "known",
+                "player": "Jugador", "end_date": "2099-08-20T12:00:00Z",
+                "bid_eur": 10, "has_bid": False, "is_winning": False, "is_outbid": False,
+            }],
+        }
+        response = {
+            "currentUser": {"nickname": "burguis"},
+            "tokens": {"a0": {
+                "id": "EnglishAuction:known", "open": True, "endDate": "2099-08-20T12:00:00Z",
+                "bestBid": {"amounts": {"eurCents": 1350}, "userBidder": {"nickname": "otro"}},
+                "myLastBid": {"amounts": {"eurCents": 1200}, "maximumAmounts": {"eurCents": 1300}},
+            }},
+        }
+        progress = []
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(listar_subastas, "CACHE_PATH", Path(directory) / "market.json"), \
+             patch.object(listar_subastas, "graphql_request", return_value=response):
+            listar_subastas.CACHE_PATH.write_text(json.dumps(old_cache), encoding="utf-8")
+            payload = listar_subastas.refresh_cached_auction_prices(
+                progress=lambda processed, total, label: progress.append((processed, total, label)),
+            )
+
+        row = payload["auctions"][0]
+        self.assertEqual(row["bid_eur"], 13.5)
+        self.assertEqual(row["my_bid_eur"], 13.0)
+        self.assertTrue(row["is_outbid"])
+        self.assertEqual(row["bid_position"], 2)
+        self.assertEqual(payload["full_refreshed_at"], "2026-08-13T00:00:00+00:00")
+        self.assertEqual(payload["last_refresh_mode"], "quick")
+        self.assertEqual(progress[-1][:2], (1, 1))
 
     def test_fetch_la_liga_teams_uses_season_contestants(self):
         response = {
@@ -303,14 +344,42 @@ class AuctionActionsTests(TestCase):
         self.assertFalse(confirmed.cleaned_data["bids"][1]["use_credit"])
         self.assertEqual(confirmed.cleaned_data["bids"][1]["currency"], "ETH")
 
-    @patch("dashboard.views.messages.success")
-    @patch("dashboard.views.render")
-    @patch("listar_subastas.fetch_la_liga_rare_auctions", return_value=[])
-    @patch("listar_subastas.refresh_auction_cache")
-    def test_refresh_button_forces_a_full_market_scan(self, refresh_cache, fetch_auctions, render, success):
-        render.side_effect = lambda request, template, context: context
-        auctions_list(RequestFactory().post("/ofertas/", {"action": "refresh_market"}))
-        refresh_cache.assert_called_once_with(force_full=True)
+    @patch("listar_subastas.load_auction_cache", return_value={"auctions": []})
+    def test_market_refresh_is_queued_and_exposes_progress(self, _cache):
+        user = get_user_model().objects.create_user(username="market-refresh-user")
+        self.client.force_login(user)
+        response = self.client.post(reverse("enqueue_auction_refresh"), {"mode": "quick"})
+
+        self.assertEqual(response.status_code, 202)
+        job = AuctionRefreshJob.objects.get(pk=response.json()["job_id"])
+        self.assertEqual(job.mode, AuctionRefreshJob.Mode.QUICK)
+        job.status = AuctionRefreshJob.Status.RUNNING
+        job.processed_count = 25
+        job.total_count = 100
+        job.progress_label = "Pujas revisadas: 25/100"
+        job.save()
+
+        status = self.client.get(reverse("auction_refresh_status"), {"id": job.id}).json()["job"]
+        self.assertEqual(status["percent"], 25)
+        self.assertEqual(status["progress_label"], "Pujas revisadas: 25/100")
+
+    @patch("listar_subastas.refresh_cached_auction_prices")
+    def test_market_worker_processes_quick_refresh(self, refresh_prices):
+        user = get_user_model().objects.create_user(username="market-worker-user")
+        job = AuctionRefreshJob.objects.create(user=user, mode=AuctionRefreshJob.Mode.QUICK)
+
+        def complete(progress):
+            progress(4, 4, "Pujas revisadas: 4/4")
+            return {"auctions": [{}, {}, {}], "new_cards_count": 0}
+
+        refresh_prices.side_effect = complete
+        process_next_auction_refresh()
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, AuctionRefreshJob.Status.SUCCEEDED)
+        self.assertEqual(job.processed_count, 4)
+        self.assertEqual(job.total_count, 4)
+        self.assertEqual(job.auction_count, 3)
 
     @patch("dashboard.views.render")
     @patch("listar_subastas.fetch_la_liga_rare_auctions")
