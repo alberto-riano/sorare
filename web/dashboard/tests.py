@@ -1555,10 +1555,58 @@ class MovementHistoryTests(TestCase):
         self.assertNotContains(response, "Otro jugador")
         self.assertEqual(response.context["totals"]["purchases"], Decimal("20"))
         self.assertEqual(response.context["totals"]["trade_cash_in"], Decimal("4.26"))
-        self.assertEqual(response.context["totals"]["sales_net"], Decimal("3.04"))
-        self.assertEqual(response.context["totals"]["sales_inseason"], Decimal("3.04"))
+        self.assertEqual(response.context["totals"]["sales_net"], Decimal("7.30"))
+        self.assertEqual(response.context["totals"]["sales_inseason"], Decimal("7.30"))
         self.assertEqual(response.context["totals"]["sales_classic"], Decimal("0"))
         self.assertEqual(response.context["totals"]["balance"], Decimal("-12.70"))
+
+    def test_trade_type_follows_the_card_bought_or_sold_not_the_payment_cards(self):
+        juan = {
+            "asset_id": "juan-is", "player": "Juan Iglesias", "rarity": "rare",
+            "season_year": 2026, "in_season": True,
+        }
+        lejeune = {
+            "asset_id": "lejeune-classic", "player": "Florian Lejeune", "rarity": "limited",
+            "season_year": 2024, "in_season": False,
+        }
+        classic_target = {
+            "asset_id": "classic-target", "player": "Objetivo Classic", "rarity": "rare",
+            "season_year": 2023, "in_season": False,
+        }
+        inseason_payment = {
+            "asset_id": "is-payment", "player": "Pago In-Season", "rarity": "limited",
+            "season_year": 2026, "in_season": True,
+        }
+        MovementSnapshot.objects.create(user=self.user, source_version=14, movements=[
+            {
+                "id": "juan-sale", "occurred_at": "2026-08-23T10:00:00Z",
+                "direction": "trade", "cash_direction": "sale", "market": "Intercambio + dinero",
+                "category": "laliga_inseason", "cards": [juan, lejeune],
+                "sent_cards": [juan], "received_cards": [lejeune],
+                "gross_eur": 16.76, "net_eur": 15.92, "fee_eur": .84,
+            },
+            {
+                "id": "classic-buy", "occurred_at": "2026-08-23T11:00:00Z",
+                "direction": "trade", "cash_direction": "purchase", "market": "Intercambio + dinero",
+                "category": "other", "cards": [classic_target, inseason_payment],
+                "sent_cards": [inseason_payment], "received_cards": [classic_target],
+                "gross_eur": 5, "net_eur": 5, "fee_eur": 0,
+            },
+        ])
+
+        response = self.client.get(reverse("movements"), {"category": "all", "date_from": ""})
+        self.assertEqual(response.context["totals"]["sales_inseason"], Decimal("15.92"))
+        self.assertEqual(response.context["totals"]["sales_classic"], Decimal("0"))
+        self.assertEqual(response.context["totals"]["purchases_inseason"], Decimal("0"))
+        self.assertEqual(response.context["totals"]["purchases_classic"], Decimal("5"))
+
+        analytics = self.client.get(reverse("movement_analytics"), {"date_from": "2026-08-12"})
+        self.assertEqual(analytics.status_code, 200)
+        by_type = {row["key"]: row for row in analytics.context["breakdown"]}
+        self.assertEqual(by_type["inseason"]["received"], Decimal("15.92"))
+        self.assertEqual(by_type["classic"]["spent"], Decimal("5"))
+        self.assertContains(analytics, "Capital aún invertido")
+        self.assertContains(analytics, "Beneficio realizado")
 
     def test_first_visit_enqueues_background_sync(self):
         response = self.client.get(reverse("movements"))

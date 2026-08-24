@@ -14,6 +14,7 @@ urlpatterns = [
     path("ventas/estado/", views.sales_jobs_status, name="sales_jobs_status"),
     path("ventas/historial/", views.sales_price_history, name="sales_price_history"),
     path("movimientos/", views.movements, name="movements"),
+    path("movimientos/analisis/", views.movement_analytics, name="movement_analytics"),
     path("movimientos/actualizar/", views.enqueue_movements_sync, name="enqueue_movements_sync"),
     path("movimientos/estado/", views.movements_sync_status, name="movements_sync_status"),
     path("ofertas/", views.auctions_list, name="auctions_list"),

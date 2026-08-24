@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import sys
 import uuid
+from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from django.views.decorators.csrf import csrf_exempt
@@ -121,6 +122,29 @@ def _movement_datetime(value):
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (TypeError, ValueError):
         return None
+
+
+def _movement_main_cards(row):
+    """Cartas que definen la naturaleza económica de una operación.
+
+    En un intercambio, las cartas recibidas como contraprestación no cambian
+    el tipo de la carta vendida, y viceversa.
+    """
+    cash_direction = row.get("cash_direction") or row.get("direction")
+    if cash_direction == "sale":
+        return row.get("sent_cards") or row.get("cards") or []
+    if cash_direction == "purchase":
+        return row.get("received_cards") or row.get("cards") or []
+    return row.get("cards") or []
+
+
+def _movement_seasonality(row):
+    cards = _movement_main_cards(row)
+    if cards and all(bool(card.get("in_season")) for card in cards):
+        return "inseason"
+    if cards and all(not bool(card.get("in_season")) for card in cards):
+        return "classic"
+    return "mixed"
 
 
 def movements(request):
@@ -285,8 +309,15 @@ def movements(request):
             summary_rows_by_id[movement_id] = prepared_rows_by_id[movement_id]
     summary_rows = list(summary_rows_by_id.values())
 
-    purchases = [row for row in summary_rows if row.get("direction") == "purchase"]
-    sales = [row for row in summary_rows if row.get("direction") == "sale"]
+    purchases = [
+        row for row in summary_rows
+        if (row.get("cash_direction") or row.get("direction")) == "purchase"
+        and row.get("direction") != "reward"
+    ]
+    sales = [
+        row for row in summary_rows
+        if (row.get("cash_direction") or row.get("direction")) == "sale"
+    ]
     trades = [row for row in summary_rows if row.get("direction") == "trade"]
     rewards = [row for row in summary_rows if row.get("direction") == "reward"]
     trade_cash_in = sum(
@@ -296,23 +327,12 @@ def movements(request):
         Decimal(str(row.get("net_eur") or 0)) for row in trades if row.get("cash_direction") == "purchase"
     )
 
-    def movement_seasonality(row, *, sale=False):
-        if sale:
-            cards = row.get("sent_cards") or row.get("cards") or []
-        else:
-            cards = row.get("received_cards") or row.get("cards") or []
-        if cards and all(bool(card.get("in_season")) for card in cards):
-            return "inseason"
-        if cards and all(not bool(card.get("in_season")) for card in cards):
-            return "classic"
-        return "mixed"
-
-    purchases_inseason = [row for row in purchases if movement_seasonality(row) == "inseason"]
-    purchases_classic = [row for row in purchases if movement_seasonality(row) == "classic"]
-    purchases_mixed = [row for row in purchases if movement_seasonality(row) == "mixed"]
-    sales_inseason = [row for row in sales if movement_seasonality(row, sale=True) == "inseason"]
-    sales_classic = [row for row in sales if movement_seasonality(row, sale=True) == "classic"]
-    sales_mixed = [row for row in sales if movement_seasonality(row, sale=True) == "mixed"]
+    purchases_inseason = [row for row in purchases if _movement_seasonality(row) == "inseason"]
+    purchases_classic = [row for row in purchases if _movement_seasonality(row) == "classic"]
+    purchases_mixed = [row for row in purchases if _movement_seasonality(row) == "mixed"]
+    sales_inseason = [row for row in sales if _movement_seasonality(row) == "inseason"]
+    sales_classic = [row for row in sales if _movement_seasonality(row) == "classic"]
+    sales_mixed = [row for row in sales if _movement_seasonality(row) == "mixed"]
     essence_totals = {"limited": 0, "rare": 0, "super_rare": 0}
     for reward in rewards:
         essence_items = reward.get("essence") or []
@@ -350,9 +370,7 @@ def movements(request):
         "essence_super_rare": essence_totals["super_rare"],
         "balance": (
             sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
-            + trade_cash_in
             - sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases)
-            - trade_cash_out
         ),
     }
     try:
@@ -388,6 +406,217 @@ def movements(request):
         "date_to": date_to,
         "per_page": per_page,
         "query_without_page": query.urlencode(),
+    })
+
+
+def movement_analytics(request):
+    snapshot = MovementSnapshot.objects.filter(user=request.user, source_version__gte=14).first()
+    if not snapshot:
+        return render(request, "dashboard/movement_analytics.html", {"snapshot": None})
+
+    today = date.today()
+    preset = request.GET.get("preset", "season")
+    preset_dates = {
+        "season": date(2026, 8, 12),
+        "7d": today - timedelta(days=6),
+        "30d": today - timedelta(days=29),
+        "month": today.replace(day=1),
+    }
+    requested_from = request.GET.get("date_from")
+    if requested_from is not None:
+        date_from = requested_from.strip()
+        preset = "custom"
+    else:
+        date_from = preset_dates.get(preset, preset_dates["season"]).isoformat()
+        if preset not in preset_dates:
+            preset = "season"
+    date_to = request.GET.get("date_to", "").strip()
+    seasonality = request.GET.get("seasonality", "")
+    if seasonality not in {"", "inseason", "classic"}:
+        seasonality = ""
+    rarity = request.GET.get("rarity", "")
+    if rarity not in {"", "limited", "rare", "super_rare", "unique"}:
+        rarity = ""
+    category = request.GET.get("category", "all")
+    if category not in {"all", "laliga_inseason", "other"}:
+        category = "all"
+    market = request.GET.get("market", "").strip()
+    grouping = request.GET.get("grouping", "day")
+    if grouping not in {"day", "week", "month"}:
+        grouping = "day"
+
+    base_rows = []
+    prepared = []
+    markets = set()
+    for raw in snapshot.movements or []:
+        if raw.get("direction") == "reward" or raw.get("category") == "reward":
+            continue
+        row = dict(raw)
+        occurred_at = _movement_datetime(row.get("occurred_at"))
+        if not occurred_at:
+            continue
+        row["occurred_at_dt"] = occurred_at
+        local_date = occurred_at.astimezone(ZoneInfo("Europe/Madrid")).date()
+        row["local_date"] = local_date
+        if row.get("market"):
+            markets.add(str(row["market"]))
+        if date_from and local_date.isoformat() < date_from:
+            continue
+        if date_to and local_date.isoformat() > date_to:
+            continue
+        if category != "all" and row.get("category") != category:
+            continue
+        main_cards = _movement_main_cards(row)
+        if seasonality and _movement_seasonality(row) != seasonality:
+            continue
+        if rarity and not any(card.get("rarity") == rarity for card in main_cards):
+            continue
+        base_rows.append(row)
+        if not market or row.get("market") == market:
+            prepared.append(row)
+
+    purchases = [
+        row for row in prepared
+        if (row.get("cash_direction") or row.get("direction")) == "purchase"
+    ]
+    sales = [
+        row for row in prepared
+        if (row.get("cash_direction") or row.get("direction")) == "sale"
+    ]
+    purchase_total = sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases)
+    sales_total = sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
+    fees_total = sum(Decimal(str(row.get("fee_eur") or 0)) for row in prepared)
+
+    cycles = build_trade_cycles(base_rows)
+    realized_cycles = [
+        cycle for cycle in cycles
+        if cycle.get("is_complete") and cycle.get("balance_eur") is not None
+        and (
+            not market
+            or (cycle.get("purchase") or {}).get("market") == market
+            or (cycle.get("sale") or {}).get("market") == market
+        )
+    ]
+    realized_profit = sum(Decimal(str(cycle["balance_eur"])) for cycle in realized_cycles)
+    realized_cost = sum(Decimal(str(cycle.get("purchase_cost_eur") or 0)) for cycle in realized_cycles)
+    realized_roi = (
+        realized_profit * Decimal("100") / realized_cost
+        if realized_cost else None
+    )
+
+    # Capital con coste conocido: compras individuales del intervalo que aún
+    # no han tenido una salida exacta. Las cartas recibidas como pago no se
+    # valoran artificialmente.
+    held = {}
+    for row in sorted(base_rows, key=lambda item: item["occurred_at_dt"]):
+        received = row.get("received_cards") or (
+            row.get("cards") or [] if row.get("direction") == "purchase" else []
+        )
+        sent = row.get("sent_cards") or (
+            row.get("cards") or [] if row.get("direction") == "sale" else []
+        )
+        cash_direction = row.get("cash_direction") or row.get("direction")
+        if (
+            cash_direction == "purchase" and len(received) == 1 and not sent
+            and (not market or row.get("market") == market)
+        ):
+            card = received[0]
+            asset_id = str(card.get("asset_id") or "")
+            if asset_id:
+                held[asset_id] = {
+                    "card": card,
+                    "cost": Decimal(str(row.get("gross_eur") or 0)),
+                }
+        for card in sent:
+            asset_id = str(card.get("asset_id") or "")
+            if asset_id:
+                held.pop(asset_id, None)
+    invested_total = sum(item["cost"] for item in held.values())
+
+    breakdown = []
+    for value, label in (("inseason", "In-Season"), ("classic", "Classic")):
+        typed_purchases = [row for row in purchases if _movement_seasonality(row) == value]
+        typed_sales = [row for row in sales if _movement_seasonality(row) == value]
+        typed_cycles = [
+            cycle for cycle in realized_cycles
+            if bool((cycle.get("purchase_card") or cycle.get("sale_card") or {}).get("in_season"))
+            == (value == "inseason")
+        ]
+        typed_held = [
+            item for item in held.values()
+            if bool(item["card"].get("in_season")) == (value == "inseason")
+        ]
+        spent = sum(Decimal(str(row.get("gross_eur") or 0)) for row in typed_purchases)
+        received = sum(Decimal(str(row.get("net_eur") or 0)) for row in typed_sales)
+        breakdown.append({
+            "key": value,
+            "label": label,
+            "spent": spent,
+            "received": received,
+            "balance": received - spent,
+            "realized": sum(Decimal(str(cycle["balance_eur"])) for cycle in typed_cycles),
+            "invested": sum(item["cost"] for item in typed_held),
+            "held_count": len(typed_held),
+        })
+
+    timeline = defaultdict(lambda: {"purchases": Decimal("0"), "sales": Decimal("0")})
+    for row in purchases + sales:
+        row_date = row["local_date"]
+        if grouping == "month":
+            key = row_date.replace(day=1)
+            label = key.strftime("%m/%Y")
+        elif grouping == "week":
+            key = row_date - timedelta(days=row_date.weekday())
+            label = f"Semana {key.strftime('%d/%m')}"
+        else:
+            key = row_date
+            label = key.strftime("%d/%m")
+        bucket = timeline[(key, label)]
+        cash_direction = row.get("cash_direction") or row.get("direction")
+        if cash_direction == "purchase":
+            bucket["purchases"] += Decimal(str(row.get("gross_eur") or 0))
+        elif cash_direction == "sale":
+            bucket["sales"] += Decimal(str(row.get("net_eur") or 0))
+    timeline_rows = []
+    scale = max(
+        [max(values["purchases"], values["sales"]) for values in timeline.values()] or [Decimal("1")]
+    ) or Decimal("1")
+    for (key, label), values in sorted(timeline.items()):
+        timeline_rows.append({
+            "label": label,
+            "purchases": values["purchases"],
+            "sales": values["sales"],
+            "purchase_width": float(values["purchases"] * 100 / scale),
+            "sales_width": float(values["sales"] * 100 / scale),
+        })
+
+    totals = {
+        "purchases": purchase_total,
+        "purchase_count": len(purchases),
+        "sales": sales_total,
+        "sale_count": len(sales),
+        "balance": sales_total - purchase_total,
+        "fees": fees_total,
+        "realized_profit": realized_profit,
+        "realized_count": len(realized_cycles),
+        "realized_roi": realized_roi,
+        "invested": invested_total,
+        "held_count": len(held),
+    }
+    return render(request, "dashboard/movement_analytics.html", {
+        "snapshot": snapshot,
+        "totals": totals,
+        "breakdown": breakdown,
+        "timeline": timeline_rows,
+        "markets": sorted(markets),
+        "selected_preset": preset,
+        "selected_category": category,
+        "selected_seasonality": seasonality,
+        "selected_rarity": rarity,
+        "selected_market": market,
+        "selected_grouping": grouping,
+        "date_from": date_from,
+        "date_to": date_to,
     })
 
 

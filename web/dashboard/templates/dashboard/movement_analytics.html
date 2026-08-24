@@ -1,0 +1,86 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Análisis económico | Sorare{% endblock %}
+
+{% block content %}
+<div class="movements-page analytics-page">
+  <section class="panel movements-hero analytics-hero reveal">
+    <div>
+      <p class="kicker">Contabilidad de cartas</p>
+      <h1><i class="fas fa-chart-line"></i> Análisis económico</h1>
+      <p>Balance, operaciones cerradas y capital invertido con los filtros aplicados.</p>
+    </div>
+    {% if snapshot %}<div class="analytics-updated"><span>Datos actualizados</span><strong>{{ snapshot.refreshed_at|date:'d/m/Y H:i' }}</strong><a class="btn btn-secondary" href="{% url 'movements' %}"><i class="fas fa-list"></i> Ver movimientos</a></div>{% endif %}
+  </section>
+
+  <nav class="movement-tabs panel" aria-label="Sección de movimientos">
+    <a href="{% url 'movements' %}"><i class="fas fa-list"></i> Historial</a>
+    <a href="{% url 'movement_analytics' %}" class="is-active"><i class="fas fa-chart-line"></i> Análisis</a>
+  </nav>
+
+  {% if snapshot %}
+  <section class="panel analytics-controls reveal">
+    <div class="analytics-presets" aria-label="Periodos rápidos">
+      <a href="?preset=season&category={{ selected_category }}&seasonality={{ selected_seasonality }}&rarity={{ selected_rarity }}&market={{ selected_market|urlencode }}&grouping={{ selected_grouping }}" class="{% if selected_preset == 'season' %}is-active{% endif %}">Desde 12 agosto</a>
+      <a href="?preset=7d&category={{ selected_category }}&seasonality={{ selected_seasonality }}&rarity={{ selected_rarity }}&market={{ selected_market|urlencode }}&grouping={{ selected_grouping }}" class="{% if selected_preset == '7d' %}is-active{% endif %}">Últimos 7 días</a>
+      <a href="?preset=30d&category={{ selected_category }}&seasonality={{ selected_seasonality }}&rarity={{ selected_rarity }}&market={{ selected_market|urlencode }}&grouping={{ selected_grouping }}" class="{% if selected_preset == '30d' %}is-active{% endif %}">Últimos 30 días</a>
+      <a href="?preset=month&category={{ selected_category }}&seasonality={{ selected_seasonality }}&rarity={{ selected_rarity }}&market={{ selected_market|urlencode }}&grouping={{ selected_grouping }}" class="{% if selected_preset == 'month' %}is-active{% endif %}">Este mes</a>
+    </div>
+    <form method="get" class="analytics-filters" id="analyticsFilters">
+      <label><span>Ámbito</span><select name="category"><option value="all">Todo</option><option value="laliga_inseason" {% if selected_category == 'laliga_inseason' %}selected{% endif %}>LaLiga</option><option value="other" {% if selected_category == 'other' %}selected{% endif %}>Otros</option></select></label>
+      <label><span>Tipo de carta</span><select name="seasonality"><option value="">In-Season y Classic</option><option value="inseason" {% if selected_seasonality == 'inseason' %}selected{% endif %}>In-Season</option><option value="classic" {% if selected_seasonality == 'classic' %}selected{% endif %}>Classic</option></select></label>
+      <label><span>Rareza</span><select name="rarity"><option value="">Todas</option><option value="limited" {% if selected_rarity == 'limited' %}selected{% endif %}>Limited</option><option value="rare" {% if selected_rarity == 'rare' %}selected{% endif %}>Rare</option><option value="super_rare" {% if selected_rarity == 'super_rare' %}selected{% endif %}>Super Rare</option><option value="unique" {% if selected_rarity == 'unique' %}selected{% endif %}>Unique</option></select></label>
+      <label><span>Mercado</span><select name="market"><option value="">Todos</option>{% for value in markets %}<option value="{{ value }}" {% if selected_market == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+      <label><span>Desde</span><input type="date" name="date_from" value="{{ date_from }}"></label>
+      <label><span>Hasta</span><input type="date" name="date_to" value="{{ date_to }}"></label>
+      <label><span>Agrupar gráfica</span><select name="grouping"><option value="day" {% if selected_grouping == 'day' %}selected{% endif %}>Por día</option><option value="week" {% if selected_grouping == 'week' %}selected{% endif %}>Por semana</option><option value="month" {% if selected_grouping == 'month' %}selected{% endif %}>Por mes</option></select></label>
+      <button class="btn btn-accent" type="submit"><i class="fas fa-filter"></i> Aplicar</button>
+      <a class="btn btn-secondary" href="{% url 'movement_analytics' %}">Limpiar</a>
+    </form>
+  </section>
+
+  <section class="analytics-kpis reveal">
+    <article class="panel"><span><i class="fas fa-cart-shopping"></i> Compras</span><strong class="is-out">−{{ totals.purchases|floatformat:2 }} €</strong><small>{{ totals.purchase_count }} operaciones · precio total</small></article>
+    <article class="panel"><span><i class="fas fa-tag"></i> Ventas</span><strong class="is-in">+{{ totals.sales|floatformat:2 }} €</strong><small>{{ totals.sale_count }} operaciones · recibido</small></article>
+    <article class="panel analytics-balance"><span><i class="fas fa-scale-balanced"></i> Balance del periodo</span><strong class="{% if totals.balance < 0 %}is-out{% else %}is-in{% endif %}">{% if totals.balance > 0 %}+{% endif %}{{ totals.balance|floatformat:2 }} €</strong><small>Ventas menos compras</small></article>
+    <article class="panel"><span><i class="fas fa-circle-check"></i> Beneficio realizado</span><strong class="{% if totals.realized_profit < 0 %}is-out{% else %}is-in{% endif %}">{% if totals.realized_profit > 0 %}+{% endif %}{{ totals.realized_profit|floatformat:2 }} €</strong><small>{{ totals.realized_count }} ciclos cerrados{% if totals.realized_roi != None %} · {{ totals.realized_roi|floatformat:1 }}% ROI{% endif %}</small></article>
+    <article class="panel"><span><i class="fas fa-wallet"></i> Capital aún invertido</span><strong>{{ totals.invested|floatformat:2 }} €</strong><small>{{ totals.held_count }} cartas compradas aún sin salida</small></article>
+    <article class="panel"><span><i class="fas fa-receipt"></i> Comisiones</span><strong>{{ totals.fees|floatformat:2 }} €</strong><small>Incluidas en los importes recibidos</small></article>
+  </section>
+
+  <section class="analytics-grid reveal">
+    <article class="panel analytics-breakdown">
+      <div class="table-head"><div><p class="kicker">Desglose</p><h2>In-Season frente a Classic</h2></div></div>
+      <div class="analytics-type-list">
+        {% for row in breakdown %}<section class="analytics-type-row type-{{ row.key }}">
+          <header><span>{{ row.label }}</span><strong class="{% if row.balance < 0 %}is-out{% else %}is-in{% endif %}">{% if row.balance > 0 %}+{% endif %}{{ row.balance|floatformat:2 }} €</strong></header>
+          <dl><div><dt>Compras</dt><dd>−{{ row.spent|floatformat:2 }} €</dd></div><div><dt>Ventas</dt><dd>+{{ row.received|floatformat:2 }} €</dd></div><div><dt>Beneficio realizado</dt><dd>{% if row.realized > 0 %}+{% endif %}{{ row.realized|floatformat:2 }} €</dd></div><div><dt>Invertido</dt><dd>{{ row.invested|floatformat:2 }} € <small>({{ row.held_count }} cartas)</small></dd></div></dl>
+        </section>{% endfor %}
+      </div>
+    </article>
+
+    <article class="panel analytics-flow">
+      <div class="table-head"><div><p class="kicker">Evolución</p><h2>Entradas y salidas</h2></div><div class="analytics-legend"><span><i class="is-purchase"></i> Compras</span><span><i class="is-sale"></i> Ventas</span></div></div>
+      <div class="analytics-flow-list">
+        {% for row in timeline %}<div class="analytics-flow-row">
+          <strong>{{ row.label }}</strong>
+          <div><span class="is-purchase" style="width:{% widthratio row.purchase_width 1 1 %}%"></span></div><em>−{{ row.purchases|floatformat:2 }} €</em>
+          <div><span class="is-sale" style="width:{% widthratio row.sales_width 1 1 %}%"></span></div><em>+{{ row.sales|floatformat:2 }} €</em>
+        </div>{% empty %}<p class="sales-empty">No hay importes en este periodo.</p>{% endfor %}
+      </div>
+    </article>
+  </section>
+  {% else %}
+  <section class="panel sales-empty-state"><i class="fas fa-chart-line"></i><h2>Primero necesitamos tu historial</h2><p>Actualiza Movimientos y el análisis se generará automáticamente con esa información.</p><a class="btn btn-accent" href="{% url 'movements' %}">Ir a Movimientos</a></section>
+  {% endif %}
+</div>
+{% if snapshot %}<script>
+(function () {
+  var form = document.getElementById('analyticsFilters');
+  if (!form) return;
+  form.querySelectorAll('select,input[type="date"]').forEach(function (control) {
+    control.addEventListener('change', function () { form.submit(); });
+  });
+})();
+</script>{% endif %}
+{% endblock %}
