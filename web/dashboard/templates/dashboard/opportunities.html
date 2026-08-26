@@ -12,11 +12,27 @@
     </div>
     <div class="opportunity-refresh">
       {% if snapshot %}<span>Último análisis</span><strong>{{ snapshot.refreshed_at|date:'d/m/Y H:i' }}</strong>{% endif %}
-      <button class="btn btn-accent" type="button" id="refreshOpportunities" {% if active_refresh %}disabled{% endif %}>
-        <i class="fas fa-arrows-rotate{% if active_refresh %} fa-spin{% endif %}"></i>
-        {% if active_refresh %}Analizando…{% else %}Actualizar análisis{% endif %}
-      </button>
     </div>
+  </section>
+
+  <section class="panel opportunity-team-refresh reveal">
+    <div class="opportunity-team-refresh-head">
+      <div><p class="kicker">Actualización por equipos</p><h2>Elige qué clubes analizar</h2><p>Puedes empezar por uno o varios equipos y completar el resto más adelante.</p></div>
+      <div class="opportunity-team-refresh-actions">
+        <label><input type="checkbox" id="refreshAllTeams" {% if refresh_all_teams %}checked{% endif %}> <span>Seleccionar todos</span></label>
+        <button class="btn btn-accent" type="button" id="refreshOpportunities" {% if active_refresh %}disabled{% endif %}>
+          <i class="fas fa-arrows-rotate{% if active_refresh %} fa-spin{% endif %}"></i>
+          {% if active_refresh %}Analizando…{% else %}Actualizar selección{% endif %}
+        </button>
+      </div>
+    </div>
+    {% if refresh_team_catalog %}<div class="opportunity-team-grid">
+      {% for team in refresh_team_catalog %}<label class="opportunity-team-choice">
+        <input type="checkbox" class="opportunity-refresh-team" value="{{ team.slug }}" {% if refresh_all_teams or team.slug in selected_refresh_team_slugs %}checked{% endif %}>
+        <span>{{ team.name }}</span>
+        {% if team.slug in refreshed_team_slugs %}<i class="fas fa-circle-check" title="Ya tiene datos"></i>{% endif %}
+      </label>{% endfor %}
+    </div>{% else %}<p class="opportunity-team-loading"><i class="fas fa-circle-notch fa-spin"></i> Cargando los equipos de LaLiga…</p>{% endif %}
   </section>
 
   <section class="opportunity-kpis reveal">
@@ -80,7 +96,7 @@
     </nav>{% endif %}
   </section>
   {% else %}
-  <section class="panel opportunity-empty"><i class="fas fa-chart-line"></i><h2>Preparando el primer análisis</h2><p>Se está revisando el mercado fijo y las ventas comparables. Puedes salir de esta página: el worker seguirá trabajando.</p></section>
+  <section class="panel opportunity-empty"><i class="fas fa-chart-line"></i><h2>Elige por dónde empezar</h2><p>Selecciona uno, varios o todos los equipos y pulsa «Actualizar selección». Puedes salir de esta página mientras trabaja.</p></section>
   {% endif %}
 </div>
 
@@ -88,6 +104,8 @@
 (function () {
   var button = document.getElementById('refreshOpportunities');
   var progress = document.getElementById('opportunityProgress');
+  var allTeams = document.getElementById('refreshAllTeams');
+  var teamInputs = Array.prototype.slice.call(document.querySelectorAll('.opportunity-refresh-team'));
   var csrf = '{{ csrf_token }}';
   var activeJob = {% if active_refresh %}{{ active_refresh.id }}{% else %}null{% endif %};
   function poll() {
@@ -110,16 +128,50 @@
         button.innerHTML = '<i class="fas fa-arrows-rotate"></i> Reintentar';
       });
   }
+  function syncAllTeams() {
+    if (allTeams) allTeams.checked = teamInputs.length > 0 && teamInputs.every(function (input) { return input.checked; });
+  }
+  if (allTeams) allTeams.addEventListener('change', function () {
+    teamInputs.forEach(function (input) { input.checked = allTeams.checked; });
+  });
+  teamInputs.forEach(function (input) { input.addEventListener('change', syncAllTeams); });
   if (button) button.addEventListener('click', function () {
+    var selectedTeams = teamInputs.filter(function (input) { return input.checked; }).map(function (input) { return input.value; });
+    if (teamInputs.length && !selectedTeams.length) {
+      progress.hidden = false;
+      progress.classList.add('is-error');
+      document.getElementById('opportunityProgressIcon').className = 'fas fa-triangle-exclamation';
+      document.getElementById('opportunityProgressTitle').textContent = 'Selecciona algún equipo';
+      document.getElementById('opportunityProgressLabel').textContent = 'Marca uno, varios o todos los clubes antes de actualizar.';
+      return;
+    }
     progress.classList.remove('is-error');
     progress.hidden = false;
     document.getElementById('opportunityProgressIcon').className = 'fas fa-circle-notch fa-spin';
     document.getElementById('opportunityProgressTitle').textContent = 'Analizando mercado';
-    document.getElementById('opportunityProgressLabel').textContent = 'Preparando actualización';
+    document.getElementById('opportunityProgressLabel').textContent = selectedTeams.length === teamInputs.length ? 'Preparando todos los equipos' : 'Preparando ' + selectedTeams.length + ' equipos';
     button.disabled = true;
     button.innerHTML = '<i class="fas fa-arrows-rotate fa-spin"></i> Analizando…';
-    fetch('{% url "enqueue_opportunity_refresh" %}', {method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':csrf}})
-      .then(function (response) { return response.json(); }).then(function (payload) { activeJob = payload.job_id; poll(); });
+    fetch('{% url "enqueue_opportunity_refresh" %}', {
+      method:'POST', credentials:'same-origin',
+      headers:{'X-CSRFToken':csrf, 'Content-Type':'application/json'},
+      body: JSON.stringify({teams: selectedTeams.length === teamInputs.length ? [] : selectedTeams})
+    })
+      .then(function (response) {
+        return response.json().then(function (payload) {
+          if (!response.ok || !payload.job_id) throw new Error(payload.error || 'No se pudo iniciar la actualización');
+          return payload;
+        });
+      })
+      .then(function (payload) { activeJob = payload.job_id; poll(); })
+      .catch(function (error) {
+        progress.classList.add('is-error');
+        document.getElementById('opportunityProgressIcon').className = 'fas fa-triangle-exclamation';
+        document.getElementById('opportunityProgressTitle').textContent = 'No se pudo iniciar';
+        document.getElementById('opportunityProgressLabel').textContent = error.message || 'Vuelve a intentarlo';
+        button.disabled = false;
+        button.innerHTML = '<i class="fas fa-arrows-rotate"></i> Reintentar';
+      });
   });
   if (activeJob) poll();
   document.querySelectorAll('.opportunity-main-row').forEach(function (row) {

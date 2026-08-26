@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
+import re
 import sys
 import uuid
-import re
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
@@ -124,13 +125,36 @@ def index(request):
     return render(request, "dashboard/index.html", {"cards": cards})
 
 
+def _opportunity_team_catalog(snapshot=None, latest_job=None):
+    catalog = list(((snapshot.metadata if snapshot else {}) or {}).get("team_catalog") or [])
+    if not catalog and latest_job:
+        catalog = list(latest_job.team_catalog or [])
+    if not catalog:
+        try:
+            import listar_subastas
+
+            cached_rows = (listar_subastas.load_auction_cache() or {}).get("auctions") or []
+            by_slug = {}
+            for row in cached_rows:
+                slug = str(row.get("team_slug") or "").strip()
+                name = str(row.get("team") or "").strip()
+                if slug and name:
+                    by_slug[slug] = {"slug": slug, "name": name, "picture_url": row.get("team_picture_url") or ""}
+            catalog = list(by_slug.values())
+        except Exception:
+            catalog = []
+    return sorted(
+        [team for team in catalog if team.get("slug") and team.get("name")],
+        key=lambda team: str(team.get("name") or "").casefold(),
+    )
+
+
 def opportunities(request):
     snapshot = OpportunitySnapshot.objects.filter(market_key="laliga-2026", source_version=1).first()
+    latest_refresh = OpportunityRefreshJob.objects.order_by("-created_at").first()
     active_refresh = OpportunityRefreshJob.objects.filter(
         status__in=(OpportunityRefreshJob.Status.QUEUED, OpportunityRefreshJob.Status.RUNNING),
     ).order_by("-created_at").first()
-    if not snapshot and not active_refresh:
-        active_refresh = OpportunityRefreshJob.objects.create(user=request.user)
 
     all_rows = list(snapshot.rows if snapshot else [])
     player_filter = request.GET.get("player", "").strip().casefold()
@@ -176,10 +200,16 @@ def opportunities(request):
     pagination_params = request.GET.copy()
     pagination_params.pop("page", None)
     metadata = snapshot.metadata if snapshot else {}
+    selected_refresh_team_slugs = set(active_refresh.target_team_slugs or []) if active_refresh else set()
     return render(request, "dashboard/opportunities.html", {
         "snapshot": snapshot,
         "metadata": metadata,
         "active_refresh": active_refresh,
+        "refresh_team_catalog": _opportunity_team_catalog(snapshot, latest_refresh),
+        "selected_refresh_team_slugs": selected_refresh_team_slugs,
+        "refresh_all_teams": not selected_refresh_team_slugs,
+        "refreshed_team_slugs": set(metadata.get("refreshed_team_slugs") or []),
+        "team_updated_at": metadata.get("team_updated_at") or {},
         "page_obj": page_obj,
         "total_market_rows": len(all_rows),
         "filtered_count": len(rows),
@@ -202,8 +232,27 @@ def enqueue_opportunity_refresh(request):
     active = OpportunityRefreshJob.objects.filter(
         status__in=(OpportunityRefreshJob.Status.QUEUED, OpportunityRefreshJob.Status.RUNNING),
     ).order_by("-created_at").first()
-    job = active or OpportunityRefreshJob.objects.create(user=request.user)
-    return JsonResponse({"job_id": job.id, "status": job.status}, status=202)
+    if active:
+        return JsonResponse({"job_id": active.id, "status": active.status}, status=202)
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Selección de equipos no válida"}, status=400)
+    raw_team_slugs = payload.get("teams") or []
+    if not isinstance(raw_team_slugs, list):
+        return JsonResponse({"error": "Selección de equipos no válida"}, status=400)
+    team_slugs = list(dict.fromkeys(str(slug).strip() for slug in raw_team_slugs if str(slug).strip()))
+    if len(team_slugs) > 20 or any(not re.fullmatch(r"[a-z0-9-]{1,180}", slug) for slug in team_slugs):
+        return JsonResponse({"error": "Selección de equipos no válida"}, status=400)
+    known_catalog = _opportunity_team_catalog(
+        OpportunitySnapshot.objects.filter(market_key="laliga-2026").first(),
+        OpportunityRefreshJob.objects.order_by("-created_at").first(),
+    )
+    known_slugs = {team["slug"] for team in known_catalog}
+    if known_slugs and set(team_slugs).difference(known_slugs):
+        return JsonResponse({"error": "Alguno de los equipos ya no pertenece a LaLiga"}, status=400)
+    job = OpportunityRefreshJob.objects.create(user=request.user, target_team_slugs=team_slugs)
+    return JsonResponse({"job_id": job.id, "status": job.status, "teams": team_slugs}, status=202)
 
 
 @require_GET
@@ -217,6 +266,8 @@ def opportunity_refresh_status(request):
         "percent": round(job.processed_count / job.total_count * 100) if job.total_count else 0,
         "player_count": job.player_count,
         "opportunity_count": job.opportunity_count,
+        "target_team_slugs": job.target_team_slugs,
+        "team_catalog": job.team_catalog,
         "progress_label": job.progress_label,
         "error": job.error,
     } for job in jobs]})

@@ -89,6 +89,8 @@ class OpportunityRefreshJob(models.Model):
     total_count = models.PositiveIntegerField(default=0)
     player_count = models.PositiveIntegerField(default=0)
     opportunity_count = models.PositiveIntegerField(default=0)
+    target_team_slugs = models.JSONField(default=list)
+    team_catalog = models.JSONField(default=list)
     progress_label = models.CharField(max_length=180, blank=True)
     error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)

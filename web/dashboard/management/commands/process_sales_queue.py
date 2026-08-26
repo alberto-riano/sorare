@@ -29,7 +29,7 @@ def process_next_opportunity_refresh():
         job.save(update_fields=("status", "started_at", "progress_label"))
 
     try:
-        from web_services.opportunity_market import collect_opportunity_market
+        from web_services.opportunity_market import build_opportunity_rows, collect_opportunity_market
 
         def save_progress(processed, total, label):
             OpportunityRefreshJob.objects.filter(pk=job.pk).update(
@@ -38,20 +38,46 @@ def process_next_opportunity_refresh():
                 progress_label=label,
             )
 
-        payload = collect_opportunity_market(progress=save_progress)
-        metadata = payload.get("metadata") or {}
+        def save_catalog(team_catalog):
+            OpportunityRefreshJob.objects.filter(pk=job.pk).update(team_catalog=team_catalog)
+
+        payload = collect_opportunity_market(
+            progress=save_progress,
+            team_slugs=job.target_team_slugs,
+            catalog_callback=save_catalog,
+        )
+        refreshed_at = timezone.now()
+        selected_metadata = payload.get("metadata") or {}
+        refreshed_team_slugs = set(selected_metadata.get("refreshed_team_slugs") or [])
+        snapshot = OpportunitySnapshot.objects.filter(market_key="laliga-2026").first()
+        previous_rows = list(snapshot.rows if snapshot else [])
+        kept_rows = [row for row in previous_rows if row.get("team_slug") not in refreshed_team_slugs]
+        merged_rows, merged_metadata = build_opportunity_rows(kept_rows + list(payload.get("rows") or []))
+        previous_metadata = dict(snapshot.metadata if snapshot else {})
+        team_updated_at = dict(previous_metadata.get("team_updated_at") or {})
+        for team_slug in refreshed_team_slugs:
+            team_updated_at[team_slug] = refreshed_at.isoformat()
+        merged_metadata.update({
+            "roster_players": len(merged_rows),
+            "players_analyzed": len(merged_rows),
+            "active_listings": sum(
+                1 for row in merged_rows for rarity in ("limited", "rare")
+                if (row.get(rarity) or {}).get("floor")
+            ),
+            "opportunities": sum(1 for row in merged_rows if row.get("recommended_rarity")),
+            "team_catalog": selected_metadata.get("team_catalog") or previous_metadata.get("team_catalog") or [],
+            "refreshed_team_slugs": sorted(
+                set(previous_metadata.get("refreshed_team_slugs") or []).union(refreshed_team_slugs)
+            ),
+            "team_updated_at": team_updated_at,
+        })
         OpportunitySnapshot.objects.update_or_create(
             market_key="laliga-2026",
-            defaults={
-                "rows": payload.get("rows") or [],
-                "metadata": metadata,
-                "refreshed_at": timezone.now(),
-                "source_version": 1,
-            },
+            defaults={"rows": merged_rows, "metadata": merged_metadata, "refreshed_at": refreshed_at, "source_version": 1},
         )
         job.refresh_from_db(fields=("processed_count", "total_count"))
-        job.player_count = metadata.get("players_analyzed") or 0
-        job.opportunity_count = metadata.get("opportunities") or 0
+        job.player_count = selected_metadata.get("players_analyzed") or 0
+        job.opportunity_count = selected_metadata.get("opportunities") or 0
         job.processed_count = max(job.processed_count, job.total_count)
         job.progress_label = "Oportunidades actualizadas"
         job.status = OpportunityRefreshJob.Status.SUCCEEDED

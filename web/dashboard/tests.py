@@ -34,7 +34,7 @@ from web_services.movement_history import (
     collect_movement_history, collect_public_reward_history,
 )
 from web_services.opportunity_market import (
-    _comparable_kind, _floor_query, build_opportunity_rows, robust_sales_reference,
+    _comparable_kind, _floor_query, _history_query, build_opportunity_rows, robust_sales_reference,
 )
 
 
@@ -1743,6 +1743,13 @@ class OpportunityMarketTests(TestCase):
         self.assertEqual(query.count("anyCards("), 2)
         self.assertEqual(variables, {"slug": "player-one"})
 
+    def test_history_query_respects_sorare_twenty_item_limit(self):
+        query, variables = _history_query(["player-one", "player-two"])
+
+        self.assertNotIn("first: 30", query)
+        self.assertEqual(query.count("first: 20"), 4)
+        self.assertEqual(variables["slug0"], "player-one")
+
     def test_market_value_is_capped_by_floor_and_cross_rarity_detects_bargain(self):
         sales = lambda values: [
             {"eur": value, "date": f"2026-08-{20 + index:02d}T10:00:00Z", "kind": "public", "label": "Oferta pública"}
@@ -1796,7 +1803,7 @@ class OpportunityMarketTests(TestCase):
             "rows": [{"player": "Prueba"}],
             "metadata": {"players_analyzed": 1, "opportunities": 1},
         }
-        job = OpportunityRefreshJob.objects.create(user=self.user)
+        job = OpportunityRefreshJob.objects.create(user=self.user, target_team_slugs=["real-madrid-madrid"])
 
         processed = process_next_opportunity_refresh()
 
@@ -1805,8 +1812,45 @@ class OpportunityMarketTests(TestCase):
         self.assertEqual(job.status, OpportunityRefreshJob.Status.SUCCEEDED)
         self.assertEqual(job.player_count, 1)
         self.assertEqual(OpportunitySnapshot.objects.get().rows[0]["player"], "Prueba")
+        self.assertEqual(collect.call_args.kwargs["team_slugs"], ["real-madrid-madrid"])
 
-    def test_first_visit_enqueues_background_refresh(self):
+    def test_first_visit_waits_for_team_selection(self):
         response = self.client.get(reverse("opportunities"))
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(OpportunityRefreshJob.objects.filter(status="queued").exists())
+        self.assertFalse(OpportunityRefreshJob.objects.filter(status="queued").exists())
+        self.assertContains(response, "Elige por dónde empezar")
+
+    def test_refresh_can_be_enqueued_for_selected_teams(self):
+        response = self.client.post(
+            reverse("enqueue_opportunity_refresh"),
+            data=json.dumps({"teams": ["real-madrid-madrid", "barcelona-barcelona"]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        job = OpportunityRefreshJob.objects.get(pk=response.json()["job_id"])
+        self.assertEqual(job.target_team_slugs, ["real-madrid-madrid", "barcelona-barcelona"])
+
+    @patch("web_services.opportunity_market.collect_opportunity_market")
+    def test_selected_team_refresh_preserves_other_teams(self, collect):
+        OpportunitySnapshot.objects.create(rows=[
+            {"player": "Antiguo Madrid", "player_slug": "old-madrid", "team_slug": "real-madrid-madrid", "limited": {}, "rare": {}},
+            {"player": "Jugador Barça", "player_slug": "barca-player", "team_slug": "barcelona-barcelona", "limited": {}, "rare": {}},
+        ])
+        collect.return_value = {
+            "rows": [{"player": "Nuevo Madrid", "player_slug": "new-madrid", "team_slug": "real-madrid-madrid", "limited": {}, "rare": {}}],
+            "metadata": {
+                "players_analyzed": 1, "opportunities": 0,
+                "refreshed_team_slugs": ["real-madrid-madrid"],
+                "team_catalog": [
+                    {"slug": "real-madrid-madrid", "name": "Real Madrid"},
+                    {"slug": "barcelona-barcelona", "name": "FC Barcelona"},
+                ],
+            },
+        }
+        OpportunityRefreshJob.objects.create(user=self.user, target_team_slugs=["real-madrid-madrid"])
+
+        process_next_opportunity_refresh()
+
+        players = {row["player"] for row in OpportunitySnapshot.objects.get().rows}
+        self.assertEqual(players, {"Nuevo Madrid", "Jugador Barça"})

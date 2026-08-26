@@ -194,7 +194,7 @@ def _history_query(slugs):
         for rarity in RARITIES:
             alias = f"p{index}{'l' if rarity == 'limited' else 'r'}"
             selections.append(f"""
-              {alias}: tokenPrices(playerSlug: ${variable}, rarity: {RARITY_API[rarity]}, season: {SEASON_YEAR}, seasonEligibility: IN_SEASON, first: 30) {{
+              {alias}: tokenPrices(playerSlug: ${variable}, rarity: {RARITY_API[rarity]}, season: {SEASON_YEAR}, seasonEligibility: IN_SEASON, first: 20) {{
                 amounts {{ eurCents wei }} date
                 card {{ seasonYear inSeasonEligible }}
                 deal {{
@@ -259,14 +259,22 @@ def _floor_query(player):
     return query, {"slug": player["player_slug"]}
 
 
-def collect_opportunity_market(progress=None):
+def collect_opportunity_market(progress=None, team_slugs=None, catalog_callback=None):
     """Descarga ofertas fijas y ofertas públicas, y devuelve el snapshot de UI."""
     import listar_subastas
 
     headers = build_headers()
     rates = fetch_exchange_rates()
     teams = listar_subastas.fetch_la_liga_teams(headers, season_year=SEASON_YEAR)
-    team_items = list(teams.items())
+    team_catalog = [{"slug": slug, "name": name} for slug, name in sorted(teams.items(), key=lambda item: item[1])]
+    if catalog_callback:
+        catalog_callback(team_catalog)
+    requested_team_slugs = {str(slug).strip() for slug in (team_slugs or []) if str(slug).strip()}
+    unknown_team_slugs = requested_team_slugs.difference(teams)
+    if unknown_team_slugs:
+        raise ValueError(f"Equipos no válidos: {', '.join(sorted(unknown_team_slugs))}")
+    team_items = [item for item in teams.items() if not requested_team_slugs or item[0] in requested_team_slugs]
+    refreshed_team_slugs = [slug for slug, _ in team_items]
     roster = {}
     for offset in range(0, len(team_items), 5):
         chunk = team_items[offset:offset + 5]
@@ -363,5 +371,7 @@ def collect_opportunity_market(progress=None):
         "players_analyzed": len(rows),
         "active_listings": len(floors),
         "opportunities": sum(1 for row in rows if row.get("recommended_rarity")),
+        "team_catalog": team_catalog,
+        "refreshed_team_slugs": refreshed_team_slugs,
     })
     return {"rows": rows, "metadata": metadata}
