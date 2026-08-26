@@ -231,32 +231,32 @@ def _roster_query(team_items):
     return query, variables
 
 
-def _floor_query(players):
-    definitions = []
-    selections = []
-    variables = {}
-    for index, player in enumerate(players):
-        variable = f"slug{index}"
-        definitions.append(f"${variable}: String!")
-        variables[variable] = player["player_slug"]
-        selections.append(f"""
-            p{index}: anyPlayer(slug: ${variable}) {{
-            limited: anyCards(first: 1, rarities: [limited], seasonStartYears: [{SEASON_YEAR}], inSeasonEligible: true) {{
-              nodes {{
+def _floor_query(player):
+    # Sorare rechaza varios ``anyPlayer`` en la raíz aunque lleven alias. Por
+    # eso cada petición resuelve un jugador y las dos rarezas a la vez.
+    query = f"""
+      query OpportunityFloor($slug: String!) {{
+        player: anyPlayer(slug: $slug) {{
+          limited: anyCards(first: 1, rarities: [limited], seasonStartYears: [{SEASON_YEAR}], inSeasonEligible: true) {{
+            nodes {{
+              lowestPriceCard {{
                 assetId slug serialNumber
-                publicMinPrices {{ eurCents wei }}
-              }}
-            }}
-            rare: anyCards(first: 1, rarities: [rare], seasonStartYears: [{SEASON_YEAR}], inSeasonEligible: true) {{
-              nodes {{
-                assetId slug serialNumber
-                publicMinPrices {{ eurCents wei }}
+                liveSingleSaleOffer {{ receiverSide {{ amounts {{ eurCents wei }} }} }}
               }}
             }}
           }}
-        """)
-    query = "query OpportunityFloors(" + ",".join(definitions) + ") {" + "".join(selections) + "}"
-    return query, variables
+          rare: anyCards(first: 1, rarities: [rare], seasonStartYears: [{SEASON_YEAR}], inSeasonEligible: true) {{
+            nodes {{
+              lowestPriceCard {{
+                assetId slug serialNumber
+                liveSingleSaleOffer {{ receiverSide {{ amounts {{ eurCents wei }} }} }}
+              }}
+            }}
+          }}
+        }}
+      }}
+    """
+    return query, {"slug": player["player_slug"]}
 
 
 def collect_opportunity_market(progress=None):
@@ -294,29 +294,28 @@ def collect_opportunity_market(progress=None):
     players = list(roster.values())
     floors = {}
     floor_total = len(players)
-    for offset in range(0, floor_total, 8):
-        chunk = players[offset:offset + 8]
-        query, variables = _floor_query(chunk)
+    for index, player in enumerate(players, start=1):
+        query, variables = _floor_query(player)
         data = graphql_request(query, variables, headers=headers)
-        for index, player in enumerate(chunk):
-            market = data.get(f"p{index}") or {}
-            for rarity in RARITIES:
-                nodes = (market.get(rarity) or {}).get("nodes") or []
-                representative = nodes[0] if nodes else {}
-                cents = to_eur_cents(representative.get("publicMinPrices") or {}, rates)
-                if cents is None or cents <= 0:
-                    continue
-                floors[(player["player_slug"], rarity)] = {
-                    **player,
-                    "floor": round(cents / 100, 2),
-                    "asset_id": representative.get("assetId"),
-                    "card_slug": representative.get("slug"),
-                    "serial": representative.get("serialNumber"),
-                }
-        done = min(offset + len(chunk), floor_total)
+        market = data.get("player") or {}
+        for rarity in RARITIES:
+            nodes = (market.get(rarity) or {}).get("nodes") or []
+            representative = (nodes[0] if nodes else {}).get("lowestPriceCard") or {}
+            offer = representative.get("liveSingleSaleOffer") or {}
+            cents = to_eur_cents((offer.get("receiverSide") or {}).get("amounts") or {}, rates)
+            if cents is None or cents <= 0:
+                continue
+            floors[(player["player_slug"], rarity)] = {
+                **player,
+                "floor": round(cents / 100, 2),
+                "asset_id": representative.get("assetId"),
+                "card_slug": representative.get("slug"),
+                "serial": representative.get("serialNumber"),
+            }
         if progress:
-            progress(len(team_items) + done, len(team_items) + floor_total, f"Suelos fijos: {done}/{floor_total} jugadores")
-        time.sleep(REQUEST_INTERVAL_SECONDS)
+            progress(len(team_items) + index, len(team_items) + floor_total, f"Suelos fijos: {index}/{floor_total} jugadores")
+        if index < floor_total:
+            time.sleep(REQUEST_INTERVAL_SECONDS)
 
     player_slugs = sorted({slug for slug, _ in floors})
     histories = {(slug, rarity): [] for slug in player_slugs for rarity in RARITIES}

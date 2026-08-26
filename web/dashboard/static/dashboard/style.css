@@ -1554,9 +1554,11 @@ body.modal-open { overflow: hidden; }
 .opportunity-kpi-highlight { border-color: #8ed9cf; background: linear-gradient(135deg,#fff,#ecfdf8); }
 .opportunity-progress { display: grid; gap: .55rem; }
 .opportunity-progress[hidden] { display: none !important; }
-.opportunity-progress > div:first-child { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: .5rem; }
+.opportunity-progress > div:first-child { display: grid; grid-template-columns: auto auto minmax(0,1fr); align-items: center; gap: .5rem; min-width: 0; }
 .opportunity-progress > div:first-child i { color: var(--accent); }
-.opportunity-progress > div:first-child span { color: var(--muted); font-size: .72rem; text-align: right; }
+.opportunity-progress > div:first-child span { min-width: 0; color: var(--muted); font-size: .72rem; text-align: right; overflow-wrap: anywhere; }
+.opportunity-progress.is-error > div:first-child span { text-align: left; }
+.opportunity-progress.is-error > div:first-child i { color: #dc2626; }
 .opportunity-progress-track { height: 8px; overflow: hidden; border-radius: 99px; background: #eceae3; }
 .opportunity-progress-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--accent),#22c55e); transition: width .25s; }
 .opportunity-filters { display: grid; grid-template-columns: repeat(4,minmax(145px,1fr)); gap: .65rem; align-items: end; }

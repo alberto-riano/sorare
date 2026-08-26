@@ -33,7 +33,9 @@ from web_services.movement_history import (
     _account_currency, _movement_from_group, _operation_from_trade, build_trade_cycles,
     collect_movement_history, collect_public_reward_history,
 )
-from web_services.opportunity_market import _comparable_kind, build_opportunity_rows, robust_sales_reference
+from web_services.opportunity_market import (
+    _comparable_kind, _floor_query, build_opportunity_rows, robust_sales_reference,
+)
 
 
 class LaLigaAuctionTests(TestCase):
@@ -1733,6 +1735,13 @@ class OpportunityMarketTests(TestCase):
         )
         self.assertEqual(_comparable_kind({"deal": {"__typename": "TokenAuction"}}), (None, None))
         self.assertEqual(_comparable_kind({"deal": {"__typename": "TokenPrimaryOffer"}}), (None, None))
+
+    def test_floor_query_uses_only_one_player_root_field(self):
+        query, variables = _floor_query({"player_slug": "player-one"})
+
+        self.assertEqual(query.count("anyPlayer("), 1)
+        self.assertEqual(query.count("anyCards("), 2)
+        self.assertEqual(variables, {"slug": "player-one"})
 
     def test_market_value_is_capped_by_floor_and_cross_rarity_detects_bargain(self):
         sales = lambda values: [
