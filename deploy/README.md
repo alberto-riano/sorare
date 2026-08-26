@@ -69,6 +69,11 @@ cambios locales inesperados, se detiene antes del pull.
 Haz copias de esos datos, especialmente `config/config.txt` y `web/db.sqlite3`.
 Para automatizaciones, adapta `deploy/crontab.example` a la ruta real del repo.
 
+La pestaña Oportunidades se recalcula en segundo plano cada dos horas. Si has
+creado una API key en los ajustes de desarrollador de Sorare, puedes añadirla
+como `APIKEY=...` a `config/config.txt`; es opcional, pero aumenta los límites
+de consulta del análisis de mercado.
+
 Comandos útiles:
 
 ```bash

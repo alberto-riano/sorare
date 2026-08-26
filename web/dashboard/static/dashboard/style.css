@@ -1534,3 +1534,98 @@ body.modal-open { overflow: hidden; }
   .movement-filters, .movement-kpis, .analytics-filters, .analytics-kpis { grid-template-columns: 1fr; }
   .analytics-secondary-metrics { grid-template-columns: 1fr; }
 }
+
+/* Oportunidades */
+.opportunities-page { display: grid; gap: 1rem; min-width: 0; }
+.opportunities-page > *, .opportunity-results { min-width: 0; }
+.opportunity-hero { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.opportunity-hero h1 { margin: .15rem 0 .35rem; }
+.opportunity-hero h1 i { color: var(--accent); }
+.opportunity-hero p:last-child { margin: 0; color: var(--muted); }
+.opportunity-refresh { display: grid; justify-items: end; gap: .25rem; min-width: 220px; }
+.opportunity-refresh > span { color: var(--muted); font-size: .7rem; }
+.opportunity-refresh > strong { font: 700 .78rem "IBM Plex Mono",monospace; }
+.opportunity-kpis { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .8rem; }
+.opportunity-kpis article { display: grid; gap: .25rem; min-width: 0; }
+.opportunity-kpis article > span { color: var(--muted); font-size: .72rem; font-weight: 700; }
+.opportunity-kpis article > span i { width: 1rem; color: var(--accent); }
+.opportunity-kpis article > strong { font: 700 1.38rem "IBM Plex Mono",monospace; }
+.opportunity-kpis article > small { color: var(--muted); font-size: .62rem; line-height: 1.35; }
+.opportunity-kpi-highlight { border-color: #8ed9cf; background: linear-gradient(135deg,#fff,#ecfdf8); }
+.opportunity-progress { display: grid; gap: .55rem; }
+.opportunity-progress[hidden] { display: none !important; }
+.opportunity-progress > div:first-child { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: .5rem; }
+.opportunity-progress > div:first-child i { color: var(--accent); }
+.opportunity-progress > div:first-child span { color: var(--muted); font-size: .72rem; text-align: right; }
+.opportunity-progress-track { height: 8px; overflow: hidden; border-radius: 99px; background: #eceae3; }
+.opportunity-progress-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--accent),#22c55e); transition: width .25s; }
+.opportunity-filters { display: grid; grid-template-columns: repeat(4,minmax(145px,1fr)); gap: .65rem; align-items: end; }
+.opportunity-filters label:not(.opportunity-check) { display: grid; gap: .25rem; }
+.opportunity-filters label > span { color: var(--muted); font-size: .66rem; font-weight: 700; }
+.opportunity-filters input, .opportunity-filters select { width: 100%; min-height: 42px; padding: .45rem .65rem; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.84); color: var(--ink); font: inherit; }
+.opportunity-check { display: flex; align-items: center; gap: .45rem; min-height: 42px; }
+.opportunity-check input { width: 18px; min-height: 18px; }
+.opportunity-results .table-head > p { color: var(--muted); font-size: .68rem; }
+.opportunity-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+.opportunity-table { width: 100%; min-width: 1050px; border-collapse: collapse; }
+.opportunity-table th { padding: .65rem .75rem; background: #f7f4ec; text-align: left; font-size: .68rem; }
+.opportunity-table th.rarity-limited { box-shadow: inset 0 3px #eab308; }
+.opportunity-table th.rarity-rare { box-shadow: inset 0 3px #ef4444; }
+.opportunity-table td { padding: .72rem .75rem; border-top: 1px solid var(--line); vertical-align: middle; }
+.opportunity-main-row { cursor: pointer; transition: background .15s; }
+.opportunity-main-row:hover { background: #f8fffd; }
+.opportunity-player { display: flex; align-items: center; gap: .65rem; min-width: 215px; }
+.opportunity-player > img { width: 46px; height: 46px; border-radius: 50%; object-fit: contain; background: #eafbf7; }
+.opportunity-player > div { display: grid; gap: .18rem; }
+.opportunity-player strong { font-size: .82rem; }
+.opportunity-player span { display: flex; align-items: center; gap: .3rem; color: var(--muted); font-size: .65rem; }
+.opportunity-player span img { width: 18px; height: 18px; object-fit: contain; }
+.opportunity-price { display: grid; gap: .08rem; min-width: 145px; }
+.opportunity-price small { color: var(--muted); font-size: .58rem; text-transform: uppercase; }
+.opportunity-price strong { font: 700 1.02rem "IBM Plex Mono",monospace; }
+.opportunity-price span { font-size: .64rem; }
+.opportunity-price em { color: var(--muted); font-size: .58rem; font-style: normal; }
+.muted-dash { color: var(--muted); }
+.opportunity-signal { display: grid; gap: .05rem; min-width: 120px; padding: .45rem .55rem; border-radius: 10px; }
+.opportunity-signal small { font-size: .59rem; font-weight: 800; text-transform: uppercase; }
+.opportunity-signal strong { font: 700 1.12rem "IBM Plex Mono",monospace; }
+.opportunity-signal span { font-size: .56rem; text-transform: capitalize; }
+.signal-limited { color: #8a6000; background: #fff6c7; }
+.signal-rare { color: #a1162a; background: #ffe2e5; }
+.opportunity-no-signal { display: grid; gap: .1rem; color: var(--muted); font-size: .62rem; }
+.opportunity-actions { display: flex; gap: .35rem; }
+.opportunity-actions button, .opportunity-actions a { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--accent); border-radius: 50%; background: #fff; color: var(--accent); cursor: pointer; }
+.opportunity-evidence-row td { padding: 0; background: #f8fbfa; }
+.opportunity-evidence { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; padding: .8rem; }
+.opportunity-evidence section { min-width: 0; padding: .7rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.opportunity-evidence h3 { margin: 0 0 .25rem; font-size: .76rem; }
+.opportunity-evidence p { margin: 0 0 .5rem; color: var(--muted); font-size: .61rem; }
+.limited-dot { color: #eab308; }.rare-dot { color: #ef4444; }
+.opportunity-sales { display: flex; flex-wrap: wrap; gap: .35rem; }
+.opportunity-sales > span { display: grid; grid-template-columns: auto auto; gap: .05rem .25rem; align-items: center; padding: .32rem .4rem; border: 1px solid var(--line); border-radius: 8px; background: #fbfaf7; }
+.opportunity-sales i { color: var(--accent); font-size: .6rem; }
+.opportunity-sales strong { font: 700 .65rem "IBM Plex Mono",monospace; }
+.opportunity-sales small { grid-column: 1 / -1; color: var(--muted); font-size: .52rem; }
+.opportunity-sales em { color: var(--muted); font-size: .62rem; }
+.opportunity-method-note { margin: 0; padding: 0 .8rem .8rem; color: #756d5f; font-size: .59rem; }
+.opportunity-pagination { display: flex; justify-content: center; align-items: center; gap: .6rem; margin-top: .8rem; }
+.opportunity-pagination a { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--accent); border-radius: 50%; color: var(--accent); }
+.opportunity-pagination span { font-size: .7rem; }
+.opportunity-empty { display: grid; justify-items: center; gap: .5rem; padding: 3rem; text-align: center; }
+.opportunity-empty > i { color: var(--accent); font-size: 2rem; }
+.opportunity-empty h2, .opportunity-empty p { margin: 0; }
+.opportunity-empty p { color: var(--muted); }
+
+@media (max-width: 1180px) {
+  .opportunity-kpis { grid-template-columns: 1fr 1fr; }
+  .opportunity-filters { grid-template-columns: repeat(3,minmax(140px,1fr)); }
+}
+@media (max-width: 780px) {
+  .opportunity-hero { align-items: stretch; flex-direction: column; }
+  .opportunity-refresh { justify-items: start; }
+  .opportunity-filters { grid-template-columns: 1fr 1fr; }
+  .opportunity-evidence { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .opportunity-kpis, .opportunity-filters { grid-template-columns: 1fr; }
+}

@@ -17,12 +17,13 @@ from dashboard.forms import BatchBidForm, BatchSaleForm, InlineBidForm
 from dashboard.management.commands.process_bid_queue import process_next_job
 from dashboard.management.commands.process_sales_queue import (
     process_next_auction_refresh, process_next_movement_sync, process_next_public_reward_sync,
-    process_next_refresh, process_next_sale,
+    process_next_opportunity_refresh, process_next_refresh, process_next_sale,
 )
 from dashboard.models import (
     AuctionFilterPreset, AuctionRefreshJob, BidBatchItem, BidBatchJob, FavoritePlayer,
     MovementSnapshot, MovementSyncJob, PublicRewardSnapshot, PublicRewardSyncJob,
-    SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob,
+    OpportunityRefreshJob, OpportunitySnapshot, SaleBatchItem, SaleBatchJob,
+    SalesInventory, SalesRefreshJob,
 )
 from dashboard.views import auction_price_history, auctions_list
 from sorare_utils import get_latest_prices
@@ -32,6 +33,7 @@ from web_services.movement_history import (
     _account_currency, _movement_from_group, _operation_from_trade, build_trade_cycles,
     collect_movement_history, collect_public_reward_history,
 )
+from web_services.opportunity_market import _comparable_kind, build_opportunity_rows, robust_sales_reference
 
 
 class LaLigaAuctionTests(TestCase):
@@ -1704,3 +1706,98 @@ class MovementHistoryTests(TestCase):
         self.assertNotContains(response, "Puja abierta")
         self.assertContains(response, "Cargando tu historial")
         self.assertTrue(MovementSyncJob.objects.filter(user=self.user, status="queued").exists())
+
+
+class OpportunityMarketTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username="opportunity-user", password="test-pass")
+        self.client.force_login(self.user)
+
+    def test_robust_reference_rejects_extreme_sale_and_prioritizes_recent_data(self):
+        summary = robust_sales_reference([
+            {"eur": 10, "date": "2026-08-25T10:00:00Z"},
+            {"eur": 11, "date": "2026-08-24T10:00:00Z"},
+            {"eur": 12, "date": "2026-08-23T10:00:00Z"},
+            {"eur": 11.5, "date": "2026-08-22T10:00:00Z"},
+            {"eur": 95, "date": "2026-08-21T10:00:00Z"},
+        ], now=datetime(2026, 8, 26, tzinfo=ZoneInfo("UTC")))
+
+        self.assertLess(summary["value"], 13)
+        self.assertEqual(len(summary["sales"]), 4)
+        self.assertIn(summary["confidence"], {"medium", "high"})
+
+    def test_only_completed_public_offers_are_comparable(self):
+        self.assertEqual(
+            _comparable_kind({"deal": {"__typename": "TokenOffer", "type": "SINGLE_BUY_OFFER"}}),
+            ("public", "Oferta pública"),
+        )
+        self.assertEqual(_comparable_kind({"deal": {"__typename": "TokenAuction"}}), (None, None))
+        self.assertEqual(_comparable_kind({"deal": {"__typename": "TokenPrimaryOffer"}}), (None, None))
+
+    def test_market_value_is_capped_by_floor_and_cross_rarity_detects_bargain(self):
+        sales = lambda values: [
+            {"eur": value, "date": f"2026-08-{20 + index:02d}T10:00:00Z", "kind": "public", "label": "Oferta pública"}
+            for index, value in enumerate(values)
+        ]
+        players = [{
+            "player": "Jugador ganga", "player_slug": "jugador-ganga",
+            "limited": {"floor": 20, "sales": sales([18, 20, 19, 21, 20])},
+            "rare": {"floor": 38, "sales": sales([70, 75, 72, 74, 71])},
+        }]
+
+        rows, metadata = build_opportunity_rows(players)
+
+        self.assertEqual(rows[0]["limited"]["market_value"], 20)
+        self.assertEqual(rows[0]["rare"]["market_value"], 38)
+        self.assertEqual(metadata["ratio_source"], "fallback")
+        self.assertEqual(rows[0]["recommended_rarity"], "rare")
+        self.assertGreater(rows[0]["discount_percent"], 20)
+
+    def test_page_filters_cached_opportunities_without_calling_sorare(self):
+        OpportunitySnapshot.objects.create(
+            rows=[{
+                "player": "Oportunidad Roja", "player_slug": "oportunidad-roja",
+                "team": "Real Madrid", "position": "Forward", "recommended_rarity": "rare",
+                "discount_percent": 31.5, "confidence": "high", "player_picture_url": "",
+                "team_picture_url": "",
+                "limited": {"floor": 5, "market_value": 5, "sales_reference": 6, "sales": [], "parity_reference": 5, "reference_value": 5},
+                "rare": {"floor": 18, "market_value": 18, "sales_reference": 25, "sales": [], "parity_reference": 22.5, "reference_value": 24},
+            }, {
+                "player": "Sin señal", "player_slug": "sin-senal", "team": "Sevilla FC",
+                "position": "Defender", "recommended_rarity": None, "discount_percent": 0,
+                "confidence": "low", "limited": {}, "rare": {},
+            }],
+            metadata={"rare_limited_ratio": 4.4, "ratio_source": "learned", "ratio_sample": 20, "players_analyzed": 2, "active_listings": 3, "opportunities": 1},
+        )
+
+        response = self.client.get(reverse("opportunities"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Oportunidad Roja")
+        self.assertNotContains(response, ">Sin señal<")
+        self.assertContains(response, "Las subastas no se incluyen")
+        self.assertContains(response, "compras instantáneas")
+
+        show_all = self.client.get(reverse("opportunities"), {"show_all": "1"})
+        self.assertContains(show_all, "Sin señal")
+
+    @patch("web_services.opportunity_market.collect_opportunity_market")
+    def test_worker_persists_snapshot_and_finishes_job(self, collect):
+        collect.return_value = {
+            "rows": [{"player": "Prueba"}],
+            "metadata": {"players_analyzed": 1, "opportunities": 1},
+        }
+        job = OpportunityRefreshJob.objects.create(user=self.user)
+
+        processed = process_next_opportunity_refresh()
+
+        job.refresh_from_db()
+        self.assertEqual(processed.pk, job.pk)
+        self.assertEqual(job.status, OpportunityRefreshJob.Status.SUCCEEDED)
+        self.assertEqual(job.player_count, 1)
+        self.assertEqual(OpportunitySnapshot.objects.get().rows[0]["player"], "Prueba")
+
+    def test_first_visit_enqueues_background_refresh(self):
+        response = self.client.get(reverse("opportunities"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(OpportunityRefreshJob.objects.filter(status="queued").exists())

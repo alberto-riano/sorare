@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import uuid
+import re
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
@@ -28,7 +29,8 @@ from .forms import BatchBidForm, BatchSaleForm, BidScheduleForm, InlineBidForm, 
 from .models import (
     AuctionFilterPreset, AuctionRefreshJob, BidBatchItem, BidBatchJob, FavoritePlayer,
     MovementSnapshot, MovementSyncJob, PublicRewardSnapshot, PublicRewardSyncJob,
-    SaleBatchItem, SaleBatchJob, SalesInventory, SalesRefreshJob,
+    OpportunityRefreshJob, OpportunitySnapshot, SaleBatchItem, SaleBatchJob,
+    SalesInventory, SalesRefreshJob,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -84,6 +86,13 @@ def index(request):
             "status": "Disponible",
         },
         {
+            "title": "Oportunidades",
+            "icon": "fas fa-gem",
+            "description": "Compara suelos y ventas reales Limited/Rare para detectar desajustes de precio.",
+            "url": "opportunities",
+            "status": "Disponible",
+        },
+        {
             "title": "Ofertas Recibidas",
             "icon": "fas fa-envelope-open-text",
             "description": "Consulta las ofertas pendientes que has recibido por tus cartas.",
@@ -113,6 +122,104 @@ def index(request):
         },
     ]
     return render(request, "dashboard/index.html", {"cards": cards})
+
+
+def opportunities(request):
+    snapshot = OpportunitySnapshot.objects.filter(market_key="laliga-2026", source_version=1).first()
+    active_refresh = OpportunityRefreshJob.objects.filter(
+        status__in=(OpportunityRefreshJob.Status.QUEUED, OpportunityRefreshJob.Status.RUNNING),
+    ).order_by("-created_at").first()
+    if not snapshot and not active_refresh:
+        active_refresh = OpportunityRefreshJob.objects.create(user=request.user)
+
+    all_rows = list(snapshot.rows if snapshot else [])
+    player_filter = request.GET.get("player", "").strip().casefold()
+    team_filter = request.GET.get("team", "").strip()
+    position_filter = request.GET.get("position", "").strip()
+    rarity_filter = request.GET.get("opportunity_rarity", "").strip().lower()
+    confidence_filter = request.GET.get("confidence", "").strip().lower()
+    try:
+        min_discount = max(0, min(95, int(request.GET.get("min_discount", "12"))))
+    except ValueError:
+        min_discount = 12
+    show_all = request.GET.get("show_all") == "1"
+
+    rows = []
+    for row in all_rows:
+        if player_filter and player_filter not in str(row.get("player") or "").casefold():
+            continue
+        if team_filter and row.get("team") != team_filter:
+            continue
+        if position_filter and row.get("position") != position_filter:
+            continue
+        if rarity_filter in {"limited", "rare"} and row.get("recommended_rarity") != rarity_filter:
+            continue
+        if confidence_filter in {"medium", "high"} and row.get("confidence") != confidence_filter:
+            continue
+        if not show_all and (not row.get("recommended_rarity") or float(row.get("discount_percent") or 0) < min_discount):
+            continue
+        rows.append(row)
+
+    sort = request.GET.get("sort", "discount")
+    if sort == "player":
+        rows.sort(key=lambda row: str(row.get("player") or "").casefold())
+    elif sort == "floor":
+        rows.sort(key=lambda row: float((row.get(row.get("recommended_rarity") or "limited") or {}).get("floor") or 10**9))
+    else:
+        rows.sort(key=lambda row: float(row.get("discount_percent") or 0), reverse=True)
+    try:
+        per_page = int(request.GET.get("per_page", 25))
+    except ValueError:
+        per_page = 25
+    per_page = per_page if per_page in {25, 50, 100} else 25
+    page_obj = Paginator(rows, per_page).get_page(request.GET.get("page", 1))
+    pagination_params = request.GET.copy()
+    pagination_params.pop("page", None)
+    metadata = snapshot.metadata if snapshot else {}
+    return render(request, "dashboard/opportunities.html", {
+        "snapshot": snapshot,
+        "metadata": metadata,
+        "active_refresh": active_refresh,
+        "page_obj": page_obj,
+        "total_market_rows": len(all_rows),
+        "filtered_count": len(rows),
+        "available_teams": sorted({row.get("team") for row in all_rows if row.get("team")}),
+        "available_positions": sorted({row.get("position") for row in all_rows if row.get("position")}),
+        "selected_team": team_filter,
+        "selected_position": position_filter,
+        "selected_rarity": rarity_filter,
+        "selected_confidence": confidence_filter,
+        "selected_min_discount": min_discount,
+        "show_all": show_all,
+        "sort": sort,
+        "per_page": per_page,
+        "pagination_query": pagination_params.urlencode(),
+    })
+
+
+@require_POST
+def enqueue_opportunity_refresh(request):
+    active = OpportunityRefreshJob.objects.filter(
+        status__in=(OpportunityRefreshJob.Status.QUEUED, OpportunityRefreshJob.Status.RUNNING),
+    ).order_by("-created_at").first()
+    job = active or OpportunityRefreshJob.objects.create(user=request.user)
+    return JsonResponse({"job_id": job.id, "status": job.status}, status=202)
+
+
+@require_GET
+def opportunity_refresh_status(request):
+    jobs = OpportunityRefreshJob.objects.order_by("-created_at")[:5]
+    return JsonResponse({"jobs": [{
+        "id": job.id,
+        "status": job.status,
+        "processed_count": job.processed_count,
+        "total_count": job.total_count,
+        "percent": round(job.processed_count / job.total_count * 100) if job.total_count else 0,
+        "player_count": job.player_count,
+        "opportunity_count": job.opportunity_count,
+        "progress_label": job.progress_label,
+        "error": job.error,
+    } for job in jobs]})
 
 
 def _movement_datetime(value):

@@ -7,12 +7,64 @@ from django.utils import timezone
 
 from dashboard.models import (
     AuctionRefreshJob, BidBatchItem, MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
-    PublicRewardSnapshot, PublicRewardSyncJob, SalesInventory, SalesRefreshJob,
+    OpportunityRefreshJob, OpportunitySnapshot, PublicRewardSnapshot, PublicRewardSyncJob,
+    SalesInventory, SalesRefreshJob,
 )
 from dashboard.views import PATHS
 from web_services.movement_history import collect_movement_history, collect_public_reward_history
 from web_services.process_runner import run_card_sale, sale_error_message
 from web_services.sales_inventory import collect_sales_inventory
+
+
+def process_next_opportunity_refresh():
+    with transaction.atomic():
+        job = OpportunityRefreshJob.objects.select_for_update().filter(
+            status=OpportunityRefreshJob.Status.QUEUED,
+        ).first()
+        if not job:
+            return None
+        job.status = OpportunityRefreshJob.Status.RUNNING
+        job.started_at = timezone.now()
+        job.progress_label = "Preparando mercado fijo de LaLiga"
+        job.save(update_fields=("status", "started_at", "progress_label"))
+
+    try:
+        from web_services.opportunity_market import collect_opportunity_market
+
+        def save_progress(processed, total, label):
+            OpportunityRefreshJob.objects.filter(pk=job.pk).update(
+                processed_count=processed,
+                total_count=total,
+                progress_label=label,
+            )
+
+        payload = collect_opportunity_market(progress=save_progress)
+        metadata = payload.get("metadata") or {}
+        OpportunitySnapshot.objects.update_or_create(
+            market_key="laliga-2026",
+            defaults={
+                "rows": payload.get("rows") or [],
+                "metadata": metadata,
+                "refreshed_at": timezone.now(),
+                "source_version": 1,
+            },
+        )
+        job.refresh_from_db(fields=("processed_count", "total_count"))
+        job.player_count = metadata.get("players_analyzed") or 0
+        job.opportunity_count = metadata.get("opportunities") or 0
+        job.processed_count = max(job.processed_count, job.total_count)
+        job.progress_label = "Oportunidades actualizadas"
+        job.status = OpportunityRefreshJob.Status.SUCCEEDED
+    except Exception as exc:
+        job.status = OpportunityRefreshJob.Status.FAILED
+        job.progress_label = "Análisis interrumpido"
+        job.error = f"No se pudieron calcular las oportunidades: {exc}"[:2000]
+    job.finished_at = timezone.now()
+    job.save(update_fields=(
+        "status", "processed_count", "total_count", "player_count", "opportunity_count",
+        "progress_label", "error", "finished_at",
+    ))
+    return job
 
 
 def process_next_auction_refresh():
@@ -301,6 +353,11 @@ class Command(BaseCommand):
             error="La actualización se interrumpió; las recompensas anteriores siguen disponibles.",
             finished_at=timezone.now(),
         )
+        OpportunityRefreshJob.objects.filter(status=OpportunityRefreshJob.Status.RUNNING).update(
+            status=OpportunityRefreshJob.Status.FAILED,
+            error="El análisis se interrumpió; el snapshot anterior sigue disponible.",
+            finished_at=timezone.now(),
+        )
         for job in SaleBatchJob.objects.filter(status=SaleBatchJob.Status.RUNNING):
             job.items.filter(status__in=(SaleBatchItem.Status.QUEUED, SaleBatchItem.Status.RUNNING)).update(
                 status=SaleBatchItem.Status.FAILED,
@@ -314,6 +371,7 @@ class Command(BaseCommand):
         while True:
             processed = (
                 process_next_auction_refresh()
+                or process_next_opportunity_refresh()
                 or process_next_refresh()
                 or process_next_movement_sync()
                 or process_next_public_reward_sync()

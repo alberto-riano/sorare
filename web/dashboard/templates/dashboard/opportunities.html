@@ -1,0 +1,127 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Oportunidades LaLiga | Sorare{% endblock %}
+
+{% block content %}
+<div class="opportunities-page">
+  <section class="panel opportunity-hero reveal">
+    <div>
+      <p class="kicker">LaLiga 2026-27 · In-Season</p>
+      <h1><i class="fas fa-gem"></i> Oportunidades</h1>
+      <p>Compara el suelo fijo con ofertas públicas completadas y la relación entre Limited y Rare. Las subastas no se incluyen.</p>
+    </div>
+    <div class="opportunity-refresh">
+      {% if snapshot %}<span>Último análisis</span><strong>{{ snapshot.refreshed_at|date:'d/m/Y H:i' }}</strong>{% endif %}
+      <button class="btn btn-accent" type="button" id="refreshOpportunities" {% if active_refresh %}disabled{% endif %}>
+        <i class="fas fa-arrows-rotate{% if active_refresh %} fa-spin{% endif %}"></i>
+        {% if active_refresh %}Analizando…{% else %}Actualizar análisis{% endif %}
+      </button>
+    </div>
+  </section>
+
+  <section class="opportunity-kpis reveal">
+    <article class="panel"><span><i class="fas fa-scale-balanced"></i> Relación Rare / Limited</span><strong>{{ metadata.rare_limited_ratio|default:'—' }}×</strong><small>{% if metadata.ratio_source == 'learned' %}Calculada con {{ metadata.ratio_sample }} jugadores comparables{% else %}Referencia prudente hasta tener más comparables{% endif %}</small></article>
+    <article class="panel"><span><i class="fas fa-users"></i> Jugadores analizados</span><strong>{{ metadata.players_analyzed|default:0 }}</strong><small>{{ metadata.active_listings|default:0 }} precios suelo activos</small></article>
+    <article class="panel opportunity-kpi-highlight"><span><i class="fas fa-bolt"></i> Señales detectadas</span><strong>{{ metadata.opportunities|default:0 }}</strong><small>Descuento mínimo del algoritmo: 12%</small></article>
+    <article class="panel"><span><i class="fas fa-filter-circle-dollar"></i> Universo</span><strong>Limited + Rare</strong><small>Venta fija y ofertas públicas · sin subastas</small></article>
+  </section>
+
+  <section class="panel opportunity-progress" id="opportunityProgress" {% if not active_refresh %}hidden{% endif %}>
+    <div><i class="fas fa-circle-notch fa-spin"></i><strong id="opportunityProgressTitle">Analizando mercado</strong><span id="opportunityProgressLabel">{{ active_refresh.progress_label|default:'Preparando actualización' }}</span></div>
+    <div class="opportunity-progress-track"><span id="opportunityProgressBar" style="width:0%"></span></div>
+  </section>
+
+  {% if snapshot %}
+  <section class="panel opportunity-controls reveal">
+    <form method="get" id="opportunityFilters" class="opportunity-filters">
+      <label><span>Jugador</span><input name="player" value="{{ request.GET.player }}" placeholder="Buscar jugador"></label>
+      <label><span>Equipo</span><select name="team"><option value="">Todos</option>{% for team in available_teams %}<option value="{{ team }}" {% if selected_team == team %}selected{% endif %}>{{ team }}</option>{% endfor %}</select></label>
+      <label><span>Posición</span><select name="position"><option value="">Todas</option>{% for position in available_positions %}<option value="{{ position }}" {% if selected_position == position %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
+      <label><span>Oportunidad en</span><select name="opportunity_rarity"><option value="">Ambas rarezas</option><option value="limited" {% if selected_rarity == 'limited' %}selected{% endif %}>Limited</option><option value="rare" {% if selected_rarity == 'rare' %}selected{% endif %}>Rare</option></select></label>
+      <label><span>Confianza</span><select name="confidence"><option value="">Media y alta</option><option value="high" {% if selected_confidence == 'high' %}selected{% endif %}>Alta</option><option value="medium" {% if selected_confidence == 'medium' %}selected{% endif %}>Media</option></select></label>
+      <label><span>Descuento mínimo</span><select name="min_discount"><option value="12" {% if selected_min_discount == 12 %}selected{% endif %}>12%</option><option value="20" {% if selected_min_discount == 20 %}selected{% endif %}>20%</option><option value="30" {% if selected_min_discount == 30 %}selected{% endif %}>30%</option><option value="40" {% if selected_min_discount == 40 %}selected{% endif %}>40%</option></select></label>
+      <label><span>Orden</span><select name="sort"><option value="discount" {% if sort == 'discount' %}selected{% endif %}>Mayor oportunidad</option><option value="player" {% if sort == 'player' %}selected{% endif %}>Jugador</option><option value="floor" {% if sort == 'floor' %}selected{% endif %}>Menor suelo</option></select></label>
+      <label><span>Por página</span><select name="per_page"><option value="25" {% if per_page == 25 %}selected{% endif %}>25</option><option value="50" {% if per_page == 50 %}selected{% endif %}>50</option><option value="100" {% if per_page == 100 %}selected{% endif %}>100</option></select></label>
+      <label class="opportunity-check"><input type="checkbox" name="show_all" value="1" {% if show_all %}checked{% endif %}><span>Mostrar también sin señal</span></label>
+      <button class="btn btn-accent" type="submit"><i class="fas fa-filter"></i> Aplicar</button>
+      <a class="btn btn-secondary" href="{% url 'opportunities' %}">Limpiar</a>
+    </form>
+  </section>
+
+  <section class="panel opportunity-results reveal">
+    <div class="table-head"><div><p class="kicker">Mercado fijo</p><h2>{{ filtered_count }} resultados</h2></div><p>El valor de mercado nunca supera el suelo activo.</p></div>
+    <div class="opportunity-table-wrap">
+      <table class="opportunity-table">
+        <thead><tr><th>Jugador</th><th class="rarity-limited">Limited</th><th class="rarity-rare">Rare</th><th>Señal</th><th></th></tr></thead>
+        <tbody>
+        {% for row in page_obj %}
+          <tr class="opportunity-main-row" data-evidence="evidence-{{ forloop.counter }}">
+            <td><div class="opportunity-player">{% if row.player_picture_url %}<img src="{{ row.player_picture_url }}" alt="">{% endif %}<div><strong>{{ row.player }}</strong><span>{% if row.team_picture_url %}<img src="{{ row.team_picture_url }}" alt="">{% endif %}{{ row.team }} · {{ row.position }}</span></div></div></td>
+            <td>{% if row.limited.floor %}<div class="opportunity-price"><small>Suelo fijo</small><strong>{{ row.limited.floor|floatformat:2 }} €</strong><span>Valor observado {{ row.limited.market_value|floatformat:2 }} €</span>{% if row.limited.sales_reference %}<em>{{ row.limited.sales|length }} comparables · ref. {{ row.limited.sales_reference|floatformat:2 }} €</em>{% else %}<em>Sin ventas comparables</em>{% endif %}</div>{% else %}<span class="muted-dash">Sin oferta</span>{% endif %}</td>
+            <td>{% if row.rare.floor %}<div class="opportunity-price"><small>Suelo fijo</small><strong>{{ row.rare.floor|floatformat:2 }} €</strong><span>Valor observado {{ row.rare.market_value|floatformat:2 }} €</span>{% if row.rare.sales_reference %}<em>{{ row.rare.sales|length }} comparables · ref. {{ row.rare.sales_reference|floatformat:2 }} €</em>{% else %}<em>Sin ventas comparables</em>{% endif %}</div>{% else %}<span class="muted-dash">Sin oferta</span>{% endif %}</td>
+            <td>{% if row.recommended_rarity %}<div class="opportunity-signal signal-{{ row.recommended_rarity }}"><small>Comprar {{ row.recommended_rarity|title }}</small><strong>−{{ row.discount_percent|floatformat:1 }}%</strong><span>Confianza {% if row.confidence == 'high' %}alta{% else %}media{% endif %}</span></div>{% else %}<div class="opportunity-no-signal"><strong>Sin señal</strong><span>Precio coherente o evidencia baja</span></div>{% endif %}</td>
+            <td><div class="opportunity-actions"><button type="button" class="opportunity-evidence-button" title="Ver cálculo"><i class="fas fa-chevron-down"></i></button><a href="https://sorare.com/football/players/{{ row.player_slug }}" target="_blank" rel="noopener" title="Abrir en Sorare"><i class="fas fa-arrow-up-right-from-square"></i></a></div></td>
+          </tr>
+          <tr class="opportunity-evidence-row" id="evidence-{{ forloop.counter }}" hidden><td colspan="5">
+            <div class="opportunity-evidence">
+              <section><h3><i class="fas fa-circle limited-dot"></i> Limited</h3><p>Referencia propia: <strong>{{ row.limited.sales_reference|floatformat:2|default:'—' }} €</strong> · Paridad desde Rare: <strong>{{ row.limited.parity_reference|floatformat:2|default:'—' }} €</strong> · Referencia de señal: <strong>{{ row.limited.reference_value|floatformat:2|default:'—' }} €</strong></p><div class="opportunity-sales">{% for sale in row.limited.sales %}<span><i class="fas fa-bullhorn"></i><strong>{{ sale.eur|floatformat:2 }} €</strong><small>{{ sale.label }} · {{ sale.date|slice:':10' }}</small></span>{% empty %}<em>Sin ofertas públicas comparables.</em>{% endfor %}</div></section>
+              <section><h3><i class="fas fa-circle rare-dot"></i> Rare</h3><p>Referencia propia: <strong>{{ row.rare.sales_reference|floatformat:2|default:'—' }} €</strong> · Paridad desde Limited: <strong>{{ row.rare.parity_reference|floatformat:2|default:'—' }} €</strong> · Referencia de señal: <strong>{{ row.rare.reference_value|floatformat:2|default:'—' }} €</strong></p><div class="opportunity-sales">{% for sale in row.rare.sales %}<span><i class="fas fa-bullhorn"></i><strong>{{ sale.eur|floatformat:2 }} €</strong><small>{{ sale.label }} · {{ sale.date|slice:':10' }}</small></span>{% empty %}<em>Sin ofertas públicas comparables.</em>{% endfor %}</div></section>
+            </div>
+            <p class="opportunity-method-note"><i class="fas fa-circle-info"></i> Solo se usan ofertas públicas completadas: se excluyen compras instantáneas, ofertas directas, intercambios y todas las subastas. Los valores extremos se descartan antes de calcular la mediana ponderada.</p>
+          </td></tr>
+        {% empty %}<tr><td colspan="5" class="sales-empty">No hay resultados para estos filtros.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_obj.paginator.num_pages > 1 %}<nav class="opportunity-pagination">
+      {% if page_obj.has_previous %}<a href="?{{ pagination_query }}&page={{ page_obj.previous_page_number }}"><i class="fas fa-chevron-left"></i></a>{% endif %}
+      <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}<a href="?{{ pagination_query }}&page={{ page_obj.next_page_number }}"><i class="fas fa-chevron-right"></i></a>{% endif %}
+    </nav>{% endif %}
+  </section>
+  {% else %}
+  <section class="panel opportunity-empty"><i class="fas fa-chart-line"></i><h2>Preparando el primer análisis</h2><p>Se está revisando el mercado fijo y las ventas comparables. Puedes salir de esta página: el worker seguirá trabajando.</p></section>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  var button = document.getElementById('refreshOpportunities');
+  var progress = document.getElementById('opportunityProgress');
+  var csrf = '{{ csrf_token }}';
+  var activeJob = {% if active_refresh %}{{ active_refresh.id }}{% else %}null{% endif %};
+  function poll() {
+    fetch('{% url "opportunity_refresh_status" %}', {credentials:'same-origin'})
+      .then(function (response) { return response.json(); })
+      .then(function (payload) {
+        var jobs = payload.jobs || [];
+        var job = activeJob ? jobs.find(function (item) { return item.id === activeJob; }) : jobs.find(function (item) { return item.status === 'queued' || item.status === 'running'; });
+        if (!job) return;
+        activeJob = job.id; progress.hidden = false; button.disabled = true;
+        document.getElementById('opportunityProgressBar').style.width = (job.percent || 0) + '%';
+        document.getElementById('opportunityProgressLabel').textContent = job.progress_label || 'Analizando mercado';
+        if (job.status === 'queued' || job.status === 'running') { window.setTimeout(poll, 2500); return; }
+        if (job.status === 'succeeded') { window.location.reload(); return; }
+        document.getElementById('opportunityProgressTitle').textContent = 'No se pudo actualizar';
+        document.getElementById('opportunityProgressLabel').textContent = job.error || 'Revisa el worker';
+        button.disabled = false;
+      });
+  }
+  if (button) button.addEventListener('click', function () {
+    fetch('{% url "enqueue_opportunity_refresh" %}', {method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':csrf}})
+      .then(function (response) { return response.json(); }).then(function (payload) { activeJob = payload.job_id; poll(); });
+  });
+  if (activeJob) poll();
+  document.querySelectorAll('.opportunity-main-row').forEach(function (row) {
+    row.addEventListener('click', function (event) {
+      if (event.target.closest('a')) return;
+      var evidence = document.getElementById(row.dataset.evidence);
+      evidence.hidden = !evidence.hidden;
+      row.querySelector('.opportunity-evidence-button i').className = 'fas ' + (evidence.hidden ? 'fa-chevron-down' : 'fa-chevron-up');
+    });
+  });
+  var form = document.getElementById('opportunityFilters');
+  if (form) form.querySelectorAll('select,input[type="checkbox"]').forEach(function (control) { control.addEventListener('change', function () { form.submit(); }); });
+})();
+</script>
+{% endblock %}

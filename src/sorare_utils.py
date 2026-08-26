@@ -42,11 +42,15 @@ def build_headers(config=None):
     if not jwt_token:
         print("Error: JWT_TOKEN no encontrado en config.txt")
         sys.exit(1)
-    return {
+    headers = {
         'content-type': 'application/json',
         'Authorization': f'Bearer {jwt_token}',
         'JWT-AUD': jwt_aud,
     }
+    api_key = config.get('APIKEY') or config.get('API_KEY')
+    if api_key:
+        headers['APIKEY'] = api_key
+    return headers
 
 
 # ---------------------------------------------------------------------------

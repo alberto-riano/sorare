@@ -62,6 +62,43 @@ class AuctionRefreshJob(models.Model):
         ordering = ("created_at",)
 
 
+class OpportunitySnapshot(models.Model):
+    """Último análisis cacheado del mercado fijo LaLiga Limited/Rare."""
+
+    market_key = models.CharField(max_length=40, unique=True, default="laliga-2026")
+    rows = models.JSONField(default=list)
+    metadata = models.JSONField(default=dict)
+    refreshed_at = models.DateTimeField(null=True, blank=True)
+    source_version = models.PositiveSmallIntegerField(default=1)
+
+
+class OpportunityRefreshJob(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "En cola"
+        RUNNING = "running", "Analizando"
+        SUCCEEDED = "succeeded", "Completada"
+        FAILED = "failed", "Fallida"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sorare_opportunity_refresh_jobs",
+    )
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    processed_count = models.PositiveIntegerField(default=0)
+    total_count = models.PositiveIntegerField(default=0)
+    player_count = models.PositiveIntegerField(default=0)
+    opportunity_count = models.PositiveIntegerField(default=0)
+    progress_label = models.CharField(max_length=180, blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("created_at",)
+
+
 class BidBatchJob(models.Model):
     class Status(models.TextChoices):
         QUEUED = "queued", "En cola"
