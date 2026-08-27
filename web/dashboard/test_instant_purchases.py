@@ -9,20 +9,42 @@ from django.urls import reverse
 from dashboard.management.commands.process_sales_queue import process_next_instant_purchase_refresh
 from dashboard.models import InstantPurchaseRefreshJob, InstantPurchaseSnapshot
 from web_services.instant_purchase_market import (
-    PLAYER_BATCH_SIZE,
-    _live_offers_query,
+    PRIMARY_OFFER_PAGE_SIZE,
+    PRIMARY_OFFERS_QUERY,
+    _normalize_primary_offers,
     _recent_comparables,
     build_instant_purchase_rows,
 )
 
 
 class InstantPurchaseValuationTests(TestCase):
-    def test_live_listing_query_stays_within_conservative_page_size(self):
-        query, variables = _live_offers_query([("player-one", None)])
+    def test_live_listing_query_uses_sorare_primary_offers(self):
+        self.assertEqual(PRIMARY_OFFER_PAGE_SIZE, 5)
+        self.assertIn("livePrimaryOffers", PRIMARY_OFFERS_QUERY)
+        self.assertNotIn("liveSingleSaleOffers", PRIMARY_OFFERS_QUERY)
+        self.assertIn("instantBuyCampaign", PRIMARY_OFFERS_QUERY)
 
-        self.assertEqual(PLAYER_BATCH_SIZE, 1)
-        self.assertIn("first: 10", query)
-        self.assertEqual(variables, {"slug0": "player-one", "after0": None})
+    def test_primary_offers_are_filtered_to_rare_laliga_cards(self):
+        card = {
+            "slug": "player-2026-rare-1", "assetId": "asset", "rarityTyped": "rare",
+            "seasonYear": 2026, "serialNumber": 1, "inSeasonEligible": True,
+            "anyPositions": ["Forward"],
+            "anyPlayer": {"slug": "player", "displayName": "Player", "squaredPictureUrl": "player.png"},
+            "anyTeam": {"slug": "team", "name": "Team", "pictureUrl": "team.png"},
+        }
+        offers = [{
+            "id": "primary", "price": {"eurCents": 7711}, "anyCards": [card],
+            "instantBuyCampaign": {"remainingAtCurrentPrice": 2, "remainingSupply": 5, "soldOut": False},
+        }]
+
+        rows = _normalize_primary_offers(offers, {"team"}, (0.92, 1.17, 1800))
+
+        self.assertEqual(rows[0]["offer_id"], "primary")
+        self.assertEqual(rows[0]["price_eur"], 77.11)
+        self.assertEqual(rows[0]["remaining_at_price"], 2)
+
+        offers[0]["instantBuyCampaign"]["remainingSupply"] = 0
+        self.assertEqual(_normalize_primary_offers(offers, {"team"}, (0.92, 1.17, 1800)), [])
 
     def test_history_keeps_recent_auctions_and_public_offers_only(self):
         now = datetime(2026, 8, 27, tzinfo=ZoneInfo("UTC"))
@@ -41,12 +63,10 @@ class InstantPurchaseValuationTests(TestCase):
 
         self.assertEqual([row["kind"] for row in rows], ["auction", "public"])
 
-    def test_own_listing_is_excluded_and_rows_sort_by_absolute_difference(self):
+    def test_rows_compare_primary_price_with_secondary_floor_and_sort_by_difference(self):
         listings = [
             {"offer_id": "cheap", "player_slug": "one", "rarity": "rare", "price_eur": 50},
-            {"offer_id": "floor", "player_slug": "one", "rarity": "rare", "price_eur": 80},
             {"offer_id": "expensive", "player_slug": "two", "rarity": "rare", "price_eur": 1000},
-            {"offer_id": "expensive-floor", "player_slug": "two", "rarity": "rare", "price_eur": 1050},
         ]
         histories = {
             (slug, rarity): []
@@ -54,12 +74,16 @@ class InstantPurchaseValuationTests(TestCase):
             for rarity in ("limited", "rare")
         }
 
-        rows, metadata = build_instant_purchase_rows(listings, histories)
+        rows, metadata = build_instant_purchase_rows(
+            listings,
+            histories,
+            market_floors={("one", "rare"): 80, ("two", "rare"): 1050},
+        )
 
         self.assertEqual(rows[0]["offer_id"], "expensive")
         self.assertEqual(rows[0]["saving_eur"], 50)
         cheap = next(row for row in rows if row["offer_id"] == "cheap")
-        self.assertEqual(cheap["next_rare_floor"], 80)
+        self.assertEqual(cheap["rare_floor"], 80)
         self.assertEqual(cheap["saving_eur"], 30)
         self.assertEqual(metadata["favorable_listings"], 2)
 
@@ -73,7 +97,7 @@ class InstantPurchasePageTests(TestCase):
                 "offer_id": "offer-1", "card_slug": "player-2026-rare-1", "player": "Jugador Rare",
                 "player_slug": "jugador-rare", "team": "Real Madrid", "team_slug": "real-madrid-madrid",
                 "team_picture_url": "https://example.com/badge.png", "position": "Forward", "serial": 1,
-                "price_eur": 50, "next_rare_floor": 80, "rare_sales_reference": 75,
+                "price_eur": 50, "rare_floor": 80, "remaining_at_price": 2, "rare_sales_reference": 75,
                 "rare_sales": [], "limited_floor": 15, "limited_sales_reference": 14,
                 "limited_sales": [], "limited_parity_reference": 67.5, "estimated_value": 75,
                 "saving_eur": 25, "saving_percent": 33.3, "confidence": "high", "is_favorable": True,
@@ -98,6 +122,10 @@ class InstantPurchasePageTests(TestCase):
 
     @patch("web_services.instant_purchase_market.collect_instant_purchase_market")
     def test_worker_persists_snapshot(self, collect):
+        InstantPurchaseSnapshot.objects.update(
+            rows=[{"offer_id": "old-manager-listing", "team_slug": "other-team"}],
+            source_version=1,
+        )
         collect.return_value = {
             "rows": [{"offer_id": "new", "team_slug": "real-madrid-madrid", "saving_eur": 12, "is_favorable": True}],
             "metadata": {"favorable_listings": 1, "refreshed_team_slugs": ["real-madrid-madrid"]},
@@ -111,4 +139,6 @@ class InstantPurchasePageTests(TestCase):
         job.refresh_from_db()
         self.assertEqual(processed.pk, job.pk)
         self.assertEqual(job.status, InstantPurchaseRefreshJob.Status.SUCCEEDED)
-        self.assertEqual(InstantPurchaseSnapshot.objects.get().rows[0]["offer_id"], "new")
+        snapshot = InstantPurchaseSnapshot.objects.get()
+        self.assertEqual(snapshot.source_version, 2)
+        self.assertEqual([row["offer_id"] for row in snapshot.rows], ["new"])

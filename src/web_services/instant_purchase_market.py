@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import statistics
 import time
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from sorare_utils import (
@@ -16,16 +15,16 @@ from sorare_utils import (
 from web_services.opportunity_market import (
     REQUEST_INTERVAL_SECONDS,
     SEASON_YEAR,
+    _floor_query,
     _history_query,
     _parse_date,
-    _roster_query,
     learn_rare_ratio,
     robust_sales_reference,
 )
 
 
 HISTORY_DAYS = 30
-PLAYER_BATCH_SIZE = 1
+PRIMARY_OFFER_PAGE_SIZE = 5
 
 
 def _comparable_kind(price):
@@ -60,25 +59,19 @@ def _recent_comparables(prices, rates, now=None):
     return rows
 
 
-def build_instant_purchase_rows(listings, histories, now=None):
-    """Valora cada listing Rare frente a ventas, siguiente suelo y Limited."""
+def build_instant_purchase_rows(listings, histories, market_floors=None, now=None):
+    """Valora cada oferta primaria Rare frente a ventas y mercado secundario."""
     now = now or datetime.now(timezone.utc)
-    by_player = defaultdict(lambda: {"rare": [], "limited": []})
-    for listing in listings:
-        rarity = listing.get("rarity")
-        if rarity in {"rare", "limited"} and listing.get("price_eur"):
-            by_player[listing.get("player_slug")][rarity].append(listing)
+    market_floors = market_floors or {}
+    player_slugs = {listing.get("player_slug") for listing in listings}
 
     player_values = []
     summaries = {}
-    for player_slug, market in by_player.items():
+    for player_slug in player_slugs:
         player_row = {"player_slug": player_slug}
         for rarity in ("limited", "rare"):
             summary = robust_sales_reference(histories.get((player_slug, rarity), []), now=now)
-            floor = min(
-                (float(row["price_eur"]) for row in market[rarity]),
-                default=None,
-            )
+            floor = market_floors.get((player_slug, rarity))
             market_value = min(
                 [value for value in (floor, summary["value"]) if value is not None],
                 default=None,
@@ -93,19 +86,10 @@ def build_instant_purchase_rows(listings, histories, now=None):
         if listing.get("rarity") != "rare":
             continue
         player_slug = listing.get("player_slug")
-        player_market = by_player[player_slug]
         rare_summary = summaries[(player_slug, "rare")]
         limited_summary = summaries[(player_slug, "limited")]
-        other_rare_prices = [
-            float(row["price_eur"])
-            for row in player_market["rare"]
-            if row.get("offer_id") != listing.get("offer_id")
-        ]
-        next_rare_floor = min(other_rare_prices, default=None)
-        limited_floor = min(
-            (float(row["price_eur"]) for row in player_market["limited"]),
-            default=None,
-        )
+        rare_floor = market_floors.get((player_slug, "rare"))
+        limited_floor = market_floors.get((player_slug, "limited"))
         limited_market_value = min(
             [value for value in (limited_floor, limited_summary["value"]) if value is not None],
             default=None,
@@ -115,19 +99,19 @@ def build_instant_purchase_rows(listings, histories, now=None):
         references = []
         if rare_summary["value"]:
             references.extend([float(rare_summary["value"])] * 2)
-        if next_rare_floor:
-            references.extend([next_rare_floor] * 2)
+        if rare_floor:
+            references.extend([float(rare_floor)] * 2)
         if limited_parity:
             references.append(float(limited_parity))
         estimated_value = statistics.median(references) if references else None
-        if estimated_value is not None and next_rare_floor is not None:
-            estimated_value = min(estimated_value, next_rare_floor)
+        if estimated_value is not None and rare_floor is not None:
+            estimated_value = min(estimated_value, float(rare_floor))
 
         price = float(listing["price_eur"])
         saving_eur = estimated_value - price if estimated_value is not None else None
         saving_percent = saving_eur / estimated_value * 100 if estimated_value and saving_eur is not None else None
         confidence_score = rare_summary["confidence_score"]
-        if next_rare_floor is not None:
+        if rare_floor is not None:
             confidence_score = max(confidence_score, 55)
         if limited_parity is not None:
             confidence_score = max(confidence_score, 48 if ratio_source == "learned" else 32)
@@ -135,7 +119,7 @@ def build_instant_purchase_rows(listings, histories, now=None):
 
         rows.append({
             **listing,
-            "next_rare_floor": round(next_rare_floor, 2) if next_rare_floor is not None else None,
+            "rare_floor": round(float(rare_floor), 2) if rare_floor is not None else None,
             "rare_sales_reference": rare_summary["value"],
             "rare_sales": rare_summary["sales"],
             "limited_floor": round(limited_floor, 2) if limited_floor is not None else None,
@@ -160,23 +144,32 @@ def build_instant_purchase_rows(listings, histories, now=None):
     }
 
 
-def _normalize_live_offers(offers, roster, rates):
+def _normalize_primary_offers(offers, team_slugs, rates):
     listings = []
     for offer in offers:
-        cents = to_eur_cents((offer.get("receiverSide") or {}).get("amounts") or {}, rates)
+        cents = to_eur_cents(offer.get("price") or {}, rates)
         if not cents or cents <= 0:
             continue
-        for card in (offer.get("senderSide") or {}).get("anyCards") or []:
+        campaign = offer.get("instantBuyCampaign") or {}
+        if campaign.get("soldOut") or campaign.get("remainingSupply") == 0:
+            continue
+        for card in offer.get("anyCards") or []:
             player = card.get("anyPlayer") or {}
+            team = card.get("anyTeam") or {}
             player_slug = player.get("slug")
             rarity = card.get("rarityTyped")
-            if player_slug not in roster or rarity not in {"rare", "limited"}:
+            if team.get("slug") not in team_slugs or rarity != "rare":
                 continue
             if card.get("seasonYear") != SEASON_YEAR or not card.get("inSeasonEligible"):
                 continue
-            identity = roster[player_slug]
             listings.append({
-                **identity,
+                "player": player.get("displayName") or player_slug,
+                "player_slug": player_slug,
+                "player_picture_url": player.get("squaredPictureUrl"),
+                "team": team.get("name") or team.get("slug"),
+                "team_slug": team.get("slug"),
+                "team_picture_url": team.get("pictureUrl"),
+                "position": ((card.get("anyPositions") or ["?"])[0]),
                 "offer_id": offer.get("id"),
                 "asset_id": card.get("assetId"),
                 "card_slug": card.get("slug"),
@@ -185,62 +178,48 @@ def _normalize_live_offers(offers, roster, rates):
                 "price_eur": round(cents / 100, 2),
                 "start_date": offer.get("startDate"),
                 "end_date": offer.get("endDate"),
+                                "remaining_at_price": campaign.get("remainingAtCurrentPrice"),
+                                "remaining_supply": campaign.get("remainingSupply"),
             })
     return listings
 
 
-def _live_offers_query(player_cursors):
-        definitions = []
-        selections = []
-        variables = {}
-        for index, (player_slug, cursor) in enumerate(player_cursors):
-                slug_variable = f"slug{index}"
-                cursor_variable = f"after{index}"
-                definitions.extend((f"${slug_variable}: String!", f"${cursor_variable}: String"))
-                variables[slug_variable] = player_slug
-                variables[cursor_variable] = cursor
-                selections.append(f"""
-                      p{index}: liveSingleSaleOffers(playerSlug: ${slug_variable}, sport: FOOTBALL, first: 10, after: ${cursor_variable}) {{
-                        nodes {{
-                            id startDate endDate
-                            senderSide {{
-                                anyCards {{
-                                    slug assetId rarityTyped seasonYear serialNumber inSeasonEligible
-                                    anyPlayer {{ slug }}
-                                }}
-                            }}
-                            receiverSide {{ amounts {{ eurCents usdCents gbpCents wei }} }}
-                        }}
-                        pageInfo {{ hasNextPage endCursor }}
+PRIMARY_OFFERS_QUERY = f"""
+    query InstantPurchaseListings($after: String) {{
+        tokens {{
+            livePrimaryOffers(sport: FOOTBALL, first: {PRIMARY_OFFER_PAGE_SIZE}, after: $after) {{
+                nodes {{
+                    id startDate endDate status
+                    price {{ eurCents usdCents gbpCents wei }}
+                    instantBuyCampaign {{ remainingAtCurrentPrice remainingSupply soldOut }}
+                    anyCards {{
+                        slug assetId rarityTyped seasonYear serialNumber inSeasonEligible anyPositions
+                        anyPlayer {{ slug displayName squaredPictureUrl }}
+                        anyTeam {{ slug name pictureUrl }}
                     }}
-                """)
-        query = "query InstantPurchaseListings(" + ",".join(definitions) + ") { tokens {" + "".join(selections) + "} }"
-        return query, variables
+                }}
+                pageInfo {{ hasNextPage endCursor }}
+            }}
+        }}
+    }}
+"""
 
 
-def _fetch_roster_live_offers(player_slugs, headers, progress=None, progress_base=0):
+def _fetch_live_primary_offers(headers, progress=None):
         offers = []
-        for offset in range(0, len(player_slugs), PLAYER_BATCH_SIZE):
-                chunk = player_slugs[offset:offset + PLAYER_BATCH_SIZE]
-                pending = [(slug, None) for slug in chunk]
-                while pending:
-                        query, variables = _live_offers_query(pending)
-                        connections = graphql_request(query, variables, headers=headers)["tokens"]
-                        next_pending = []
-                        for index, (player_slug, _) in enumerate(pending):
-                                connection = connections.get(f"p{index}") or {}
-                                offers.extend(connection.get("nodes") or [])
-                                page_info = connection.get("pageInfo") or {}
-                                if page_info.get("hasNextPage"):
-                                        next_pending.append((player_slug, page_info.get("endCursor")))
-                        pending = next_pending
-                        if pending:
-                                time.sleep(REQUEST_INTERVAL_SECONDS)
-                done = min(offset + len(chunk), len(player_slugs))
+        cursor = None
+        page = 0
+        while True:
+                connection = graphql_request(PRIMARY_OFFERS_QUERY, {"after": cursor}, headers=headers)["tokens"]["livePrimaryOffers"]
+                offers.extend(connection.get("nodes") or [])
+                page += 1
                 if progress:
-                        progress(progress_base + done, progress_base + len(player_slugs), f"Compras activas: {done}/{len(player_slugs)} jugadores")
-                if done < len(player_slugs):
-                        time.sleep(REQUEST_INTERVAL_SECONDS)
+                        progress(page, 0, f"Ofertas directas de Sorare: {len(offers)} revisadas")
+                page_info = connection.get("pageInfo") or {}
+                if not page_info.get("hasNextPage"):
+                        break
+                cursor = page_info.get("endCursor")
+                time.sleep(REQUEST_INTERVAL_SECONDS)
         return offers
 
 
@@ -260,44 +239,34 @@ def collect_instant_purchase_market(progress=None, team_slugs=None, catalog_call
     if catalog_callback:
         catalog_callback(catalog)
 
-    roster = {}
     catalog_by_slug = {team["slug"]: team for team in catalog}
-    for offset in range(0, len(team_items), 5):
-        chunk = team_items[offset:offset + 5]
-        query, variables = _roster_query(chunk)
-        clubs = graphql_request(query, variables, headers=headers)["football"]
-        for index, (requested_slug, fallback_name) in enumerate(chunk):
-            club = clubs.get(f"t{index}") or {}
-            catalog_team = catalog_by_slug[requested_slug]
-            catalog_team["name"] = club.get("name") or fallback_name
-            catalog_team["picture_url"] = club.get("pictureUrl") or ""
-            for player in (club.get("activePlayers") or {}).get("nodes") or []:
-                if not player.get("slug"):
-                    continue
-                roster[player["slug"]] = {
-                    "player": player.get("displayName") or player["slug"],
-                    "player_slug": player["slug"],
-                    "player_picture_url": player.get("squaredPictureUrl"),
-                    "team": catalog_team["name"],
-                    "team_slug": requested_slug,
-                    "team_picture_url": catalog_team["picture_url"],
-                    "position": ((player.get("anyPositions") or ["?"])[0]),
-                }
-        if progress:
-            progress(min(offset + len(chunk), len(team_items)), len(team_items), "Cargando plantillas de LaLiga")
-        time.sleep(REQUEST_INTERVAL_SECONDS)
+    selected_team_slugs = {slug for slug, _ in team_items}
+    offers = _fetch_live_primary_offers(headers, progress=progress)
+    listings = _normalize_primary_offers(offers, selected_team_slugs, rates)
+    for listing in listings:
+        catalog_team = catalog_by_slug.get(listing["team_slug"])
+        if catalog_team:
+            catalog_team["picture_url"] = listing.get("team_picture_url") or catalog_team["picture_url"]
     if catalog_callback:
         catalog_callback(catalog)
 
-    player_slugs = sorted(roster)
-    offers = _fetch_roster_live_offers(
-        player_slugs,
-        headers,
-        progress=progress,
-        progress_base=len(team_items),
-    )
-    listings = _normalize_live_offers(offers, roster, rates)
-    rare_players = sorted({row["player_slug"] for row in listings if row["rarity"] == "rare"})
+    rare_players = sorted({row["player_slug"] for row in listings})
+    market_floors = {}
+    for index, player_slug in enumerate(rare_players, start=1):
+        query, variables = _floor_query({"player_slug": player_slug})
+        market = (graphql_request(query, variables, headers=headers).get("player") or {})
+        for rarity in ("limited", "rare"):
+            nodes = (market.get(rarity) or {}).get("nodes") or []
+            card = (nodes[0] if nodes else {}).get("lowestPriceCard") or {}
+            offer = card.get("liveSingleSaleOffer") or {}
+            cents = to_eur_cents((offer.get("receiverSide") or {}).get("amounts") or {}, rates)
+            if cents and cents > 0:
+                market_floors[(player_slug, rarity)] = round(cents / 100, 2)
+        if progress:
+            progress(index, len(rare_players) * 2, f"Suelos de mercado: {index}/{len(rare_players)} jugadores")
+        if index < len(rare_players):
+            time.sleep(REQUEST_INTERVAL_SECONDS)
+
     histories = {(slug, rarity): [] for slug in rare_players for rarity in ("limited", "rare")}
     for offset in range(0, len(rare_players), 8):
         chunk = rare_players[offset:offset + 8]
@@ -309,11 +278,10 @@ def collect_instant_purchase_market(progress=None, team_slugs=None, catalog_call
                 histories[(slug, rarity)] = _recent_comparables(prices.get(alias), rates)
         if progress:
             done = min(offset + len(chunk), len(rare_players))
-            base = len(team_items) + len(player_slugs)
-            progress(base + done, base + len(rare_players), f"Valorando cartas: {done}/{len(rare_players)} jugadores")
+            progress(len(rare_players) + done, len(rare_players) * 2, f"Histórico: {done}/{len(rare_players)} jugadores")
         time.sleep(REQUEST_INTERVAL_SECONDS)
 
-    rows, metadata = build_instant_purchase_rows(listings, histories)
+    rows, metadata = build_instant_purchase_rows(listings, histories, market_floors=market_floors)
     metadata.update({
         "players_analyzed": len(rare_players),
         "team_catalog": catalog,

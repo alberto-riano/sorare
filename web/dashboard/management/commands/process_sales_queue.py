@@ -127,7 +127,9 @@ def process_next_instant_purchase_refresh():
         refreshed_at = timezone.now()
         selected_metadata = payload.get("metadata") or {}
         refreshed_team_slugs = set(selected_metadata.get("refreshed_team_slugs") or [])
-        snapshot = InstantPurchaseSnapshot.objects.filter(market_key="laliga-rare-2026").first()
+        snapshot = InstantPurchaseSnapshot.objects.filter(
+            market_key="laliga-rare-2026", source_version=2,
+        ).first()
         previous_rows = list(snapshot.rows if snapshot else [])
         rows = [row for row in previous_rows if row.get("team_slug") not in refreshed_team_slugs]
         rows.extend(payload.get("rows") or [])
@@ -148,7 +150,7 @@ def process_next_instant_purchase_refresh():
         }
         InstantPurchaseSnapshot.objects.update_or_create(
             market_key="laliga-rare-2026",
-            defaults={"rows": rows, "metadata": metadata, "refreshed_at": refreshed_at, "source_version": 1},
+            defaults={"rows": rows, "metadata": metadata, "refreshed_at": refreshed_at, "source_version": 2},
         )
         job.refresh_from_db(fields=("processed_count", "total_count"))
         job.listing_count = len(payload.get("rows") or [])

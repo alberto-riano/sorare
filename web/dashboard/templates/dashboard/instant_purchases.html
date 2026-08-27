@@ -8,7 +8,7 @@
     <div>
       <p class="kicker">LaLiga 2026-27 · Rare In-Season</p>
       <h1><i class="fas fa-cart-shopping"></i> Compras instantáneas</h1>
-      <p>Cartas a la venta ahora, comparadas con subastas terminadas, ofertas públicas aceptadas, el siguiente suelo Rare y su referencia Limited.</p>
+      <p>Cartas vendidas directamente por Sorare, comparadas con subastas terminadas, ofertas públicas aceptadas, el suelo de otros managers y su referencia Limited.</p>
     </div>
     <div class="opportunity-refresh">
       {% if snapshot %}<span>Último análisis</span><strong>{{ snapshot.refreshed_at|date:'d/m/Y H:i' }}</strong>{% endif %}
@@ -33,7 +33,7 @@
   </section>
 
   <section class="opportunity-kpis reveal">
-    <article class="panel"><span><i class="fas fa-tags"></i> Listings Rare</span><strong>{{ metadata.active_listings|default:0 }}</strong><small>Compras instantáneas activas analizadas</small></article>
+    <article class="panel"><span><i class="fas fa-tags"></i> Ofertas directas Rare</span><strong>{{ metadata.active_listings|default:0 }}</strong><small>Cartas vendidas directamente por Sorare</small></article>
     <article class="panel opportunity-kpi-highlight"><span><i class="fas fa-arrow-trend-down"></i> Precios favorables</span><strong>{{ metadata.favorable_listings|default:0 }}</strong><small>Por debajo de la valoración disponible</small></article>
     <article class="panel"><span><i class="fas fa-scale-balanced"></i> Relación Rare / Limited</span><strong>{{ metadata.rare_limited_ratio|default:'—' }}×</strong><small>{% if metadata.ratio_source == 'learned' %}Calculada con {{ metadata.ratio_sample }} jugadores{% else %}Referencia provisional{% endif %}</small></article>
     <article class="panel"><span><i class="fas fa-clock-rotate-left"></i> Histórico</span><strong>30 días</strong><small>Subastas y ofertas públicas aceptadas</small></article>
@@ -66,8 +66,8 @@
         {% for row in page_obj %}
           <tr class="opportunity-main-row" data-evidence="instant-evidence-{{ forloop.counter }}">
             <td><div class="opportunity-player">{% if row.player_picture_url %}<img src="{{ row.player_picture_url }}" alt="">{% endif %}<div><strong>{{ row.player }}</strong><span>{% if row.team_picture_url %}<img src="{{ row.team_picture_url }}" alt="">{% endif %}{{ row.team }} · {{ row.position }} · #{{ row.serial }}</span></div></div></td>
-            <td><div class="opportunity-price instant-current-price"><small>Precio anunciado</small><strong>{{ row.price_eur|floatformat:2 }} €</strong><span>Rare In-Season 2026-27</span></div></td>
-            <td><div class="opportunity-price"><small>Siguiente suelo</small><strong>{{ row.next_rare_floor|floatformat:2|default:'—' }} €</strong><span>Histórico {{ row.rare_sales_reference|floatformat:2|default:'—' }} €</span><em>{{ row.rare_sales|length }} ventas comparables</em></div></td>
+            <td><div class="opportunity-price instant-current-price"><small>Precio Sorare</small><strong>{{ row.price_eur|floatformat:2 }} €</strong><span>Rare In-Season 2026-27{% if row.remaining_at_price != None %} · quedan {{ row.remaining_at_price }}{% endif %}</span></div></td>
+            <td><div class="opportunity-price"><small>Suelo de managers</small><strong>{{ row.rare_floor|floatformat:2|default:'—' }} €</strong><span>Histórico {{ row.rare_sales_reference|floatformat:2|default:'—' }} €</span><em>{{ row.rare_sales|length }} ventas comparables</em></div></td>
             <td><div class="opportunity-price"><small>Suelo Limited</small><strong>{{ row.limited_floor|floatformat:2|default:'—' }} €</strong><span>Equivalencia Rare {{ row.limited_parity_reference|floatformat:2|default:'—' }} €</span><em>Histórico Limited {{ row.limited_sales_reference|floatformat:2|default:'—' }} €</em></div></td>
             <td>{% if row.estimated_value != None %}<div class="instant-valuation{% if row.is_favorable %} is-favorable{% else %} is-unfavorable{% endif %}"><small>Valor estimado {{ row.estimated_value|floatformat:2 }} €</small><strong>{% if row.saving_eur > 0 %}+{% endif %}{{ row.saving_eur|floatformat:2 }} €</strong><span>{% if row.saving_percent > 0 %}+{% endif %}{{ row.saving_percent|floatformat:1 }}% · confianza {% if row.confidence == 'high' %}alta{% elif row.confidence == 'medium' %}media{% else %}baja{% endif %}</span></div>{% else %}<div class="opportunity-no-signal"><strong>Sin valoración</strong><span>Evidencia insuficiente</span></div>{% endif %}</td>
             <td><div class="opportunity-actions"><button type="button" class="opportunity-evidence-button" title="Ver comparables"><i class="fas fa-chevron-down"></i></button>{% if row.card_slug %}<a href="https://sorare.com/football/cards/{{ row.card_slug }}" target="_blank" rel="noopener" title="Abrir carta en Sorare"><i class="fas fa-arrow-up-right-from-square"></i></a>{% endif %}</div></td>
@@ -77,7 +77,7 @@
               <section><h3><i class="fas fa-circle rare-dot"></i> Ventas Rare · últimos 30 días</h3><div class="opportunity-sales">{% for sale in row.rare_sales %}<span><i class="fas {% if sale.kind == 'auction' %}fa-gavel{% else %}fa-bullhorn{% endif %}"></i><strong>{{ sale.eur|floatformat:2 }} €</strong><small>{{ sale.label }} · {{ sale.date|slice:':10' }}</small></span>{% empty %}<em>Sin subastas ni ofertas públicas comparables.</em>{% endfor %}</div></section>
               <section><h3><i class="fas fa-circle limited-dot"></i> Ventas Limited · últimos 30 días</h3><div class="opportunity-sales">{% for sale in row.limited_sales %}<span><i class="fas {% if sale.kind == 'auction' %}fa-gavel{% else %}fa-bullhorn{% endif %}"></i><strong>{{ sale.eur|floatformat:2 }} €</strong><small>{{ sale.label }} · {{ sale.date|slice:':10' }}</small></span>{% empty %}<em>Sin subastas ni ofertas públicas comparables.</em>{% endfor %}</div></section>
             </div>
-            <p class="opportunity-method-note"><i class="fas fa-circle-info"></i> La propia carta se excluye del siguiente suelo Rare. Serial, XP y diseños especiales no alteran esta valoración inicial.</p>
+            <p class="opportunity-method-note"><i class="fas fa-circle-info"></i> El suelo Rare corresponde al mercado de otros managers. Serial, XP y diseños especiales no alteran esta valoración inicial.</p>
           </td></tr>
         {% empty %}<tr><td colspan="6" class="sales-empty">No hay compras instantáneas que coincidan con estos filtros.</td></tr>{% endfor %}
         </tbody>

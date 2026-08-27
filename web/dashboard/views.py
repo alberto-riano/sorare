@@ -297,7 +297,7 @@ def opportunity_refresh_status(request):
 
 def instant_purchases(request):
     snapshot = InstantPurchaseSnapshot.objects.filter(
-        market_key="laliga-rare-2026", source_version=1,
+        market_key="laliga-rare-2026", source_version=2,
     ).first()
     latest_refresh = InstantPurchaseRefreshJob.objects.order_by("-created_at").first()
     active_refresh = InstantPurchaseRefreshJob.objects.filter(

@@ -108,7 +108,7 @@ class InstantPurchaseSnapshot(models.Model):
     rows = models.JSONField(default=list)
     metadata = models.JSONField(default=dict)
     refreshed_at = models.DateTimeField(null=True, blank=True)
-    source_version = models.PositiveSmallIntegerField(default=1)
+    source_version = models.PositiveSmallIntegerField(default=2)
 
 
 class InstantPurchaseRefreshJob(models.Model):
