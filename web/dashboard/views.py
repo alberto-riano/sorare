@@ -126,23 +126,39 @@ def index(request):
 
 
 def _opportunity_team_catalog(snapshot=None, latest_job=None):
-    catalog = list(((snapshot.metadata if snapshot else {}) or {}).get("team_catalog") or [])
-    if not catalog and latest_job:
-        catalog = list(latest_job.team_catalog or [])
-    if not catalog:
-        try:
-            import listar_subastas
+    by_slug = {}
 
-            cached_rows = (listar_subastas.load_auction_cache() or {}).get("auctions") or []
-            by_slug = {}
-            for row in cached_rows:
-                slug = str(row.get("team_slug") or "").strip()
-                name = str(row.get("team") or "").strip()
-                if slug and name:
-                    by_slug[slug] = {"slug": slug, "name": name, "picture_url": row.get("team_picture_url") or ""}
-            catalog = list(by_slug.values())
-        except Exception:
-            catalog = []
+    def merge(team):
+        slug = str(team.get("slug") or "").strip()
+        name = str(team.get("name") or "").strip()
+        if not slug or not name:
+            return
+        current = by_slug.setdefault(slug, {"slug": slug, "name": name, "picture_url": ""})
+        current["name"] = name
+        current["picture_url"] = team.get("picture_url") or current["picture_url"]
+
+    for team in ((snapshot.metadata if snapshot else {}) or {}).get("team_catalog") or []:
+        merge(team)
+    if latest_job:
+        for team in latest_job.team_catalog or []:
+            merge(team)
+    for row in (snapshot.rows if snapshot else []) or []:
+        merge({
+            "slug": row.get("team_slug"), "name": row.get("team"),
+            "picture_url": row.get("team_picture_url"),
+        })
+    try:
+        import listar_subastas
+
+        cached_rows = (listar_subastas.load_auction_cache() or {}).get("auctions") or []
+        for row in cached_rows:
+            merge({
+                "slug": row.get("team_slug"), "name": row.get("team"),
+                "picture_url": row.get("team_picture_url"),
+            })
+    except Exception:
+        pass
+    catalog = list(by_slug.values())
     return sorted(
         [team for team in catalog if team.get("slug") and team.get("name")],
         key=lambda team: str(team.get("name") or "").casefold(),
@@ -157,30 +173,20 @@ def opportunities(request):
     ).order_by("-created_at").first()
 
     all_rows = list(snapshot.rows if snapshot else [])
-    player_filter = request.GET.get("player", "").strip().casefold()
     team_filter = request.GET.get("team", "").strip()
     position_filter = request.GET.get("position", "").strip()
     rarity_filter = request.GET.get("opportunity_rarity", "").strip().lower()
-    confidence_filter = request.GET.get("confidence", "").strip().lower()
-    try:
-        min_discount = max(0, min(95, int(request.GET.get("min_discount", "12"))))
-    except ValueError:
-        min_discount = 12
     show_all = request.GET.get("show_all") == "1"
 
     rows = []
     for row in all_rows:
-        if player_filter and player_filter not in str(row.get("player") or "").casefold():
-            continue
         if team_filter and row.get("team") != team_filter:
             continue
         if position_filter and row.get("position") != position_filter:
             continue
         if rarity_filter in {"limited", "rare"} and row.get("recommended_rarity") != rarity_filter:
             continue
-        if confidence_filter in {"medium", "high"} and row.get("confidence") != confidence_filter:
-            continue
-        if not show_all and (not row.get("recommended_rarity") or float(row.get("discount_percent") or 0) < min_discount):
+        if not show_all and not row.get("recommended_rarity"):
             continue
         rows.append(row)
 
@@ -191,11 +197,7 @@ def opportunities(request):
         rows.sort(key=lambda row: float((row.get(row.get("recommended_rarity") or "limited") or {}).get("floor") or 10**9))
     else:
         rows.sort(key=lambda row: float(row.get("discount_percent") or 0), reverse=True)
-    try:
-        per_page = int(request.GET.get("per_page", 25))
-    except ValueError:
-        per_page = 25
-    per_page = per_page if per_page in {25, 50, 100} else 25
+    per_page = 50
     page_obj = Paginator(rows, per_page).get_page(request.GET.get("page", 1))
     pagination_params = request.GET.copy()
     pagination_params.pop("page", None)
@@ -218,8 +220,6 @@ def opportunities(request):
         "selected_team": team_filter,
         "selected_position": position_filter,
         "selected_rarity": rarity_filter,
-        "selected_confidence": confidence_filter,
-        "selected_min_discount": min_discount,
         "show_all": show_all,
         "sort": sort,
         "per_page": per_page,

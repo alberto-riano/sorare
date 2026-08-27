@@ -1789,13 +1789,33 @@ class OpportunityMarketTests(TestCase):
         response = self.client.get(reverse("opportunities"))
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["page_obj"].paginator.per_page, 50)
         self.assertContains(response, "Oportunidad Roja")
         self.assertNotContains(response, ">Sin señal<")
         self.assertContains(response, "Las subastas no se incluyen")
         self.assertContains(response, "compras instantáneas")
+        self.assertNotContains(response, "Buscar jugador")
+        self.assertNotContains(response, "Descuento mínimo</span>")
+        self.assertNotContains(response, "Por página")
 
         show_all = self.client.get(reverse("opportunities"), {"show_all": "1"})
         self.assertContains(show_all, "Sin señal")
+
+    def test_team_selector_uses_club_shields_and_accessible_names(self):
+        OpportunitySnapshot.objects.create(
+            rows=[{
+                "player": "Jugador", "player_slug": "jugador", "team": "Equipo Escudo",
+                "team_slug": "equipo-escudo", "team_picture_url": "https://example.com/shield.png",
+                "position": "Forward", "recommended_rarity": None, "discount_percent": 0,
+                "confidence": "low", "limited": {}, "rare": {},
+            }],
+            metadata={"team_catalog": [{"slug": "equipo-escudo", "name": "Equipo Escudo"}]},
+        )
+
+        response = self.client.get(reverse("opportunities"), {"show_all": "1"})
+
+        self.assertContains(response, 'src="https://example.com/shield.png"')
+        self.assertContains(response, 'title="Equipo Escudo"')
 
     @patch("web_services.opportunity_market.collect_opportunity_market")
     def test_worker_persists_snapshot_and_finishes_job(self, collect):

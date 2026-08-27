@@ -266,7 +266,11 @@ def collect_opportunity_market(progress=None, team_slugs=None, catalog_callback=
     headers = build_headers()
     rates = fetch_exchange_rates()
     teams = listar_subastas.fetch_la_liga_teams(headers, season_year=SEASON_YEAR)
-    team_catalog = [{"slug": slug, "name": name} for slug, name in sorted(teams.items(), key=lambda item: item[1])]
+    team_catalog_by_slug = {
+        slug: {"slug": slug, "name": name, "picture_url": ""}
+        for slug, name in teams.items()
+    }
+    team_catalog = sorted(team_catalog_by_slug.values(), key=lambda item: item["name"])
     if catalog_callback:
         catalog_callback(team_catalog)
     requested_team_slugs = {str(slug).strip() for slug in (team_slugs or []) if str(slug).strip()}
@@ -280,8 +284,12 @@ def collect_opportunity_market(progress=None, team_slugs=None, catalog_callback=
         chunk = team_items[offset:offset + 5]
         query, variables = _roster_query(chunk)
         clubs = graphql_request(query, variables, headers=headers)["football"]
-        for index, (_, fallback_name) in enumerate(chunk):
+        for index, (requested_slug, fallback_name) in enumerate(chunk):
             club = clubs.get(f"t{index}") or {}
+            catalog_team = team_catalog_by_slug.get(requested_slug)
+            if catalog_team:
+                catalog_team["name"] = club.get("name") or fallback_name
+                catalog_team["picture_url"] = club.get("pictureUrl") or ""
             for player in (club.get("activePlayers") or {}).get("nodes") or []:
                 slug = player.get("slug")
                 if not slug:
@@ -298,6 +306,10 @@ def collect_opportunity_market(progress=None, team_slugs=None, catalog_callback=
         if progress:
             progress(min(offset + len(chunk), len(team_items)), len(team_items), "Cargando plantillas de LaLiga")
         time.sleep(REQUEST_INTERVAL_SECONDS)
+
+    team_catalog = sorted(team_catalog_by_slug.values(), key=lambda item: item["name"])
+    if catalog_callback:
+        catalog_callback(team_catalog)
 
     players = list(roster.values())
     floors = {}

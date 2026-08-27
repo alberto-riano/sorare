@@ -27,9 +27,10 @@
       </div>
     </div>
     {% if refresh_team_catalog %}<div class="opportunity-team-grid">
-      {% for team in refresh_team_catalog %}<label class="opportunity-team-choice">
+      {% for team in refresh_team_catalog %}<label class="opportunity-team-choice" title="{{ team.name }}">
         <input type="checkbox" class="opportunity-refresh-team" value="{{ team.slug }}" {% if refresh_all_teams or team.slug in selected_refresh_team_slugs %}checked{% endif %}>
-        <span>{{ team.name }}</span>
+        {% if team.picture_url %}<img src="{{ team.picture_url }}" alt="{{ team.name }}">{% else %}<span class="opportunity-team-fallback">{{ team.name|slice:':2' }}</span>{% endif %}
+        <span class="sr-only">{{ team.name }}</span>
         {% if team.slug in refreshed_team_slugs %}<i class="fas fa-circle-check" title="Ya tiene datos"></i>{% endif %}
       </label>{% endfor %}
     </div>{% else %}<p class="opportunity-team-loading"><i class="fas fa-circle-notch fa-spin"></i> Cargando los equipos de LaLiga…</p>{% endif %}
@@ -50,17 +51,12 @@
   {% if snapshot %}
   <section class="panel opportunity-controls reveal">
     <form method="get" id="opportunityFilters" class="opportunity-filters">
-      <label><span>Jugador</span><input name="player" value="{{ request.GET.player }}" placeholder="Buscar jugador"></label>
       <label><span>Equipo</span><select name="team"><option value="">Todos</option>{% for team in available_teams %}<option value="{{ team }}" {% if selected_team == team %}selected{% endif %}>{{ team }}</option>{% endfor %}</select></label>
       <label><span>Posición</span><select name="position"><option value="">Todas</option>{% for position in available_positions %}<option value="{{ position }}" {% if selected_position == position %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
       <label><span>Oportunidad en</span><select name="opportunity_rarity"><option value="">Ambas rarezas</option><option value="limited" {% if selected_rarity == 'limited' %}selected{% endif %}>Limited</option><option value="rare" {% if selected_rarity == 'rare' %}selected{% endif %}>Rare</option></select></label>
-      <label><span>Confianza</span><select name="confidence"><option value="">Media y alta</option><option value="high" {% if selected_confidence == 'high' %}selected{% endif %}>Alta</option><option value="medium" {% if selected_confidence == 'medium' %}selected{% endif %}>Media</option></select></label>
-      <label><span>Descuento mínimo</span><select name="min_discount"><option value="12" {% if selected_min_discount == 12 %}selected{% endif %}>12%</option><option value="20" {% if selected_min_discount == 20 %}selected{% endif %}>20%</option><option value="30" {% if selected_min_discount == 30 %}selected{% endif %}>30%</option><option value="40" {% if selected_min_discount == 40 %}selected{% endif %}>40%</option></select></label>
       <label><span>Orden</span><select name="sort"><option value="discount" {% if sort == 'discount' %}selected{% endif %}>Mayor oportunidad</option><option value="player" {% if sort == 'player' %}selected{% endif %}>Jugador</option><option value="floor" {% if sort == 'floor' %}selected{% endif %}>Menor suelo</option></select></label>
-      <label><span>Por página</span><select name="per_page"><option value="25" {% if per_page == 25 %}selected{% endif %}>25</option><option value="50" {% if per_page == 50 %}selected{% endif %}>50</option><option value="100" {% if per_page == 100 %}selected{% endif %}>100</option></select></label>
       <label class="opportunity-check"><input type="checkbox" name="show_all" value="1" {% if show_all %}checked{% endif %}><span>Mostrar también sin señal</span></label>
-      <button class="btn btn-accent" type="submit"><i class="fas fa-filter"></i> Aplicar</button>
-      <a class="btn btn-secondary" href="{% url 'opportunities' %}">Limpiar</a>
+      <a class="btn btn-secondary opportunity-clear" href="{% url 'opportunities' %}"><i class="fas fa-rotate-left"></i> Limpiar</a>
     </form>
   </section>
 
