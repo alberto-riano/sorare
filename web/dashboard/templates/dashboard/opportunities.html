@@ -38,7 +38,7 @@
 
   <section class="opportunity-kpis reveal">
     <article class="panel"><span><i class="fas fa-scale-balanced"></i> Relación Rare / Limited</span><strong>{{ metadata.rare_limited_ratio|default:'—' }}×</strong><small>{% if metadata.ratio_source == 'learned' %}Calculada con {{ metadata.ratio_sample }} jugadores comparables{% else %}Referencia prudente hasta tener más comparables{% endif %}</small></article>
-    <article class="panel"><span><i class="fas fa-users"></i> Jugadores analizados</span><strong>{{ metadata.players_analyzed|default:0 }}</strong><small>{{ metadata.active_listings|default:0 }} precios suelo activos</small></article>
+    <article class="panel"><span><i class="fas fa-users"></i> Jugadores con mercado</span><strong>{{ metadata.players_analyzed|default:0 }}</strong><small>{{ metadata.active_listings|default:0 }} precios suelo activos · plantillas revisadas</small></article>
     <article class="panel opportunity-kpi-highlight"><span><i class="fas fa-bolt"></i> Señales detectadas</span><strong>{{ metadata.opportunities|default:0 }}</strong><small>Descuento mínimo del algoritmo: 12%</small></article>
     <article class="panel"><span><i class="fas fa-filter-circle-dollar"></i> Universo</span><strong>Limited + Rare</strong><small>Venta fija y ofertas públicas · sin subastas</small></article>
   </section>
@@ -51,17 +51,17 @@
   {% if snapshot %}
   <section class="panel opportunity-controls reveal">
     <form method="get" id="opportunityFilters" class="opportunity-filters">
-      <label><span>Equipo</span><select name="team"><option value="">Todos</option>{% for team in available_teams %}<option value="{{ team }}" {% if selected_team == team %}selected{% endif %}>{{ team }}</option>{% endfor %}</select></label>
-      <label><span>Posición</span><select name="position"><option value="">Todas</option>{% for position in available_positions %}<option value="{{ position }}" {% if selected_position == position %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
-      <label><span>Oportunidad en</span><select name="opportunity_rarity"><option value="">Ambas rarezas</option><option value="limited" {% if selected_rarity == 'limited' %}selected{% endif %}>Limited</option><option value="rare" {% if selected_rarity == 'rare' %}selected{% endif %}>Rare</option></select></label>
-      <label><span>Orden</span><select name="sort"><option value="discount" {% if sort == 'discount' %}selected{% endif %}>Mayor oportunidad</option><option value="player" {% if sort == 'player' %}selected{% endif %}>Jugador</option><option value="floor" {% if sort == 'floor' %}selected{% endif %}>Menor suelo</option></select></label>
-      <label class="opportunity-check"><input type="checkbox" name="show_all" value="1" {% if show_all %}checked{% endif %}><span>Mostrar también sin señal</span></label>
+      <label class="opportunity-filter-field"><span><i class="fas fa-shield-halved"></i> Equipo</span><select name="team"><option value="">Todos los equipos</option>{% for team in available_teams %}<option value="{{ team }}" {% if selected_team == team %}selected{% endif %}>{{ team }}</option>{% endfor %}</select></label>
+      <label class="opportunity-filter-field"><span><i class="fas fa-person-running"></i> Posición</span><select name="position"><option value="">Todas las posiciones</option>{% for position in available_positions %}<option value="{{ position }}" {% if selected_position == position %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
+      <label class="opportunity-filter-field"><span><i class="fas fa-gem"></i> Oportunidad</span><select name="opportunity_rarity"><option value="">Limited y Rare</option><option value="limited" {% if selected_rarity == 'limited' %}selected{% endif %}>Solo Limited</option><option value="rare" {% if selected_rarity == 'rare' %}selected{% endif %}>Solo Rare</option></select></label>
+      <label class="opportunity-filter-field"><span><i class="fas fa-arrow-down-wide-short"></i> Ordenar</span><select name="sort"><option value="discount" {% if sort == 'discount' %}selected{% endif %}>Mayor oportunidad</option><option value="player" {% if sort == 'player' %}selected{% endif %}>Nombre del jugador</option><option value="floor" {% if sort == 'floor' %}selected{% endif %}>Menor precio suelo</option></select></label>
+      <label class="opportunity-check"><input type="checkbox" name="show_all" value="1" {% if show_all %}checked{% endif %}><span><i class="fas {% if show_all %}fa-users{% else %}fa-bolt{% endif %}"></i><b>{% if show_all %}Todos con mercado{% else %}Solo oportunidades{% endif %}</b><small>{% if show_all %}Incluye jugadores sin señal{% else %}Activa para ver el resto{% endif %}</small></span></label>
       <a class="btn btn-secondary opportunity-clear" href="{% url 'opportunities' %}"><i class="fas fa-rotate-left"></i> Limpiar</a>
     </form>
   </section>
 
   <section class="panel opportunity-results reveal">
-    <div class="table-head"><div><p class="kicker">Mercado fijo</p><h2>{{ filtered_count }} resultados</h2></div><p>El valor de mercado nunca supera el suelo activo.</p></div>
+    <div class="table-head"><div><p class="kicker">Mercado fijo</p><h2>{{ filtered_count }} resultados</h2></div><p>{% if show_all %}<i class="fas fa-users"></i> Todos los jugadores con suelo activo para estos filtros.{% else %}<i class="fas fa-bolt"></i> Solo señales de oportunidad. Cambia a «Todos con mercado» para ver el resto.{% endif %}</p></div>
     <div class="opportunity-table-wrap">
       <table class="opportunity-table">
         <thead><tr><th>Jugador</th><th class="rarity-limited">Limited</th><th class="rarity-rare">Rare</th><th>Señal</th><th></th></tr></thead>

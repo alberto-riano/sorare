@@ -1804,18 +1804,20 @@ class OpportunityMarketTests(TestCase):
     def test_team_selector_uses_club_shields_and_accessible_names(self):
         OpportunitySnapshot.objects.create(
             rows=[{
-                "player": "Jugador", "player_slug": "jugador", "team": "Equipo Escudo",
-                "team_slug": "equipo-escudo", "team_picture_url": "https://example.com/shield.png",
+                "player": "Jugador", "player_slug": "jugador", "team": "Real Club Deportivo de La Coruña",
+                "team_slug": "deportivo-la-coruna-a-coruna", "team_picture_url": "",
                 "position": "Forward", "recommended_rarity": None, "discount_percent": 0,
                 "confidence": "low", "limited": {}, "rare": {},
             }],
-            metadata={"team_catalog": [{"slug": "equipo-escudo", "name": "Equipo Escudo"}]},
+            metadata={"team_catalog": [{
+                "slug": "deportivo-la-coruna-a-coruna", "name": "Real Club Deportivo de La Coruña",
+            }]},
         )
 
         response = self.client.get(reverse("opportunities"), {"show_all": "1"})
 
-        self.assertContains(response, 'src="https://example.com/shield.png"')
-        self.assertContains(response, 'title="Equipo Escudo"')
+        self.assertContains(response, "deportivo-la-coruna-logo-png_seeklogo-187816.png")
+        self.assertContains(response, 'title="Real Club Deportivo de La Coruña"')
 
     @patch("web_services.opportunity_market.collect_opportunity_market")
     def test_worker_persists_snapshot_and_finishes_job(self, collect):

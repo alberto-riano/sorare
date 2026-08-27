@@ -126,6 +126,12 @@ def index(request):
 
 
 def _opportunity_team_catalog(snapshot=None, latest_job=None):
+    picture_fallbacks = {
+        "deportivo-la-coruna-a-coruna": (
+            "https://images.seeklogo.com/logo-png/18/1/"
+            "deportivo-la-coruna-logo-png_seeklogo-187816.png"
+        ),
+    }
     by_slug = {}
 
     def merge(team):
@@ -133,9 +139,11 @@ def _opportunity_team_catalog(snapshot=None, latest_job=None):
         name = str(team.get("name") or "").strip()
         if not slug or not name:
             return
-        current = by_slug.setdefault(slug, {"slug": slug, "name": name, "picture_url": ""})
+        current = by_slug.setdefault(slug, {
+            "slug": slug, "name": name, "picture_url": picture_fallbacks.get(slug, ""),
+        })
         current["name"] = name
-        current["picture_url"] = team.get("picture_url") or current["picture_url"]
+        current["picture_url"] = team.get("picture_url") or current["picture_url"] or picture_fallbacks.get(slug, "")
 
     for team in ((snapshot.metadata if snapshot else {}) or {}).get("team_catalog") or []:
         merge(team)
