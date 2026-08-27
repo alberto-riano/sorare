@@ -24,7 +24,7 @@ from web_services.opportunity_market import (
 
 
 HISTORY_DAYS = 30
-PRIMARY_OFFER_PAGE_SIZE = 5
+TEAM_PLAYER_PAGE_SIZE = 25
 
 
 def _comparable_kind(price):
@@ -178,53 +178,116 @@ def _normalize_primary_offers(offers, team_slugs, rates):
                 "price_eur": round(cents / 100, 2),
                 "start_date": offer.get("startDate"),
                 "end_date": offer.get("endDate"),
-                                "remaining_at_price": campaign.get("remainingAtCurrentPrice"),
-                                "remaining_supply": campaign.get("remainingSupply"),
+                "remaining_at_price": campaign.get("remainingAtCurrentPrice"),
+                "remaining_supply": campaign.get("remainingSupply"),
             })
     return listings
 
 
-PRIMARY_OFFERS_QUERY = f"""
-    query InstantPurchaseListings($after: String) {{
-        tokens {{
-            livePrimaryOffers(sport: FOOTBALL, first: {PRIMARY_OFFER_PAGE_SIZE}, after: $after) {{
-                nodes {{
-                    id startDate endDate status
-                    price {{ eurCents usdCents gbpCents wei }}
-                    instantBuyCampaign {{ remainingAtCurrentPrice remainingSupply soldOut }}
-                    anyCards {{
-                        slug assetId rarityTyped seasonYear serialNumber inSeasonEligible anyPositions
-                        anyPlayer {{ slug displayName squaredPictureUrl }}
-                        anyTeam {{ slug name pictureUrl }}
+TEAM_PRIMARY_CARDS_QUERY = f"""
+    query TeamPrimaryCards($slug: String!, $after: String) {{
+        football {{
+            club(slug: $slug) {{
+                slug name pictureUrl
+                activePlayers(first: {TEAM_PLAYER_PAGE_SIZE}, after: $after) {{
+                    nodes {{
+                        slug displayName squaredPictureUrl anyPositions
+                        anyCardWithLivePrimaryOffer(rarity: rare) {{
+                            slug assetId rarityTyped seasonYear serialNumber inSeasonEligible
+                        }}
                     }}
+                    pageInfo {{ hasNextPage endCursor }}
                 }}
-                pageInfo {{ hasNextPage endCursor }}
             }}
         }}
     }}
 """
 
 
-def _fetch_live_primary_offers(headers, progress=None):
-        offers = []
+PRIMARY_OFFER_DETAILS_QUERY = """
+    query PrimaryOfferDetails($assetIds: [String!]!) {
+        tokens {
+            anyCards(assetIds: $assetIds) {
+                slug assetId
+                livePrimaryOffer {
+                    id startDate endDate status
+                    price { eurCents usdCents gbpCents wei }
+                    instantBuyCampaign { remainingAtCurrentPrice remainingSupply soldOut }
+                }
+            }
+        }
+    }
+"""
+
+
+def _fetch_team_primary_offers(team_items, headers, progress=None):
+    offers = []
+    catalog_updates = {}
+    for team_index, (team_slug, fallback_name) in enumerate(team_items, start=1):
         cursor = None
-        page = 0
         while True:
-                connection = graphql_request(PRIMARY_OFFERS_QUERY, {"after": cursor}, headers=headers)["tokens"]["livePrimaryOffers"]
-                offers.extend(connection.get("nodes") or [])
-                page += 1
-                if progress:
-                        progress(page, 0, f"Ofertas directas de Sorare: {len(offers)} revisadas")
-                page_info = connection.get("pageInfo") or {}
-                if not page_info.get("hasNextPage"):
-                        break
-                cursor = page_info.get("endCursor")
-                time.sleep(REQUEST_INTERVAL_SECONDS)
-        return offers
+            club = graphql_request(
+                TEAM_PRIMARY_CARDS_QUERY,
+                {"slug": team_slug, "after": cursor},
+                headers=headers,
+            )["football"].get("club") or {}
+            catalog_updates[team_slug] = {
+                "name": club.get("name") or fallback_name,
+                "picture_url": club.get("pictureUrl") or "",
+            }
+            connection = club.get("activePlayers") or {}
+            cards_by_asset = {}
+            for player in connection.get("nodes") or []:
+                card = player.get("anyCardWithLivePrimaryOffer") or {}
+                asset_id = card.get("assetId")
+                if not asset_id:
+                    continue
+                cards_by_asset[asset_id] = {
+                    **card,
+                    "anyPositions": player.get("anyPositions") or [],
+                    "anyPlayer": {
+                        "slug": player.get("slug"),
+                        "displayName": player.get("displayName"),
+                        "squaredPictureUrl": player.get("squaredPictureUrl"),
+                    },
+                    "anyTeam": {
+                        "slug": team_slug,
+                        "name": club.get("name") or fallback_name,
+                        "pictureUrl": club.get("pictureUrl"),
+                    },
+                }
+
+            if cards_by_asset:
+                details = graphql_request(
+                    PRIMARY_OFFER_DETAILS_QUERY,
+                    {"assetIds": list(cards_by_asset)},
+                    headers=headers,
+                )["tokens"].get("anyCards") or []
+                for detail in details:
+                    offer = detail.get("livePrimaryOffer") or {}
+                    card = cards_by_asset.get(detail.get("assetId"))
+                    if offer.get("id") and card:
+                        offers.append({**offer, "anyCards": [card]})
+
+            page_info = connection.get("pageInfo") or {}
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+            time.sleep(REQUEST_INTERVAL_SECONDS)
+
+        if progress:
+            progress(
+                team_index,
+                len(team_items),
+                f"Ofertas directas: {team_index}/{len(team_items)} equipos ({len(offers)} encontradas)",
+            )
+        if team_index < len(team_items):
+            time.sleep(REQUEST_INTERVAL_SECONDS)
+    return offers, catalog_updates
 
 
 def collect_instant_purchase_market(progress=None, team_slugs=None, catalog_callback=None):
-    """Descarga listings activos y comparables para los clubes seleccionados."""
+    """Descarga ofertas primarias y comparables para los clubes seleccionados."""
     import listar_subastas
 
     headers = build_headers()
@@ -241,8 +304,10 @@ def collect_instant_purchase_market(progress=None, team_slugs=None, catalog_call
 
     catalog_by_slug = {team["slug"]: team for team in catalog}
     selected_team_slugs = {slug for slug, _ in team_items}
-    offers = _fetch_live_primary_offers(headers, progress=progress)
+    offers, catalog_updates = _fetch_team_primary_offers(team_items, headers, progress=progress)
     listings = _normalize_primary_offers(offers, selected_team_slugs, rates)
+    for team_slug, update in catalog_updates.items():
+        catalog_by_slug[team_slug].update(update)
     for listing in listings:
         catalog_team = catalog_by_slug.get(listing["team_slug"])
         if catalog_team:

@@ -9,8 +9,10 @@ from django.urls import reverse
 from dashboard.management.commands.process_sales_queue import process_next_instant_purchase_refresh
 from dashboard.models import InstantPurchaseRefreshJob, InstantPurchaseSnapshot
 from web_services.instant_purchase_market import (
-    PRIMARY_OFFER_PAGE_SIZE,
-    PRIMARY_OFFERS_QUERY,
+    PRIMARY_OFFER_DETAILS_QUERY,
+    TEAM_PLAYER_PAGE_SIZE,
+    TEAM_PRIMARY_CARDS_QUERY,
+    _fetch_team_primary_offers,
     _normalize_primary_offers,
     _recent_comparables,
     build_instant_purchase_rows,
@@ -18,11 +20,38 @@ from web_services.instant_purchase_market import (
 
 
 class InstantPurchaseValuationTests(TestCase):
-    def test_live_listing_query_uses_sorare_primary_offers(self):
-        self.assertEqual(PRIMARY_OFFER_PAGE_SIZE, 5)
-        self.assertIn("livePrimaryOffers", PRIMARY_OFFERS_QUERY)
-        self.assertNotIn("liveSingleSaleOffers", PRIMARY_OFFERS_QUERY)
-        self.assertIn("instantBuyCampaign", PRIMARY_OFFERS_QUERY)
+    def test_queries_discover_primary_offers_only_inside_selected_teams(self):
+        self.assertEqual(TEAM_PLAYER_PAGE_SIZE, 25)
+        self.assertIn("anyCardWithLivePrimaryOffer", TEAM_PRIMARY_CARDS_QUERY)
+        self.assertNotIn("livePrimaryOffers", TEAM_PRIMARY_CARDS_QUERY)
+        self.assertIn("anyCards(assetIds: $assetIds)", PRIMARY_OFFER_DETAILS_QUERY)
+        self.assertIn("instantBuyCampaign", PRIMARY_OFFER_DETAILS_QUERY)
+
+    @patch("web_services.instant_purchase_market.graphql_request")
+    def test_primary_offers_are_fetched_only_for_requested_teams(self, request):
+        request.side_effect = [
+            {"football": {"club": {
+                "name": "Team", "pictureUrl": "team.png",
+                "activePlayers": {
+                    "nodes": [{
+                        "slug": "player", "displayName": "Player", "anyPositions": ["Forward"],
+                        "anyCardWithLivePrimaryOffer": {"slug": "card", "assetId": "asset"},
+                    }],
+                    "pageInfo": {"hasNextPage": False},
+                },
+            }}},
+            {"tokens": {"anyCards": [{
+                "assetId": "asset",
+                "livePrimaryOffer": {"id": "primary", "price": {"eurCents": 5000}},
+            }]}},
+        ]
+
+        offers, teams = _fetch_team_primary_offers([("team", "Team")], headers={})
+
+        self.assertEqual(offers[0]["id"], "primary")
+        self.assertEqual(offers[0]["anyCards"][0]["anyPlayer"]["slug"], "player")
+        self.assertEqual(teams["team"]["picture_url"], "team.png")
+        self.assertEqual(request.call_count, 2)
 
     def test_primary_offers_are_filtered_to_rare_laliga_cards(self):
         card = {
