@@ -195,7 +195,7 @@ def _history_query(slugs):
             alias = f"p{index}{'l' if rarity == 'limited' else 'r'}"
             selections.append(f"""
               {alias}: tokenPrices(playerSlug: ${variable}, rarity: {RARITY_API[rarity]}, season: {SEASON_YEAR}, seasonEligibility: IN_SEASON, first: 20) {{
-                amounts {{ eurCents wei }} date
+                amounts {{ eurCents usdCents gbpCents wei }} date
                 card {{ seasonYear inSeasonEligible }}
                 deal {{
                   __typename
@@ -241,7 +241,7 @@ def _floor_query(player):
             nodes {{
               lowestPriceCard {{
                 assetId slug serialNumber
-                liveSingleSaleOffer {{ receiverSide {{ amounts {{ eurCents wei }} }} }}
+                liveSingleSaleOffer {{ receiverSide {{ amounts {{ eurCents usdCents gbpCents wei }} }} }}
               }}
             }}
           }}
@@ -337,7 +337,11 @@ def collect_opportunity_market(progress=None, team_slugs=None, catalog_callback=
         if index < floor_total:
             time.sleep(REQUEST_INTERVAL_SECONDS)
 
-    player_slugs = sorted({slug for slug, _ in floors})
+    # El histórico también puede aportar una valoración cuando no existe un
+    # suelo activo. Además, un precio en una moneda no contemplada no debe
+    # impedir que el jugador llegue a esta fase. Por eso se revisa la plantilla
+    # completa y no solo los jugadores para los que ya se detectó un suelo.
+    player_slugs = sorted(roster)
     histories = {(slug, rarity): [] for slug in player_slugs for rarity in RARITIES}
     history_total = len(player_slugs)
     for offset in range(0, history_total, 8):
@@ -368,15 +372,20 @@ def collect_opportunity_market(progress=None, team_slugs=None, catalog_callback=
             progress(base + done, base + history_total, f"Histórico: {done}/{history_total} jugadores")
         time.sleep(REQUEST_INTERVAL_SECONDS)
 
-    by_player = {}
-    for (slug, rarity), listing in floors.items():
-        row = by_player.setdefault(slug, {
-            key: listing.get(key) for key in (
+    by_player = {
+        slug: {
+            key: player.get(key) for key in (
                 "player", "player_slug", "player_picture_url", "team", "team_slug",
                 "team_picture_url", "position",
             )
-        })
-        row[rarity] = {**listing, "sales": histories[(slug, rarity)]}
+        } | {
+            rarity: {"sales": histories[(slug, rarity)]}
+            for rarity in RARITIES
+        }
+        for slug, player in roster.items()
+    }
+    for (slug, rarity), listing in floors.items():
+        by_player[slug][rarity].update(listing)
     rows, metadata = build_opportunity_rows(list(by_player.values()))
     metadata.update({
         "roster_players": len(roster),

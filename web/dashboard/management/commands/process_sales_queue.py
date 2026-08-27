@@ -7,7 +7,8 @@ from django.utils import timezone
 
 from dashboard.models import (
     AuctionRefreshJob, BidBatchItem, MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
-    OpportunityRefreshJob, OpportunitySnapshot, PublicRewardSnapshot, PublicRewardSyncJob,
+    InstantPurchaseRefreshJob, InstantPurchaseSnapshot, OpportunityRefreshJob, OpportunitySnapshot,
+    PublicRewardSnapshot, PublicRewardSyncJob,
     SalesInventory, SalesRefreshJob,
 )
 from dashboard.views import PATHS
@@ -88,6 +89,80 @@ def process_next_opportunity_refresh():
     job.finished_at = timezone.now()
     job.save(update_fields=(
         "status", "processed_count", "total_count", "player_count", "opportunity_count",
+        "progress_label", "error", "finished_at",
+    ))
+    return job
+
+
+def process_next_instant_purchase_refresh():
+    with transaction.atomic():
+        job = InstantPurchaseRefreshJob.objects.select_for_update().filter(
+            status=InstantPurchaseRefreshJob.Status.QUEUED,
+        ).first()
+        if not job:
+            return None
+        job.status = InstantPurchaseRefreshJob.Status.RUNNING
+        job.started_at = timezone.now()
+        job.progress_label = "Preparando compras instantáneas de LaLiga"
+        job.save(update_fields=("status", "started_at", "progress_label"))
+
+    try:
+        from web_services.instant_purchase_market import collect_instant_purchase_market
+
+        def save_progress(processed, total, label):
+            InstantPurchaseRefreshJob.objects.filter(pk=job.pk).update(
+                processed_count=processed,
+                total_count=total,
+                progress_label=label,
+            )
+
+        def save_catalog(team_catalog):
+            InstantPurchaseRefreshJob.objects.filter(pk=job.pk).update(team_catalog=team_catalog)
+
+        payload = collect_instant_purchase_market(
+            progress=save_progress,
+            team_slugs=job.target_team_slugs,
+            catalog_callback=save_catalog,
+        )
+        refreshed_at = timezone.now()
+        selected_metadata = payload.get("metadata") or {}
+        refreshed_team_slugs = set(selected_metadata.get("refreshed_team_slugs") or [])
+        snapshot = InstantPurchaseSnapshot.objects.filter(market_key="laliga-rare-2026").first()
+        previous_rows = list(snapshot.rows if snapshot else [])
+        rows = [row for row in previous_rows if row.get("team_slug") not in refreshed_team_slugs]
+        rows.extend(payload.get("rows") or [])
+        rows.sort(key=lambda row: (row.get("saving_eur") is not None, row.get("saving_eur") or 0), reverse=True)
+        previous_metadata = dict(snapshot.metadata if snapshot else {})
+        team_updated_at = dict(previous_metadata.get("team_updated_at") or {})
+        for team_slug in refreshed_team_slugs:
+            team_updated_at[team_slug] = refreshed_at.isoformat()
+        metadata = {
+            **previous_metadata,
+            **selected_metadata,
+            "active_listings": len(rows),
+            "favorable_listings": sum(1 for row in rows if row.get("is_favorable")),
+            "refreshed_team_slugs": sorted(
+                set(previous_metadata.get("refreshed_team_slugs") or []).union(refreshed_team_slugs)
+            ),
+            "team_updated_at": team_updated_at,
+        }
+        InstantPurchaseSnapshot.objects.update_or_create(
+            market_key="laliga-rare-2026",
+            defaults={"rows": rows, "metadata": metadata, "refreshed_at": refreshed_at, "source_version": 1},
+        )
+        job.refresh_from_db(fields=("processed_count", "total_count"))
+        job.listing_count = len(payload.get("rows") or [])
+        job.favorable_count = selected_metadata.get("favorable_listings") or 0
+        job.processed_count = max(job.processed_count, job.total_count)
+        job.progress_label = "Compras instantáneas actualizadas"
+        job.status = InstantPurchaseRefreshJob.Status.SUCCEEDED
+    except Exception as exc:
+        job.status = InstantPurchaseRefreshJob.Status.FAILED
+        job.progress_label = "Análisis interrumpido"
+        job.error = f"No se pudieron actualizar las compras instantáneas: {exc}"[:2000]
+    job.finished_at = timezone.now()
+    job.save(update_fields=(
+        "status", "processed_count", "total_count", "listing_count", "favorable_count",
         "progress_label", "error", "finished_at",
     ))
     return job
@@ -384,6 +459,11 @@ class Command(BaseCommand):
             error="El análisis se interrumpió; el snapshot anterior sigue disponible.",
             finished_at=timezone.now(),
         )
+        InstantPurchaseRefreshJob.objects.filter(status=InstantPurchaseRefreshJob.Status.RUNNING).update(
+            status=InstantPurchaseRefreshJob.Status.FAILED,
+            error="El análisis se interrumpió; el snapshot anterior sigue disponible.",
+            finished_at=timezone.now(),
+        )
         for job in SaleBatchJob.objects.filter(status=SaleBatchJob.Status.RUNNING):
             job.items.filter(status__in=(SaleBatchItem.Status.QUEUED, SaleBatchItem.Status.RUNNING)).update(
                 status=SaleBatchItem.Status.FAILED,
@@ -398,6 +478,7 @@ class Command(BaseCommand):
             processed = (
                 process_next_auction_refresh()
                 or process_next_opportunity_refresh()
+                or process_next_instant_purchase_refresh()
                 or process_next_refresh()
                 or process_next_movement_sync()
                 or process_next_public_reward_sync()

@@ -1741,6 +1741,8 @@ class OpportunityMarketTests(TestCase):
 
         self.assertEqual(query.count("anyPlayer("), 1)
         self.assertEqual(query.count("anyCards("), 2)
+        self.assertIn("gbpCents", query)
+        self.assertIn("usdCents", query)
         self.assertEqual(variables, {"slug": "player-one"})
 
     def test_history_query_respects_sorare_twenty_item_limit(self):
@@ -1748,7 +1750,23 @@ class OpportunityMarketTests(TestCase):
 
         self.assertNotIn("first: 30", query)
         self.assertEqual(query.count("first: 20"), 4)
+        self.assertIn("gbpCents", query)
+        self.assertIn("usdCents", query)
         self.assertEqual(variables["slug0"], "player-one")
+
+    def test_sales_can_estimate_value_without_an_active_floor(self):
+        rows, _ = build_opportunity_rows([{
+            "player": "Jugador sin suelo", "player_slug": "jugador-sin-suelo",
+            "limited": {"sales": [
+                {"eur": 10, "date": "2026-08-25T10:00:00Z", "kind": "public", "label": "Oferta pública"},
+                {"eur": 12, "date": "2026-08-24T10:00:00Z", "kind": "public", "label": "Oferta pública"},
+            ]},
+            "rare": {"sales": []},
+        }])
+
+        self.assertIsNone(rows[0]["limited"].get("floor"))
+        self.assertEqual(rows[0]["limited"]["market_value"], rows[0]["limited"]["sales_reference"])
+        self.assertIsNone(rows[0]["recommended_rarity"])
 
     def test_market_value_is_capped_by_floor_and_cross_rarity_detects_bargain(self):
         sales = lambda values: [
@@ -1791,15 +1809,15 @@ class OpportunityMarketTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["page_obj"].paginator.per_page, 50)
         self.assertContains(response, "Oportunidad Roja")
-        self.assertNotContains(response, ">Sin señal<")
+        self.assertContains(response, "Sin señal")
         self.assertContains(response, "Las subastas no se incluyen")
         self.assertContains(response, "compras instantáneas")
         self.assertNotContains(response, "Buscar jugador")
         self.assertNotContains(response, "Descuento mínimo</span>")
         self.assertNotContains(response, "Por página")
 
-        show_all = self.client.get(reverse("opportunities"), {"show_all": "1"})
-        self.assertContains(show_all, "Sin señal")
+        signals_only = self.client.get(reverse("opportunities"), {"signals_only": "1"})
+        self.assertNotContains(signals_only, ">Sin señal<")
 
     def test_team_selector_uses_club_shields_and_accessible_names(self):
         OpportunitySnapshot.objects.create(
@@ -1814,7 +1832,7 @@ class OpportunityMarketTests(TestCase):
             }]},
         )
 
-        response = self.client.get(reverse("opportunities"), {"show_all": "1"})
+        response = self.client.get(reverse("opportunities"))
 
         self.assertContains(response, "deportivo-la-coruna-logo-png_seeklogo-187816.png")
         self.assertContains(response, 'title="Real Club Deportivo de La Coruña"')

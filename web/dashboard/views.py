@@ -29,7 +29,8 @@ from web_services.sales_inventory import collection_display_name
 from .forms import BatchBidForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
 from .models import (
     AuctionFilterPreset, AuctionRefreshJob, BidBatchItem, BidBatchJob, FavoritePlayer,
-    MovementSnapshot, MovementSyncJob, PublicRewardSnapshot, PublicRewardSyncJob,
+    InstantPurchaseRefreshJob, InstantPurchaseSnapshot, MovementSnapshot, MovementSyncJob,
+    PublicRewardSnapshot, PublicRewardSyncJob,
     OpportunityRefreshJob, OpportunitySnapshot, SaleBatchItem, SaleBatchJob,
     SalesInventory, SalesRefreshJob,
 )
@@ -91,6 +92,13 @@ def index(request):
             "icon": "fas fa-gem",
             "description": "Compara suelos y ventas reales Limited/Rare para detectar desajustes de precio.",
             "url": "opportunities",
+            "status": "Disponible",
+        },
+        {
+            "title": "Compras instantáneas",
+            "icon": "fas fa-cart-shopping",
+            "description": "Compara las Rare In-Season a la venta con su mercado y sus referencias Limited.",
+            "url": "instant_purchases",
             "status": "Disponible",
         },
         {
@@ -184,7 +192,10 @@ def opportunities(request):
     team_filter = request.GET.get("team", "").strip()
     position_filter = request.GET.get("position", "").strip()
     rarity_filter = request.GET.get("opportunity_rarity", "").strip().lower()
-    show_all = request.GET.get("show_all") == "1"
+    # La vista normal enseña el universo completo. El usuario puede reducirlo
+    # expresamente a las señales detectadas, pero limpiar filtros vuelve a
+    # mostrar todos los jugadores analizados.
+    show_all = request.GET.get("signals_only") != "1"
 
     rows = []
     for row in all_rows:
@@ -202,7 +213,10 @@ def opportunities(request):
     if sort == "player":
         rows.sort(key=lambda row: str(row.get("player") or "").casefold())
     elif sort == "floor":
-        rows.sort(key=lambda row: float((row.get(row.get("recommended_rarity") or "limited") or {}).get("floor") or 10**9))
+        rows.sort(key=lambda row: min(
+            [float((row.get(rarity) or {}).get("floor")) for rarity in ("limited", "rare") if (row.get(rarity) or {}).get("floor")]
+            or [10**9]
+        ))
     else:
         rows.sort(key=lambda row: float(row.get("discount_percent") or 0), reverse=True)
     per_page = 50
@@ -276,6 +290,102 @@ def opportunity_refresh_status(request):
         "opportunity_count": job.opportunity_count,
         "target_team_slugs": job.target_team_slugs,
         "team_catalog": job.team_catalog,
+        "progress_label": job.progress_label,
+        "error": job.error,
+    } for job in jobs]})
+
+
+def instant_purchases(request):
+    snapshot = InstantPurchaseSnapshot.objects.filter(
+        market_key="laliga-rare-2026", source_version=1,
+    ).first()
+    latest_refresh = InstantPurchaseRefreshJob.objects.order_by("-created_at").first()
+    active_refresh = InstantPurchaseRefreshJob.objects.filter(
+        status__in=(InstantPurchaseRefreshJob.Status.QUEUED, InstantPurchaseRefreshJob.Status.RUNNING),
+    ).order_by("-created_at").first()
+    all_rows = list(snapshot.rows if snapshot else [])
+    player_filter = request.GET.get("player", "").strip().casefold()
+    team_filter = request.GET.get("team", "").strip()
+    position_filter = request.GET.get("position", "").strip()
+    favorable_only = request.GET.get("favorable_only") == "1"
+    confidence_filter = request.GET.get("confidence", "").strip()
+    rows = [
+        row for row in all_rows
+        if (not player_filter or player_filter in str(row.get("player") or "").casefold())
+        and (not team_filter or row.get("team") == team_filter)
+        and (not position_filter or row.get("position") == position_filter)
+        and (not favorable_only or row.get("is_favorable"))
+        and (not confidence_filter or row.get("confidence") == confidence_filter)
+    ]
+    sort = request.GET.get("sort", "saving")
+    if sort == "price":
+        rows.sort(key=lambda row: float(row.get("price_eur") or 0))
+    elif sort == "percent":
+        rows.sort(key=lambda row: row.get("saving_percent") if row.get("saving_percent") is not None else -10**9, reverse=True)
+    elif sort == "player":
+        rows.sort(key=lambda row: str(row.get("player") or "").casefold())
+    else:
+        rows.sort(key=lambda row: row.get("saving_eur") if row.get("saving_eur") is not None else -10**9, reverse=True)
+    page_obj = Paginator(rows, 50).get_page(request.GET.get("page", 1))
+    pagination_params = request.GET.copy()
+    pagination_params.pop("page", None)
+    metadata = snapshot.metadata if snapshot else {}
+    selected_refresh_team_slugs = set(active_refresh.target_team_slugs or []) if active_refresh else set()
+    return render(request, "dashboard/instant_purchases.html", {
+        "snapshot": snapshot,
+        "metadata": metadata,
+        "active_refresh": active_refresh,
+        "refresh_team_catalog": _opportunity_team_catalog(snapshot, latest_refresh),
+        "selected_refresh_team_slugs": selected_refresh_team_slugs,
+        "refresh_all_teams": not selected_refresh_team_slugs,
+        "refreshed_team_slugs": set(metadata.get("refreshed_team_slugs") or []),
+        "page_obj": page_obj,
+        "filtered_count": len(rows),
+        "available_teams": sorted({row.get("team") for row in all_rows if row.get("team")}),
+        "available_positions": sorted({row.get("position") for row in all_rows if row.get("position")}),
+        "player_filter": request.GET.get("player", "").strip(),
+        "selected_team": team_filter,
+        "selected_position": position_filter,
+        "favorable_only": favorable_only,
+        "selected_confidence": confidence_filter,
+        "sort": sort,
+        "pagination_query": pagination_params.urlencode(),
+    })
+
+
+@require_POST
+def enqueue_instant_purchase_refresh(request):
+    active = InstantPurchaseRefreshJob.objects.filter(
+        status__in=(InstantPurchaseRefreshJob.Status.QUEUED, InstantPurchaseRefreshJob.Status.RUNNING),
+    ).order_by("-created_at").first()
+    if active:
+        return JsonResponse({"job_id": active.id, "status": active.status}, status=202)
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Selección de equipos no válida"}, status=400)
+    raw_team_slugs = payload.get("teams") or []
+    if not isinstance(raw_team_slugs, list):
+        return JsonResponse({"error": "Selección de equipos no válida"}, status=400)
+    team_slugs = list(dict.fromkeys(str(slug).strip() for slug in raw_team_slugs if str(slug).strip()))
+    if len(team_slugs) > 20 or any(not re.fullmatch(r"[a-z0-9-]{1,180}", slug) for slug in team_slugs):
+        return JsonResponse({"error": "Selección de equipos no válida"}, status=400)
+    job = InstantPurchaseRefreshJob.objects.create(user=request.user, target_team_slugs=team_slugs)
+    return JsonResponse({"job_id": job.id, "status": job.status, "teams": team_slugs}, status=202)
+
+
+@require_GET
+def instant_purchase_refresh_status(request):
+    jobs = InstantPurchaseRefreshJob.objects.order_by("-created_at")[:5]
+    return JsonResponse({"jobs": [{
+        "id": job.id,
+        "status": job.status,
+        "processed_count": job.processed_count,
+        "total_count": job.total_count,
+        "percent": round(job.processed_count / job.total_count * 100) if job.total_count else 0,
+        "listing_count": job.listing_count,
+        "favorable_count": job.favorable_count,
+        "target_team_slugs": job.target_team_slugs,
         "progress_label": job.progress_label,
         "error": job.error,
     } for job in jobs]})

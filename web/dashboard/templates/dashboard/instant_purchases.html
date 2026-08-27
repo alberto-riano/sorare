@@ -1,0 +1,150 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Compras instantáneas Rare LaLiga | Sorare{% endblock %}
+
+{% block content %}
+<div class="opportunities-page instant-purchases-page">
+  <section class="panel opportunity-hero reveal">
+    <div>
+      <p class="kicker">LaLiga 2026-27 · Rare In-Season</p>
+      <h1><i class="fas fa-cart-shopping"></i> Compras instantáneas</h1>
+      <p>Cartas a la venta ahora, comparadas con subastas terminadas, ofertas públicas aceptadas, el siguiente suelo Rare y su referencia Limited.</p>
+    </div>
+    <div class="opportunity-refresh">
+      {% if snapshot %}<span>Último análisis</span><strong>{{ snapshot.refreshed_at|date:'d/m/Y H:i' }}</strong>{% endif %}
+    </div>
+  </section>
+
+  <section class="panel opportunity-team-refresh reveal">
+    <div class="opportunity-team-refresh-head">
+      <div><p class="kicker">Actualización por equipos</p><h2>Elige los clubes que quieres revisar</h2><p>Los demás conservarán los datos de su último análisis.</p></div>
+      <div class="opportunity-team-refresh-actions">
+        <label><input type="checkbox" id="refreshAllTeams" {% if refresh_all_teams %}checked{% endif %}> <span>Seleccionar todos</span></label>
+        <button class="btn btn-accent" type="button" id="refreshInstantPurchases" {% if active_refresh %}disabled{% endif %}><i class="fas fa-arrows-rotate{% if active_refresh %} fa-spin{% endif %}"></i> {% if active_refresh %}Analizando…{% else %}Actualizar selección{% endif %}</button>
+      </div>
+    </div>
+    {% if refresh_team_catalog %}<div class="opportunity-team-grid">
+      {% for team in refresh_team_catalog %}<label class="opportunity-team-choice" title="{{ team.name }}">
+        <input type="checkbox" class="instant-refresh-team" value="{{ team.slug }}" {% if refresh_all_teams or team.slug in selected_refresh_team_slugs %}checked{% endif %}>
+        {% if team.picture_url %}<img src="{{ team.picture_url }}" alt="{{ team.name }}">{% else %}<span class="opportunity-team-fallback">{{ team.name|slice:':2' }}</span>{% endif %}
+        <span class="sr-only">{{ team.name }}</span>{% if team.slug in refreshed_team_slugs %}<i class="fas fa-circle-check" title="Ya tiene datos"></i>{% endif %}
+      </label>{% endfor %}
+    </div>{% else %}<p class="opportunity-team-loading"><i class="fas fa-circle-notch fa-spin"></i> Cargando los equipos de LaLiga…</p>{% endif %}
+  </section>
+
+  <section class="opportunity-kpis reveal">
+    <article class="panel"><span><i class="fas fa-tags"></i> Listings Rare</span><strong>{{ metadata.active_listings|default:0 }}</strong><small>Compras instantáneas activas analizadas</small></article>
+    <article class="panel opportunity-kpi-highlight"><span><i class="fas fa-arrow-trend-down"></i> Precios favorables</span><strong>{{ metadata.favorable_listings|default:0 }}</strong><small>Por debajo de la valoración disponible</small></article>
+    <article class="panel"><span><i class="fas fa-scale-balanced"></i> Relación Rare / Limited</span><strong>{{ metadata.rare_limited_ratio|default:'—' }}×</strong><small>{% if metadata.ratio_source == 'learned' %}Calculada con {{ metadata.ratio_sample }} jugadores{% else %}Referencia provisional{% endif %}</small></article>
+    <article class="panel"><span><i class="fas fa-clock-rotate-left"></i> Histórico</span><strong>30 días</strong><small>Subastas y ofertas públicas aceptadas</small></article>
+  </section>
+
+  <section class="panel opportunity-progress" id="instantProgress" {% if not active_refresh %}hidden{% endif %}>
+    <div><i class="fas fa-circle-notch fa-spin" id="instantProgressIcon"></i><strong id="instantProgressTitle">Analizando mercado</strong><span id="instantProgressLabel">{{ active_refresh.progress_label|default:'Preparando actualización' }}</span></div>
+    <div class="opportunity-progress-track"><span id="instantProgressBar" style="width:0%"></span></div>
+  </section>
+
+  {% if snapshot %}
+  <section class="panel opportunity-controls reveal">
+    <form method="get" id="instantFilters" class="instant-purchase-filters">
+      <label class="opportunity-filter-field"><span><i class="fas fa-user"></i> Jugador</span><input name="player" type="search" value="{{ player_filter }}" placeholder="Buscar por nombre"></label>
+      <label class="opportunity-filter-field"><span><i class="fas fa-shield-halved"></i> Equipo</span><select name="team"><option value="">Todos</option>{% for team in available_teams %}<option value="{{ team }}" {% if selected_team == team %}selected{% endif %}>{{ team }}</option>{% endfor %}</select></label>
+      <label class="opportunity-filter-field"><span><i class="fas fa-person-running"></i> Posición</span><select name="position"><option value="">Todas</option>{% for position in available_positions %}<option value="{{ position }}" {% if selected_position == position %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
+      <label class="opportunity-filter-field"><span><i class="fas fa-signal"></i> Confianza</span><select name="confidence"><option value="">Todas</option><option value="high" {% if selected_confidence == 'high' %}selected{% endif %}>Alta</option><option value="medium" {% if selected_confidence == 'medium' %}selected{% endif %}>Media</option><option value="low" {% if selected_confidence == 'low' %}selected{% endif %}>Baja</option></select></label>
+      <label class="opportunity-filter-field"><span><i class="fas fa-arrow-down-wide-short"></i> Ordenar</span><select name="sort"><option value="saving" {% if sort == 'saving' %}selected{% endif %}>Mayor diferencia €</option><option value="percent" {% if sort == 'percent' %}selected{% endif %}>Mayor diferencia %</option><option value="price" {% if sort == 'price' %}selected{% endif %}>Menor precio</option><option value="player" {% if sort == 'player' %}selected{% endif %}>Jugador</option></select></label>
+      <label class="opportunity-check"><input type="checkbox" name="favorable_only" value="1" {% if favorable_only %}checked{% endif %}><span><i class="fas fa-bolt"></i><b>Solo favorables</b><small>{% if favorable_only %}Filtro activo{% else %}Mostrar todas{% endif %}</small></span></label>
+      <a class="btn btn-secondary opportunity-clear" href="{% url 'instant_purchases' %}" title="Limpiar filtros"><i class="fas fa-rotate-left"></i></a>
+    </form>
+  </section>
+
+  <section class="panel opportunity-results reveal">
+    <div class="table-head"><div><p class="kicker">Mercado activo</p><h2>{{ filtered_count }} compras instantáneas</h2></div><p><i class="fas fa-circle-info"></i> La diferencia indica cuánto queda el precio por debajo o por encima de la valoración.</p></div>
+    <div class="opportunity-table-wrap">
+      <table class="opportunity-table instant-purchase-table">
+        <thead><tr><th>Jugador</th><th class="rarity-rare">Compra</th><th>Mercado Rare</th><th>Referencia Limited</th><th>Valoración</th><th></th></tr></thead>
+        <tbody>
+        {% for row in page_obj %}
+          <tr class="opportunity-main-row" data-evidence="instant-evidence-{{ forloop.counter }}">
+            <td><div class="opportunity-player">{% if row.player_picture_url %}<img src="{{ row.player_picture_url }}" alt="">{% endif %}<div><strong>{{ row.player }}</strong><span>{% if row.team_picture_url %}<img src="{{ row.team_picture_url }}" alt="">{% endif %}{{ row.team }} · {{ row.position }} · #{{ row.serial }}</span></div></div></td>
+            <td><div class="opportunity-price instant-current-price"><small>Precio anunciado</small><strong>{{ row.price_eur|floatformat:2 }} €</strong><span>Rare In-Season 2026-27</span></div></td>
+            <td><div class="opportunity-price"><small>Siguiente suelo</small><strong>{{ row.next_rare_floor|floatformat:2|default:'—' }} €</strong><span>Histórico {{ row.rare_sales_reference|floatformat:2|default:'—' }} €</span><em>{{ row.rare_sales|length }} ventas comparables</em></div></td>
+            <td><div class="opportunity-price"><small>Suelo Limited</small><strong>{{ row.limited_floor|floatformat:2|default:'—' }} €</strong><span>Equivalencia Rare {{ row.limited_parity_reference|floatformat:2|default:'—' }} €</span><em>Histórico Limited {{ row.limited_sales_reference|floatformat:2|default:'—' }} €</em></div></td>
+            <td>{% if row.estimated_value != None %}<div class="instant-valuation{% if row.is_favorable %} is-favorable{% else %} is-unfavorable{% endif %}"><small>Valor estimado {{ row.estimated_value|floatformat:2 }} €</small><strong>{% if row.saving_eur > 0 %}+{% endif %}{{ row.saving_eur|floatformat:2 }} €</strong><span>{% if row.saving_percent > 0 %}+{% endif %}{{ row.saving_percent|floatformat:1 }}% · confianza {% if row.confidence == 'high' %}alta{% elif row.confidence == 'medium' %}media{% else %}baja{% endif %}</span></div>{% else %}<div class="opportunity-no-signal"><strong>Sin valoración</strong><span>Evidencia insuficiente</span></div>{% endif %}</td>
+            <td><div class="opportunity-actions"><button type="button" class="opportunity-evidence-button" title="Ver comparables"><i class="fas fa-chevron-down"></i></button>{% if row.card_slug %}<a href="https://sorare.com/football/cards/{{ row.card_slug }}" target="_blank" rel="noopener" title="Abrir carta en Sorare"><i class="fas fa-arrow-up-right-from-square"></i></a>{% endif %}</div></td>
+          </tr>
+          <tr class="opportunity-evidence-row" id="instant-evidence-{{ forloop.counter }}" hidden><td colspan="6">
+            <div class="opportunity-evidence">
+              <section><h3><i class="fas fa-circle rare-dot"></i> Ventas Rare · últimos 30 días</h3><div class="opportunity-sales">{% for sale in row.rare_sales %}<span><i class="fas {% if sale.kind == 'auction' %}fa-gavel{% else %}fa-bullhorn{% endif %}"></i><strong>{{ sale.eur|floatformat:2 }} €</strong><small>{{ sale.label }} · {{ sale.date|slice:':10' }}</small></span>{% empty %}<em>Sin subastas ni ofertas públicas comparables.</em>{% endfor %}</div></section>
+              <section><h3><i class="fas fa-circle limited-dot"></i> Ventas Limited · últimos 30 días</h3><div class="opportunity-sales">{% for sale in row.limited_sales %}<span><i class="fas {% if sale.kind == 'auction' %}fa-gavel{% else %}fa-bullhorn{% endif %}"></i><strong>{{ sale.eur|floatformat:2 }} €</strong><small>{{ sale.label }} · {{ sale.date|slice:':10' }}</small></span>{% empty %}<em>Sin subastas ni ofertas públicas comparables.</em>{% endfor %}</div></section>
+            </div>
+            <p class="opportunity-method-note"><i class="fas fa-circle-info"></i> La propia carta se excluye del siguiente suelo Rare. Serial, XP y diseños especiales no alteran esta valoración inicial.</p>
+          </td></tr>
+        {% empty %}<tr><td colspan="6" class="sales-empty">No hay compras instantáneas que coincidan con estos filtros.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_obj.paginator.num_pages > 1 %}<nav class="opportunity-pagination">
+      {% if page_obj.has_previous %}<a href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}" title="Página anterior"><i class="fas fa-chevron-left"></i></a>{% endif %}
+      <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}<a href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}" title="Página siguiente"><i class="fas fa-chevron-right"></i></a>{% endif %}
+    </nav>{% endif %}
+  </section>
+  {% else %}
+  <section class="panel opportunity-empty"><i class="fas fa-cart-shopping"></i><h2>Elige por dónde empezar</h2><p>Selecciona uno, varios o todos los equipos para analizar sus compras instantáneas Rare.</p></section>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  var button = document.getElementById('refreshInstantPurchases');
+  var progress = document.getElementById('instantProgress');
+  var allTeams = document.getElementById('refreshAllTeams');
+  var teamInputs = Array.prototype.slice.call(document.querySelectorAll('.instant-refresh-team'));
+  var csrf = '{{ csrf_token }}';
+  var activeJob = {% if active_refresh %}{{ active_refresh.id }}{% else %}null{% endif %};
+  function showError(title, detail) {
+    progress.hidden = false; progress.classList.add('is-error');
+    document.getElementById('instantProgressIcon').className = 'fas fa-triangle-exclamation';
+    document.getElementById('instantProgressTitle').textContent = title;
+    document.getElementById('instantProgressLabel').textContent = detail;
+  }
+  function poll() {
+    fetch('{% url "instant_purchase_refresh_status" %}', {credentials:'same-origin'}).then(function (response) { return response.json(); }).then(function (payload) {
+      var jobs = payload.jobs || [];
+      var job = activeJob ? jobs.find(function (item) { return item.id === activeJob; }) : jobs.find(function (item) { return item.status === 'queued' || item.status === 'running'; });
+      if (!job) return;
+      activeJob = job.id; progress.hidden = false; button.disabled = true;
+      document.getElementById('instantProgressBar').style.width = (job.percent || 0) + '%';
+      document.getElementById('instantProgressLabel').textContent = job.progress_label || 'Analizando mercado';
+      if (job.status === 'queued' || job.status === 'running') { window.setTimeout(poll, 2500); return; }
+      if (job.status === 'succeeded') { window.location.reload(); return; }
+      showError('No se pudo actualizar', job.error || 'Revisa el worker');
+      button.disabled = false; button.innerHTML = '<i class="fas fa-arrows-rotate"></i> Reintentar';
+    });
+  }
+  function syncAllTeams() { if (allTeams) allTeams.checked = teamInputs.length > 0 && teamInputs.every(function (input) { return input.checked; }); }
+  if (allTeams) allTeams.addEventListener('change', function () { teamInputs.forEach(function (input) { input.checked = allTeams.checked; }); });
+  teamInputs.forEach(function (input) { input.addEventListener('change', syncAllTeams); });
+  if (button) button.addEventListener('click', function () {
+    var selectedTeams = teamInputs.filter(function (input) { return input.checked; }).map(function (input) { return input.value; });
+    if (teamInputs.length && !selectedTeams.length) { showError('Selecciona algún equipo', 'Marca uno, varios o todos los clubes antes de actualizar.'); return; }
+    progress.classList.remove('is-error'); progress.hidden = false; button.disabled = true;
+    button.innerHTML = '<i class="fas fa-arrows-rotate fa-spin"></i> Analizando…';
+    fetch('{% url "enqueue_instant_purchase_refresh" %}', {method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':csrf, 'Content-Type':'application/json'}, body:JSON.stringify({teams:selectedTeams.length === teamInputs.length ? [] : selectedTeams})})
+      .then(function (response) { return response.json().then(function (payload) { if (!response.ok || !payload.job_id) throw new Error(payload.error || 'No se pudo iniciar'); return payload; }); })
+      .then(function (payload) { activeJob = payload.job_id; poll(); })
+      .catch(function (error) { showError('No se pudo iniciar', error.message); button.disabled = false; button.innerHTML = '<i class="fas fa-arrows-rotate"></i> Reintentar'; });
+  });
+  if (activeJob) poll();
+  document.querySelectorAll('.opportunity-main-row').forEach(function (row) {
+    row.addEventListener('click', function (event) {
+      if (event.target.closest('a')) return;
+      var evidence = document.getElementById(row.dataset.evidence); evidence.hidden = !evidence.hidden;
+      row.querySelector('.opportunity-evidence-button i').className = 'fas ' + (evidence.hidden ? 'fa-chevron-down' : 'fa-chevron-up');
+    });
+  });
+  var form = document.getElementById('instantFilters');
+  if (form) form.querySelectorAll('select,input[type="checkbox"]').forEach(function (control) { control.addEventListener('change', function () { form.submit(); }); });
+})();
+</script>
+{% endblock %}

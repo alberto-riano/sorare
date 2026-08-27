@@ -101,6 +101,45 @@ class OpportunityRefreshJob(models.Model):
         ordering = ("created_at",)
 
 
+class InstantPurchaseSnapshot(models.Model):
+    """Último análisis de compras instantáneas Rare In-Season de LaLiga."""
+
+    market_key = models.CharField(max_length=40, unique=True, default="laliga-rare-2026")
+    rows = models.JSONField(default=list)
+    metadata = models.JSONField(default=dict)
+    refreshed_at = models.DateTimeField(null=True, blank=True)
+    source_version = models.PositiveSmallIntegerField(default=1)
+
+
+class InstantPurchaseRefreshJob(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "En cola"
+        RUNNING = "running", "Analizando"
+        SUCCEEDED = "succeeded", "Completada"
+        FAILED = "failed", "Fallida"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sorare_instant_purchase_refresh_jobs",
+    )
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    processed_count = models.PositiveIntegerField(default=0)
+    total_count = models.PositiveIntegerField(default=0)
+    listing_count = models.PositiveIntegerField(default=0)
+    favorable_count = models.PositiveIntegerField(default=0)
+    target_team_slugs = models.JSONField(default=list)
+    team_catalog = models.JSONField(default=list)
+    progress_label = models.CharField(max_length=180, blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("created_at",)
+
+
 class BidBatchJob(models.Model):
     class Status(models.TextChoices):
         QUEUED = "queued", "En cola"
