@@ -35,14 +35,34 @@ class DirectOfferMarketTests(TestCase):
                 }]},
                 "receiverSide": {"amounts": {"eurCents": 900}},
             },
+            {
+                "id": "offer-in-eth",
+                "sender": {"slug": "seller-three", "nickname": "Seller Three"},
+                "senderSide": {"anyCards": [{
+                    "assetId": "asset-three", "slug": "card-three", "name": "Card Three",
+                    "rarityTyped": "limited", "seasonYear": 2026, "serialNumber": 48,
+                    "inSeasonEligible": True, "anyPlayer": {"displayName": "Jugador Uno"},
+                    "anyTeam": {"name": "Equipo Uno"},
+                }]},
+                "receiverSide": {"amounts": {"eurCents": 0, "wei": "200000000000000"}},
+            },
         ]
 
-        rows = player_in_season_listings("jugador-uno", headers={"Authorization": "hidden"})
+        rows = player_in_season_listings(
+            "jugador-uno",
+            headers={"Authorization": "hidden"},
+            rates=(0.92, 1.17, 2150),
+        )
 
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["asset_id"], "asset-one")
-        self.assertEqual(rows[0]["manager"], "Seller One")
-        self.assertEqual(rows[0]["price_eur"], Decimal("12.34"))
+        self.assertEqual(len(rows), 2)
+        eth_row = next(row for row in rows if row["asset_id"] == "asset-three")
+        self.assertEqual(eth_row["manager"], "Seller Three")
+        self.assertEqual(eth_row["price_eur"], Decimal("0.43"))
+        self.assertEqual(eth_row["price_currency"], "ETH")
+        self.assertEqual(eth_row["price_original"], Decimal("0.0002"))
+        eur_row = next(row for row in rows if row["asset_id"] == "asset-one")
+        self.assertEqual(eur_row["price_eur"], Decimal("12.34"))
+        self.assertEqual(eur_row["price_currency"], "EUR")
 
 
 class DirectOfferViewTests(TestCase):
@@ -75,7 +95,7 @@ class DirectOfferViewTests(TestCase):
             reverse("create_direct_offer"),
             data={
                 "player_slug": "jugador-uno", "asset_id": "asset-one",
-                "manager_slug": "seller-one", "euros": "10.25", "duration_hours": 48,
+                "manager_slug": "seller-one", "euros": "0.22", "duration_hours": 48,
             },
             content_type="application/json",
         )
@@ -83,7 +103,7 @@ class DirectOfferViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         run_offer.assert_called_once_with(
             unittest_mock_any_paths(), asset_id="asset-one", manager_slug="seller-one",
-            euros="10.25", duration_hours=48,
+            euros="0.22", duration_hours=48,
         )
 
     @patch("dashboard.direct_offer_views.run_direct_offer")

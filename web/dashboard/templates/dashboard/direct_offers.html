@@ -18,7 +18,7 @@
       <label><input type="checkbox" value="unique" checked><span>Unique</span></label>
     </div>
     <div class="direct-offer-terms">
-      <label><span>Oferta por carta</span><span class="money-input"><input id="offerAmount" type="number" min="0.50" max="10000" step="0.01" inputmode="decimal"><b>€</b></span></label>
+      <label><span>Oferta por carta</span><span class="money-input"><input id="offerAmount" type="number" min="0.01" max="10000" step="0.01" inputmode="decimal" required><b>€</b></span></label>
       <label><span>Validez</span><select id="offerDuration"><option value="24">24 horas</option><option value="48" selected>48 horas</option><option value="72">3 días</option><option value="168">7 días</option></select></label>
       <button class="btn btn-accent" id="sendOffers" type="button" disabled><i class="fas fa-paper-plane"></i> <span>Enviar ofertas</span></button>
     </div>
@@ -56,6 +56,12 @@
 
   function escapeHtml(value) { var node = document.createElement('span'); node.textContent = value == null ? '' : value; return node.innerHTML; }
   function rarityName(value) { return {limited:'Limited', rare:'Rare', super_rare:'Super Rare', unique:'Unique'}[value] || value; }
+  function priceHtml(row) {
+    var euro = Number(row.price_eur).toLocaleString('es-ES', {minimumFractionDigits:2, maximumFractionDigits:2});
+    if (row.price_currency === 'EUR') return '<strong>' + euro + ' €</strong>';
+    var original = Number(row.price_original).toLocaleString('es-ES', {maximumFractionDigits:6});
+    return '<div class="direct-sale-price"><strong>≈ ' + euro + ' €</strong><small>' + original + ' ' + escapeHtml(row.price_currency) + '</small></div>';
+  }
   function selectedRarities() { return Array.from(document.querySelectorAll('.direct-rarity-filter input:checked')).map(function (input) { return input.value; }); }
   function visibleRows() { var rarities = selectedRarities(); return Array.from(rowsNode.querySelectorAll('tr')).filter(function (row) { return rarities.includes(row.dataset.rarity); }); }
   function updateSummary() {
@@ -63,13 +69,13 @@
     var total = selected.length * (parseFloat(amount.value) || 0);
     document.getElementById('selectionCount').textContent = selected.length + ' seleccionadas';
     document.getElementById('maximumSpend').textContent = 'Máximo ' + total.toLocaleString('es-ES', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' €';
-    sendButton.disabled = !selected.length || !(parseFloat(amount.value) >= .5);
+    sendButton.disabled = !selected.length || !amount.checkValidity();
     var visible = visibleRows(); selectVisible.checked = visible.length > 0 && visible.every(function (row) { return row.querySelector('.direct-card-select').checked; });
   }
   function applyRarities() { var rarities = selectedRarities(); Array.from(rowsNode.children).forEach(function (row) { row.hidden = !rarities.includes(row.dataset.rarity); }); updateSummary(); }
   function showError(message) { errorBox.textContent = message; errorBox.hidden = false; loading.hidden = true; }
   function renderRows() {
-    rowsNode.innerHTML = listings.map(function (row, index) { return '<tr data-index="' + index + '" data-rarity="' + escapeHtml(row.rarity) + '"><td><input class="direct-card-select" type="checkbox" aria-label="Seleccionar carta"></td><td><div class="direct-card">' + (row.picture_url ? '<img src="' + escapeHtml(row.picture_url) + '" alt="">' : '<span class="image-fallback"><i class="fas fa-user"></i></span>') + '<div><strong>#' + escapeHtml(row.serial_number || '—') + '</strong><small>' + escapeHtml(row.season_year || '') + (row.team ? ' · ' + escapeHtml(row.team) : '') + '</small></div></div></td><td><span class="direct-rarity rarity-' + escapeHtml(row.rarity) + '">' + escapeHtml(rarityName(row.rarity)) + '</span></td><td><strong>' + Number(row.price_eur).toLocaleString('es-ES', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' €</strong></td><td><a href="https://sorare.com/football/my-club/' + encodeURIComponent(row.manager_slug) + '" target="_blank" rel="noopener">' + escapeHtml(row.manager) + '</a></td><td class="direct-offer-status"><span>Pendiente</span></td></tr>'; }).join('');
+    rowsNode.innerHTML = listings.map(function (row, index) { return '<tr data-index="' + index + '" data-rarity="' + escapeHtml(row.rarity) + '"><td><input class="direct-card-select" type="checkbox" aria-label="Seleccionar carta"></td><td><div class="direct-card">' + (row.picture_url ? '<img src="' + escapeHtml(row.picture_url) + '" alt="">' : '<span class="image-fallback"><i class="fas fa-user"></i></span>') + '<div><strong>#' + escapeHtml(row.serial_number || '—') + '</strong><small>' + escapeHtml(row.season_year || '') + (row.team ? ' · ' + escapeHtml(row.team) : '') + '</small></div></div></td><td><span class="direct-rarity rarity-' + escapeHtml(row.rarity) + '">' + escapeHtml(rarityName(row.rarity)) + '</span></td><td>' + priceHtml(row) + '</td><td><a href="https://sorare.com/football/my-club/' + encodeURIComponent(row.manager_slug) + '" target="_blank" rel="noopener">' + escapeHtml(row.manager) + '</a></td><td class="direct-offer-status"><span>Pendiente</span></td></tr>'; }).join('');
     rowsNode.querySelectorAll('.direct-card-select').forEach(function (input) { input.addEventListener('change', updateSummary); });
     tableWrap.hidden = false; controls.hidden = false; loading.hidden = true; applyRarities();
   }
@@ -88,7 +94,8 @@
   sendButton.addEventListener('click', async function () {
     var selected = Array.from(rowsNode.querySelectorAll('.direct-card-select:checked')).filter(function (input) { return !input.closest('tr').hidden; });
     var euros = Number(amount.value); var total = selected.length * euros;
-    if (!selected.length || euros < .5) return;
+    if (!selected.length) return;
+    if (!amount.reportValidity()) return;
     if (!window.confirm('Enviar ' + selected.length + ' ofertas de ' + euros.toLocaleString('es-ES', {minimumFractionDigits:2}) + ' € (máximo ' + total.toLocaleString('es-ES', {minimumFractionDigits:2}) + ' €)?')) return;
     sendButton.disabled = true; amount.disabled = true; duration.disabled = true;
     for (var input of selected) {

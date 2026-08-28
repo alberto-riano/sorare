@@ -69,8 +69,8 @@ def create_direct_offer(request):
 
     if not PLAYER_SLUG_RE.fullmatch(player_slug) or not asset_id or not manager_slug:
         return JsonResponse({"error": "Faltan datos de la carta o del manager."}, status=400)
-    if euros < Decimal("0.50") or euros > Decimal("10000"):
-        return JsonResponse({"error": "La oferta debe estar entre 0,50 € y 10.000 €."}, status=400)
+    if euros < Decimal("0.01") or euros > Decimal("10000"):
+        return JsonResponse({"error": "La oferta debe estar entre 0,01 € y 10.000 €."}, status=400)
     if duration_hours not in {24, 48, 72, 168}:
         return JsonResponse({"error": "Duración no válida."}, status=400)
 

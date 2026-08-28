@@ -186,6 +186,8 @@ nav a:hover {
 .direct-card img, .direct-card > span { width: 34px; height: 46px; object-fit: cover; border-radius: 4px; }
 .direct-card div { display: grid; gap: .1rem; }
 .direct-card small { color: var(--muted); }
+.direct-sale-price { display: grid; gap: .1rem; }
+.direct-sale-price small { color: var(--muted); font-size: .68rem; white-space: nowrap; }
 .direct-rarity { display: inline-block; padding: .22rem .4rem; border-radius: 5px; background: #eee; font-size: .7rem; font-weight: 700; }
 .direct-rarity.rarity-limited { background: #fff7d6; color: #8a6700; }
 .direct-rarity.rarity-rare { background: #fee2e2; color: #b91c1c; }
