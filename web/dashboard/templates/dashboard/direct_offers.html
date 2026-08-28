@@ -35,6 +35,21 @@
   </section>
 </div>
 
+<div class="bid-modal" id="directOfferReview" hidden>
+  <div class="bid-modal-backdrop" data-close-offer-review></div>
+  <section class="bid-modal-card direct-offer-review-card" role="dialog" aria-modal="true" aria-labelledby="directOfferReviewTitle">
+    <button type="button" class="bid-modal-close" data-close-offer-review aria-label="Cerrar">&times;</button>
+    <p class="kicker">Comprobación de moneda</p>
+    <h2 id="directOfferReviewTitle"><i class="fas fa-euro-sign"></i> Resumen de ofertas</h2>
+    <p id="directOfferReviewSummary"></p>
+    <div class="direct-offer-review-list" id="directOfferReviewList"></div>
+    <div class="bid-modal-actions">
+      <button class="btn btn-secondary" type="button" data-close-offer-review>Volver</button>
+      <button class="btn btn-accent" type="button" id="confirmDirectOffers"><i class="fas fa-paper-plane"></i> Enviar compatibles</button>
+    </div>
+  </section>
+</div>
+
 <script>
 (function () {
   var search = document.getElementById('playerSearch');
@@ -49,7 +64,10 @@
   var duration = document.getElementById('offerDuration');
   var sendButton = document.getElementById('sendOffers');
   var selectVisible = document.getElementById('selectVisible');
+  var reviewModal = document.getElementById('directOfferReview');
+  var confirmButton = document.getElementById('confirmDirectOffers');
   var listings = [];
+  var reviewedInputs = [];
   var selectedPlayerSlug = '';
   var searchTimer;
   var csrf = '{{ csrf_token }}';
@@ -91,12 +109,31 @@
   document.querySelectorAll('.direct-rarity-filter input').forEach(function (input) { input.addEventListener('change', applyRarities); });
   amount.addEventListener('input', updateSummary);
   selectVisible.addEventListener('change', function () { visibleRows().forEach(function (row) { row.querySelector('.direct-card-select').checked = selectVisible.checked; }); updateSummary(); });
+  document.querySelectorAll('[data-close-offer-review]').forEach(function (button) { button.addEventListener('click', function () { reviewModal.hidden = true; document.body.classList.remove('modal-open'); }); });
   sendButton.addEventListener('click', async function () {
     var selected = Array.from(rowsNode.querySelectorAll('.direct-card-select:checked')).filter(function (input) { return !input.closest('tr').hidden; });
     var euros = Number(amount.value); var total = selected.length * euros;
     if (!selected.length) return;
     if (!amount.reportValidity()) return;
-    if (!window.confirm('Enviar ' + selected.length + ' ofertas de ' + euros.toLocaleString('es-ES', {minimumFractionDigits:2}) + ' € (máximo ' + total.toLocaleString('es-ES', {minimumFractionDigits:2}) + ' €)?')) return;
+    sendButton.disabled = true;
+    sendButton.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> <span>Comprobando EUR</span>';
+    try {
+      var response = await fetch('{% url "preview_direct_offers" %}', {method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':csrf,'Content-Type':'application/json'}, body:JSON.stringify({player_slug:selectedPlayerSlug,euros:euros.toFixed(2),offers:selected.map(function (input) { var listing=listings[Number(input.closest('tr').dataset.index)]; return {asset_id:listing.asset_id,manager_slug:listing.manager_slug}; })})});
+      var payload = await response.json(); if (!response.ok) throw new Error(payload.error || 'No se pudo comprobar la compatibilidad EUR');
+      reviewedInputs = selected.filter(function (input) { var listing=listings[Number(input.closest('tr').dataset.index)]; return payload.results.some(function (result) { return result.asset_id === listing.asset_id && result.manager_slug === listing.manager_slug && result.compatible; }); });
+      document.getElementById('directOfferReviewSummary').textContent = payload.compatible_count + ' de ' + selected.length + ' ofertas se pueden preparar ahora en EUR. Se enviarían ' + (payload.compatible_count * euros).toLocaleString('es-ES', {minimumFractionDigits:2,maximumFractionDigits:2}) + ' € como máximo.';
+      document.getElementById('directOfferReviewList').innerHTML = payload.results.map(function (result) { return '<div class="direct-offer-review-item ' + (result.compatible ? 'is-compatible' : 'is-blocked') + '"><span><strong>#' + escapeHtml(result.serial_number || '—') + ' · ' + escapeHtml(result.manager || result.manager_slug) + '</strong><small>' + euros.toLocaleString('es-ES', {minimumFractionDigits:2,maximumFractionDigits:2}) + ' EUR</small></span><span class="direct-offer-review-state"><i class="fas ' + (result.compatible ? 'fa-circle-check' : 'fa-circle-xmark') + '"></i> ' + (result.compatible ? 'EUR disponible' : escapeHtml(result.error || 'EUR no disponible')) + '</span></div>'; }).join('');
+      selected.forEach(function (input) { var listing=listings[Number(input.closest('tr').dataset.index)]; var result=payload.results.find(function (candidate) { return candidate.asset_id === listing.asset_id && candidate.manager_slug === listing.manager_slug; }); if (result && !result.compatible) { input.checked=false; var status=input.closest('tr').querySelector('.direct-offer-status'); status.innerHTML='<span class="is-error" title="' + escapeHtml(result.error || 'EUR no disponible') + '"><i class="fas fa-circle-xmark"></i> EUR no disponible</span>'; } });
+      confirmButton.disabled = !reviewedInputs.length;
+      confirmButton.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar ' + reviewedInputs.length + (reviewedInputs.length === 1 ? ' compatible' : ' compatibles');
+      updateSummary(); reviewModal.hidden = false; document.body.classList.add('modal-open');
+    } catch (error) { showError(error.message); }
+    finally { sendButton.innerHTML = '<i class="fas fa-paper-plane"></i> <span>Enviar ofertas</span>'; updateSummary(); }
+  });
+  confirmButton.addEventListener('click', async function () {
+    var selected = reviewedInputs.slice();
+    var euros = Number(amount.value);
+    reviewModal.hidden = true; document.body.classList.remove('modal-open');
     sendButton.disabled = true; amount.disabled = true; duration.disabled = true;
     for (var input of selected) {
       var rowNode = input.closest('tr'); var listing = listings[Number(rowNode.dataset.index)]; var status = rowNode.querySelector('.direct-offer-status');
@@ -107,6 +144,7 @@
         status.innerHTML = '<span class="is-success"><i class="fas fa-circle-check"></i> Enviada</span>'; input.disabled = true;
       } catch (error) { status.innerHTML = '<span class="is-error" title="' + escapeHtml(error.message) + '"><i class="fas fa-triangle-exclamation"></i> Error</span>'; }
     }
+    reviewedInputs = [];
     amount.disabled = false; duration.disabled = false; updateSummary();
   });
 })();

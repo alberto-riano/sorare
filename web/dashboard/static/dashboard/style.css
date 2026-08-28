@@ -197,6 +197,20 @@ nav a:hover {
 .direct-offer-status .is-running { color: var(--accent); }
 .direct-offer-status .is-success { color: var(--good); }
 .direct-offer-status .is-error { color: var(--bad); }
+.direct-offer-review-card h2 { margin: .1rem 0 .35rem; }
+.direct-offer-review-card > p:not(.kicker) { margin-top: 0; color: var(--muted); }
+.direct-offer-review-list { display: grid; gap: .45rem; margin: 1rem 0; }
+.direct-offer-review-item { display: grid; grid-template-columns: minmax(130px,.65fr) minmax(180px,1fr); align-items: center; gap: .75rem; padding: .7rem; border: 1px solid var(--line); border-radius: 8px; }
+.direct-offer-review-item > span:first-child { display: grid; gap: .15rem; }
+.direct-offer-review-item small { color: var(--muted); }
+.direct-offer-review-state { display: flex; align-items: center; gap: .4rem; font-size: .78rem; font-weight: 700; }
+.direct-offer-review-item.is-compatible .direct-offer-review-state { color: var(--good); }
+.direct-offer-review-item.is-blocked .direct-offer-review-state { color: var(--bad); }
+
+@media (max-width: 600px) {
+  .direct-offer-review-item { grid-template-columns: 1fr; gap: .4rem; }
+  .direct-offer-review-state { align-items: flex-start; }
+}
 
 @media (max-width: 1500px) and (min-width: 781px) {
   .site-header nav { gap: .2rem; }

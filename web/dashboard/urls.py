@@ -17,6 +17,7 @@ urlpatterns = [
     path("lanzar-oferta/", direct_offer_views.direct_offers, name="direct_offers"),
     path("lanzar-oferta/jugadores/", direct_offer_views.direct_offer_player_search, name="direct_offer_player_search"),
     path("lanzar-oferta/ventas/", direct_offer_views.direct_offer_listings, name="direct_offer_listings"),
+    path("lanzar-oferta/resumen/", direct_offer_views.preview_direct_offers, name="preview_direct_offers"),
     path("lanzar-oferta/enviar/", direct_offer_views.create_direct_offer, name="create_direct_offer"),
     path("ventas/download/", views.sales_download_excel, name="sales_download_excel"),
     path("ventas/actualizar/", views.enqueue_sales_refresh, name="enqueue_sales_refresh"),

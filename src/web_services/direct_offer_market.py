@@ -2,10 +2,38 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sorare_utils import fetch_exchange_rates, get_live_single_sale_offers, to_eur_cents
+from sorare_utils import fetch_exchange_rates, get_live_single_sale_offers, graphql_request, to_eur_cents
 
 
 ALLOWED_RARITIES = {"limited", "rare", "super_rare", "unique"}
+
+
+PREPARE_DIRECT_OFFER_QUERY = """
+mutation PrepareDirectOffer($input: prepareOfferInput!) {
+    prepareOffer(input: $input) {
+        errors { message }
+    }
+}
+"""
+
+
+def check_direct_offer_eur(asset_id, manager_slug, amount_cents, *, headers=None):
+        data = graphql_request(
+                PREPARE_DIRECT_OFFER_QUERY,
+                {
+                        "input": {
+                                "sendAssetIds": [],
+                                "receiveAssetIds": [asset_id],
+                                "settlementCurrencies": ["EUR"],
+                                "sendAmount": {"amount": str(amount_cents), "currency": "EUR"},
+                                "receiverSlug": manager_slug,
+                                "clientMutationId": f"eur-check-{asset_id}",
+                        }
+                },
+                headers=headers,
+        )
+        errors = (data.get("prepareOffer") or {}).get("errors") or []
+        return [str(error.get("message") or "").strip() for error in errors if error.get("message")]
 
 
 def _original_price(amounts):

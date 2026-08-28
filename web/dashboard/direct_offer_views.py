@@ -15,7 +15,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from sorare_utils import build_headers, search_players_by_name  # noqa: E402
 from web_services.config_files import SorarePaths  # noqa: E402
-from web_services.direct_offer_market import player_in_season_listings  # noqa: E402
+from web_services.direct_offer_market import check_direct_offer_eur, player_in_season_listings  # noqa: E402
 from web_services.process_runner import run_direct_offer, sale_error_message  # noqa: E402
 
 
@@ -49,6 +49,65 @@ def direct_offer_listings(request):
     except (Exception, SystemExit) as exc:
         return JsonResponse({"error": str(exc)}, status=502)
     return JsonResponse({"listings": rows})
+
+
+@require_POST
+def preview_direct_offers(request):
+    try:
+        payload = json.loads(request.body or "{}")
+        player_slug = str(payload.get("player_slug") or "").strip()
+        euros = Decimal(str(payload.get("euros"))).quantize(Decimal("0.01"))
+        requested = payload.get("offers") or []
+    except (json.JSONDecodeError, InvalidOperation, TypeError, ValueError):
+        return JsonResponse({"error": "Datos no válidos."}, status=400)
+    if not PLAYER_SLUG_RE.fullmatch(player_slug) or euros < Decimal("0.01") or euros > Decimal("10000"):
+        return JsonResponse({"error": "Jugador o importe no válido."}, status=400)
+    if not isinstance(requested, list) or not requested or len(requested) > 50:
+        return JsonResponse({"error": "Selecciona entre 1 y 50 cartas."}, status=400)
+
+    headers = build_headers()
+    try:
+        listings = player_in_season_listings(player_slug, headers=headers)
+    except (Exception, SystemExit) as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+    by_key = {(row["asset_id"], row["manager_slug"]): row for row in listings}
+    amount_cents = int(euros * 100)
+    results = []
+    for item in requested:
+        if not isinstance(item, dict):
+            results.append({
+                "asset_id": "", "manager_slug": "", "compatible": False,
+                "error": "Datos de carta no válidos.",
+            })
+            continue
+        asset_id = str((item or {}).get("asset_id") or "").strip()
+        manager_slug = str((item or {}).get("manager_slug") or "").strip()
+        listing = by_key.get((asset_id, manager_slug))
+        result = {"asset_id": asset_id, "manager_slug": manager_slug, "compatible": False}
+        if not listing:
+            result["error"] = "La venta ya no está disponible para ese manager."
+        else:
+            result.update({
+                "manager": listing["manager"],
+                "serial_number": listing.get("serial_number"),
+                "rarity": listing.get("rarity"),
+            })
+            try:
+                errors = check_direct_offer_eur(
+                    asset_id, manager_slug, amount_cents, headers=headers,
+                )
+                result["compatible"] = not errors
+                if errors:
+                    result["error"] = " · ".join(errors)[:500]
+            except Exception as exc:
+                result["error"] = str(exc)[:500]
+        results.append(result)
+    return JsonResponse({
+        "currency": "EUR",
+        "euros": str(euros),
+        "results": results,
+        "compatible_count": sum(1 for result in results if result["compatible"]),
+    })
 
 
 @require_POST

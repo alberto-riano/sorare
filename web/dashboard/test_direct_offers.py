@@ -7,11 +7,26 @@ from django.test import TestCase
 from django.urls import reverse
 
 from web_services.config_files import SorarePaths
-from web_services.direct_offer_market import player_in_season_listings
+from web_services.direct_offer_market import check_direct_offer_eur, player_in_season_listings
 from web_services.process_runner import ScriptResult, run_direct_offer
 
 
 class DirectOfferMarketTests(TestCase):
+    @patch("web_services.direct_offer_market.graphql_request")
+    def test_eur_preflight_uses_eur_settlement_without_creating_offer(self, graphql):
+        graphql.return_value = {"prepareOffer": {"errors": []}}
+
+        errors = check_direct_offer_eur(
+            "asset-one", "seller-one", 22, headers={"Authorization": "hidden"},
+        )
+
+        self.assertEqual(errors, [])
+        query, variables = graphql.call_args.args[:2]
+        self.assertIn("prepareOffer", query)
+        self.assertNotIn("createDirectOffer", query)
+        self.assertEqual(variables["input"]["settlementCurrencies"], ["EUR"])
+        self.assertEqual(variables["input"]["sendAmount"], {"amount": "22", "currency": "EUR"})
+
     @patch("web_services.direct_offer_market.get_live_single_sale_offers")
     def test_listings_include_manager_and_only_in_season_cards(self, get_offers):
         get_offers.return_value = [
@@ -83,6 +98,39 @@ class DirectOfferViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["players"][0]["slug"], "jugador-uno")
+
+    @patch("dashboard.direct_offer_views.check_direct_offer_eur")
+    @patch("dashboard.direct_offer_views.player_in_season_listings")
+    @patch("dashboard.direct_offer_views.build_headers", return_value={})
+    def test_preview_reports_eur_compatibility_and_stale_sales(self, _headers, listings, check_eur):
+        listings.return_value = [self.listing, {
+            **self.listing, "asset_id": "asset-two", "manager_slug": "seller-two",
+            "manager": "Seller Two", "serial_number": 22,
+        }]
+        check_eur.side_effect = [[], ["El manager no puede recibir EUR."]]
+
+        response = self.client.post(
+            reverse("preview_direct_offers"),
+            data={
+                "player_slug": "jugador-uno", "euros": "0.22",
+                "offers": [
+                    {"asset_id": "asset-one", "manager_slug": "seller-one"},
+                    {"asset_id": "asset-two", "manager_slug": "seller-two"},
+                    {"asset_id": "stale", "manager_slug": "seller-stale"},
+                ],
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["currency"], "EUR")
+        self.assertEqual(payload["compatible_count"], 1)
+        self.assertTrue(payload["results"][0]["compatible"])
+        self.assertFalse(payload["results"][1]["compatible"])
+        self.assertIn("no puede recibir EUR", payload["results"][1]["error"])
+        self.assertIn("ya no está disponible", payload["results"][2]["error"])
+        self.assertEqual(check_eur.call_count, 2)
 
     @patch("dashboard.direct_offer_views.run_direct_offer")
     @patch("dashboard.direct_offer_views.player_in_season_listings")
