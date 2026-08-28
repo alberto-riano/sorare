@@ -447,7 +447,7 @@ def movements(request):
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
         stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 15 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 16 else None
         active_sync = MovementSyncJob.objects.filter(
             user=request.user,
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -636,6 +636,15 @@ def movements(request):
             reward_rarity = str(reward.get("reward_rarity") or "")
             if reward_rarity in essence_totals:
                 essence_totals[reward_rarity] += int(reward.get("essence_quantity") or 0)
+    pending_trading_cards = {}
+    for cycle in cycles:
+        for card in cycle.get("pending_received_cards") or []:
+            key = str(card.get("asset_id") or "") or "|".join((
+                str(card.get("player_slug") or card.get("player") or ""),
+                str(card.get("rarity") or ""),
+                str(card.get("serial_number") or ""),
+            ))
+            pending_trading_cards[key] = card
     totals = {
         "purchases": sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases),
         "sales_gross": sum(Decimal(str(row.get("gross_eur") or 0)) for row in sales),
@@ -667,6 +676,11 @@ def movements(request):
             Decimal(str(row.get("sale_net_eur") or 0))
             for row in crafts if row.get("sale_net_eur") is not None
         ),
+        "trading_balance": sum(
+            Decimal(str(cycle.get("balance_eur") or 0))
+            for cycle in cycles if cycle.get("balance_eur") is not None
+        ),
+        "trading_pending_cards": len(pending_trading_cards),
         "balance": (
             sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
             - sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases)
@@ -711,7 +725,7 @@ def movements(request):
 
 
 def movement_analytics(request):
-    snapshot = MovementSnapshot.objects.filter(user=request.user, source_version__gte=15).first()
+    snapshot = MovementSnapshot.objects.filter(user=request.user, source_version__gte=16).first()
     if not snapshot:
         return render(request, "dashboard/movement_analytics.html", {"snapshot": None})
 

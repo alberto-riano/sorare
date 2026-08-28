@@ -1062,7 +1062,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(movement["reward_rarity"], "rare")
         self.assertEqual(movement["currency"], "")
 
-        MovementSnapshot.objects.create(user=self.user, movements=[movement], source_version=15)
+        MovementSnapshot.objects.create(user=self.user, movements=[movement], source_version=16)
         response = self.client.get(reverse("movements"), {"category": "reward", "reward_type": "essence"})
         self.assertContains(response, "+20 Esencia")
         self.assertContains(response, "reward-kind reward-essence rarity-rare")
@@ -1088,16 +1088,31 @@ class MovementHistoryTests(TestCase):
                 "user": {"slug": "burguis"},
             }],
             "tokenOwner": {"from": "2026-08-26T10:00:00Z", "user": {"slug": "burguis"}},
+            "lowestPriceCard": {
+                "assetId": "floor-canales",
+                "liveSingleSaleOffer": {
+                    "receiverSide": {"amounts": {"eurCents": 1234, "referenceCurrency": "EUR"}},
+                },
+            },
         })
 
         movements = _crafting_movements_from_chests([{
-            "id": "chest-canales", "rarity": "limited", "cardShardsCount": 20,
+            "id": "chest-canales", "rarity": "limited", "cardShardsCount": 1000,
+            "poolKeyShardsCounts": [
+                {"slug": "laliga", "displayName": "LaLiga", "count": 500, "logoUrl": "laliga.png"},
+                {"slug": "champions", "displayName": "Champions", "count": 500, "logoUrl": "champions.png"},
+            ],
             "card": card,
         }], "burguis")
 
         self.assertEqual(len(movements), 1)
         self.assertEqual(movements[0]["category"], "crafting")
-        self.assertEqual(movements[0]["essence_spent"], 20)
+        self.assertEqual(movements[0]["essence_spent"], 1000)
+        self.assertEqual(
+            [(item["label"], item["count"]) for item in movements[0]["essence_breakdown"]],
+            [("LaLiga", 500), ("Champions", 500)],
+        )
+        self.assertEqual(movements[0]["craft_floor_eur"], 12.34)
         self.assertTrue(movements[0]["craft_owned_by_me"])
         self.assertEqual(movements[0]["occurred_at"], "2026-08-26T10:00:00Z")
         self.assertEqual(movements[0]["cards"][0]["asset_id"], "crafted-canales-165")
@@ -1336,7 +1351,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
         snapshot = MovementSnapshot.objects.get(user=self.user)
         self.assertEqual(snapshot.movements[0]["id"], "movement-1")
-        self.assertEqual(snapshot.source_version, 15)
+        self.assertEqual(snapshot.source_version, 16)
 
     @patch("web_services.movement_history.graphql_request")
     def test_collector_adds_confirmed_gameweek_rewards(self, request):
@@ -1472,7 +1487,7 @@ class MovementHistoryTests(TestCase):
                        essence=[{"quantity": 10, "rarity": "super_rare"}], essence_quantity=10)
         card_data = {"asset_id": "reward-card", "player": "Carta premio", "team": "Equipo", "rarity": "limited"}
         card = dict(base, id="card", reward_type="card", reward_rarity="limited", cards=[card_data])
-        MovementSnapshot.objects.create(user=self.user, movements=[money, essence, card], source_version=15)
+        MovementSnapshot.objects.create(user=self.user, movements=[money, essence, card], source_version=16)
 
         response = self.client.get(reverse("movements"), {"category": "reward", "reward_type": "essence"})
 
@@ -1498,7 +1513,7 @@ class MovementHistoryTests(TestCase):
         money = dict(base, id="money", reward_type="money", gross_eur=22.46, currency="ETH")
         cards = dict(base, id="cards", reward_type="card", cards=[{"player": "Uno"}, {"player": "Dos"}])
         MovementSnapshot.objects.create(
-            user=self.user, source_version=15,
+            user=self.user, source_version=16,
             movements=[limited, rare, super_rare, money, cards],
         )
 
@@ -1514,7 +1529,7 @@ class MovementHistoryTests(TestCase):
         self.assertContains(response, "Cartas recibidas")
 
     def test_default_history_starts_on_current_season_date_but_can_be_cleared(self):
-        MovementSnapshot.objects.create(user=self.user, source_version=15, movements=[
+        MovementSnapshot.objects.create(user=self.user, source_version=16, movements=[
             {"id": "before", "occurred_at": "2026-08-11T21:59:00Z", "direction": "purchase", "category": "other", "cards": [{"player": "Antes de temporada"}]},
             {"id": "current", "occurred_at": "2026-08-11T22:00:00Z", "direction": "purchase", "category": "other", "cards": [{"player": "Temporada actual"}]},
         ])
@@ -1531,7 +1546,7 @@ class MovementHistoryTests(TestCase):
         carvalho = {"asset_id": "carvalho", "player": "Vítor Carvalho", "rarity": "rare", "in_season": False}
         espino = {"asset_id": "espino", "player": "Alfonso Espino", "rarity": "super_rare", "in_season": False}
         moncayola = {"asset_id": "moncayola", "player": "Moncayola", "rarity": "super_rare", "in_season": False}
-        MovementSnapshot.objects.create(user=self.user, source_version=15, movements=[
+        MovementSnapshot.objects.create(user=self.user, source_version=16, movements=[
             {"id": "carvalho-buy", "occurred_at": "2026-01-29T18:20:00Z", "direction": "purchase", "cash_direction": "purchase", "category": "other", "cards": [carvalho], "received_cards": [carvalho], "gross_eur": 2.36, "net_eur": 0, "credits_eur": 2.36},
             {"id": "carvalho-trade", "occurred_at": "2026-05-27T11:13:00Z", "direction": "trade", "cash_direction": "other", "category": "other", "cards": [carvalho, espino], "sent_cards": [carvalho], "received_cards": [espino], "gross_eur": 0, "net_eur": 0},
             {"id": "espino-trade", "occurred_at": "2026-08-19T09:57:00Z", "direction": "trade", "cash_direction": "other", "category": "other", "cards": [espino, moncayola], "sent_cards": [espino], "received_cards": [moncayola], "gross_eur": 0, "net_eur": 0},
@@ -1603,7 +1618,7 @@ class MovementHistoryTests(TestCase):
             "team": "Real Madrid", "rarity": "rare", "season_year": 2021, "in_season": False,
             "is_laliga": True, "serial_number": 73,
         }
-        MovementSnapshot.objects.create(user=self.user, source_version=15, movements=[{
+        MovementSnapshot.objects.create(user=self.user, source_version=16, movements=[{
             "id": "camavinga-buy", "occurred_at": "2026-08-23T08:19:25Z", "direction": "purchase",
             "cash_direction": "purchase", "market": "Oferta pública", "category": "laliga_inseason",
             "cards": [camavinga], "received_cards": [camavinga], "sent_cards": [],
@@ -1662,7 +1677,11 @@ class MovementHistoryTests(TestCase):
             "asset_id": "pending", "player": "Aún en galería", "team": "Racing",
             "rarity": "rare", "in_season": True, "serial_number": 20,
         }
-        MovementSnapshot.objects.create(user=self.user, source_version=15, movements=[
+        lejeune = {
+            "asset_id": "lejeune", "player": "Florian Lejeune", "team": "Rayo Vallecano",
+            "rarity": "limited", "in_season": False, "serial_number": 42,
+        }
+        MovementSnapshot.objects.create(user=self.user, source_version=16, movements=[
             {
                 "id": "canales-buy", "occurred_at": "2026-08-26T12:33:00Z",
                 "direction": "purchase", "cash_direction": "purchase", "market": "Oferta pública",
@@ -1671,8 +1690,8 @@ class MovementHistoryTests(TestCase):
             },
             {
                 "id": "canales-sale", "occurred_at": "2026-08-27T06:19:00Z",
-                "direction": "sale", "cash_direction": "sale", "market": "Compra instantánea",
-                "category": "laliga_inseason", "cards": [canales], "received_cards": [],
+                "direction": "trade", "cash_direction": "sale", "market": "Intercambio + dinero",
+                "category": "laliga_inseason", "cards": [canales, lejeune], "received_cards": [lejeune],
                 "sent_cards": [canales], "gross_eur": 6.60, "net_eur": 6.27, "fee_eur": .33,
             },
             {
@@ -1690,6 +1709,11 @@ class MovementHistoryTests(TestCase):
         self.assertContains(response, "Compraventas")
         self.assertContains(response, "Canales")
         self.assertContains(response, "+1,29 €")
+        self.assertEqual(response.context["totals"]["trading_balance"], Decimal("1.29"))
+        self.assertEqual(response.context["totals"]["trading_pending_cards"], 1)
+        self.assertContains(response, "1 carta")
+        self.assertNotContains(response, "operaciones contabilizadas")
+        self.assertNotContains(response, ">Compras<")
         self.assertNotContains(response, "Aún en galería")
 
     def test_crafting_shortcut_shows_held_and_sold_cards_with_the_exit_method(self):
@@ -1701,18 +1725,23 @@ class MovementHistoryTests(TestCase):
             "asset_id": "crafted-sold", "player": "Carta vendida", "team": "Racing",
             "rarity": "limited", "in_season": True, "serial_number": 165,
         }
-        MovementSnapshot.objects.create(user=self.user, source_version=15, movements=[
+        MovementSnapshot.objects.create(user=self.user, source_version=16, movements=[
             {
                 "id": "craft:held", "occurred_at": "2026-08-25T10:00:00Z",
                 "direction": "craft", "cash_direction": "other", "market": "Crafting con esencia",
                 "category": "crafting", "cards": [held], "received_cards": [held], "sent_cards": [],
-                "craft_owned_by_me": True, "essence_spent": 100,
+                "craft_owned_by_me": True, "essence_spent": 1000, "craft_floor_eur": 12.34,
+                "essence_breakdown": [
+                    {"slug": "laliga", "label": "LaLiga", "count": 500, "logo_url": ""},
+                    {"slug": "champions", "label": "Champions", "count": 500, "logo_url": ""},
+                ],
             },
             {
                 "id": "craft:sold", "occurred_at": "2026-08-24T10:00:00Z",
                 "direction": "craft", "cash_direction": "other", "market": "Crafting con esencia",
                 "category": "crafting", "cards": [sold], "received_cards": [sold], "sent_cards": [],
-                "craft_owned_by_me": False, "essence_spent": 20,
+                "craft_owned_by_me": False, "essence_spent": 1000, "craft_floor_eur": 9.87,
+                "essence_breakdown": [],
             },
             {
                 "id": "crafted-sale", "occurred_at": "2026-08-27T06:19:00Z",
@@ -1733,6 +1762,12 @@ class MovementHistoryTests(TestCase):
         self.assertContains(response, "Carta vendida")
         self.assertContains(response, "Compra instantánea")
         self.assertContains(response, "+6,27 €")
+        self.assertContains(response, "500")
+        self.assertContains(response, "LaLiga")
+        self.assertContains(response, "Champions")
+        self.assertContains(response, "12,34 €")
+        self.assertContains(response, "9,87 €")
+        self.assertNotContains(response, "1000 esencia")
 
     def test_cash_and_card_trade_shows_gross_net_and_commission(self):
         sivera = {"asset_id": "sivera-10", "player": "Sivera", "team": "D. Alavés", "rarity": "rare", "serial_number": 10}
@@ -1768,7 +1803,7 @@ class MovementHistoryTests(TestCase):
             "team": "Espanyol", "rarity": "limited", "season_year": 2026, "in_season": True,
             "is_laliga": True, "serial_number": 110,
         }
-        MovementSnapshot.objects.create(user=self.user, source_version=15, movements=[
+        MovementSnapshot.objects.create(user=self.user, source_version=16, movements=[
             {"id": "yangel-buy", "occurred_at": "2026-08-20T20:21:25Z", "direction": "purchase", "cash_direction": "purchase", "market": "Subasta", "category": "laliga_inseason", "cards": [yangel], "received_cards": [yangel], "sent_cards": [], "gross_eur": 20, "net_eur": 20},
             {"id": "yangel-trade", "occurred_at": "2026-08-20T21:44:44Z", "direction": "trade", "cash_direction": "sale", "market": "Intercambio + dinero", "category": "laliga_inseason", "cards": [yangel, hugo, ruben], "received_cards": [hugo, ruben], "sent_cards": [yangel], "gross_eur": 4.48, "net_eur": 4.26, "fee_eur": .22},
             {"id": "hugo-sale", "occurred_at": "2026-08-22T10:00:00Z", "direction": "sale", "cash_direction": "sale", "market": "Oferta pública", "category": "other", "cards": [hugo], "received_cards": [], "sent_cards": [hugo], "gross_eur": 3.2, "net_eur": 3.04, "fee_eur": .16},
@@ -1818,7 +1853,7 @@ class MovementHistoryTests(TestCase):
             "asset_id": "is-payment", "player": "Pago In-Season", "rarity": "limited",
             "season_year": 2026, "in_season": True,
         }
-        MovementSnapshot.objects.create(user=self.user, source_version=15, movements=[
+        MovementSnapshot.objects.create(user=self.user, source_version=16, movements=[
             {
                 "id": "juan-sale", "occurred_at": "2026-08-23T10:00:00Z",
                 "direction": "trade", "cash_direction": "sale", "market": "Intercambio + dinero",

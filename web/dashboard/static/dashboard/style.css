@@ -1634,6 +1634,11 @@ body.modal-open { overflow: hidden; }
 .craft-journey .craft-status.is-sold { border-color: #bfdbfe; background: #eff6ff; }
 .craft-journey .craft-status.is-unknown { border-color: #d1d5db; background: #f9fafb; }
 .craft-journey aside { border-color: #99d8cf; background: #f0fdfa; }
+.craft-essence-breakdown { display: flex; flex-wrap: wrap; gap: .22rem; margin: .18rem 0; }
+.craft-essence-breakdown em { display: inline-flex; align-items: center; gap: .22rem; padding: .16rem .32rem; border: 1px solid #f7d77d; border-radius: 999px; background: #fff; color: #6b4e10; font-size: .65rem; font-style: normal; line-height: 1.1; }
+.craft-essence-breakdown img { width: 14px; height: 14px; object-fit: contain; }
+.craft-floor { margin-top: auto; }
+.craft-floor b { color: var(--ink); }
 .craft-journey aside div { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .2rem; }
 .craft-journey aside em { display: inline-flex; align-items: center; gap: .25rem; padding: .14rem .3rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; font-size: .68rem; font-style: normal; }
 
@@ -1652,6 +1657,13 @@ body.modal-open { overflow: hidden; }
 .movement-summary-title p { margin: 0; }
 .movement-summary-title strong { font-size: .95rem; }
 .movement-summary-title > span { color: var(--muted); font-size: .78rem; }
+.trading-global-summary { display: grid; width: min(100%, 520px); gap: .28rem; padding-top: .9rem; padding-bottom: .9rem; }
+.trading-global-summary > span { color: var(--muted); font-size: .78rem; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.trading-global-summary > span i { color: var(--accent); }
+.trading-global-summary > div { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; }
+.trading-global-summary > div strong { font: 750 1.5rem "IBM Plex Mono",monospace; }
+.trading-global-summary > div b { color: var(--muted); font-size: 1.1rem; }
+.trading-global-summary > small { color: var(--muted); }
 .movement-kpis { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; }
 .movement-kpis article { display: grid; gap: .2rem; }
 .movement-kpis span, .movement-kpis small { color: var(--muted); }

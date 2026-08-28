@@ -230,11 +230,18 @@ query CraftedCards {{
       sport: FOOTBALL
     ) {{
       id rarity cardShardsCount
+      poolKeyShardsCounts {{ count displayName slug logoUrl }}
       card {{
         {CARD_FIELDS}
         ownerSince
         ownershipHistory {{ from transferType user {{ slug }} }}
         tokenOwner {{ from user {{ slug }} }}
+        lowestPriceCard {{
+          assetId
+          liveSingleSaleOffer {{
+            receiverSide {{ amounts {{ eurCents wei referenceCurrency }} }}
+          }}
+        }}
       }}
     }}
   }}
@@ -361,6 +368,21 @@ def _crafting_movements_from_chests(chests: list[dict], current_slug: str) -> li
                 if owner_slug.casefold() == own_slug else ""
             ),
         )
+        essence_breakdown = [
+            {
+                "slug": str(item.get("slug") or ""),
+                "label": str(item.get("displayName") or item.get("slug") or "Esencia"),
+                "count": int(item.get("count") or 0),
+                "logo_url": str(item.get("logoUrl") or ""),
+            }
+            for item in chest.get("poolKeyShardsCounts") or []
+            if int(item.get("count") or 0) > 0
+        ]
+        floor_offer = (
+            ((raw_card.get("lowestPriceCard") or {}).get("liveSingleSaleOffer") or {})
+            .get("receiverSide") or {}
+        )
+        floor_eur = _money(floor_offer.get("amounts") or {}).get("eur") or None
         movements.append({
             "id": f"craft:{chest.get('id') or asset_id}",
             "occurred_at": crafted_at or None,
@@ -377,6 +399,8 @@ def _crafting_movements_from_chests(chests: list[dict], current_slug: str) -> li
             "currency": "",
             "eth": 0,
             "essence_spent": int(chest.get("cardShardsCount") or 0),
+            "essence_breakdown": essence_breakdown,
+            "craft_floor_eur": floor_eur,
             "craft_rarity": str(chest.get("rarity") or card.get("rarity") or "").lower(),
             "craft_owner_slug": owner_slug,
             "craft_owned_by_me": bool(owner_slug and owner_slug.casefold() == own_slug),
