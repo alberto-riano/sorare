@@ -220,6 +220,27 @@ query PublicManagerRewards($managerSlug: String!, $last: Int!, $before: String) 
 }
 """
 
+CRAFTED_CARDS_QUERY = f"""
+query CraftedCards {{
+  currentUser {{
+    slug
+    cardShardsChests(
+      rarities: [limited, rare, super_rare, unique]
+      spent: true
+      sport: FOOTBALL
+    ) {{
+      id rarity cardShardsCount
+      card {{
+        {CARD_FIELDS}
+        ownerSince
+        ownershipHistory {{ from transferType user {{ slug }} }}
+        tokenOwner {{ from user {{ slug }} }}
+      }}
+    }}
+  }}
+}}
+"""
+
 
 def _decimal(value) -> Decimal:
     try:
@@ -311,6 +332,56 @@ def _cards_from_operation(operation: dict, card_by_asset: dict[str, dict] | None
     card_by_asset = card_by_asset or {}
     raw_cards = _raw_cards_from_operation(operation)
     return [_card(card_by_asset.get(str(card.get("assetId"))) or card) for card in raw_cards]
+
+
+def _crafting_movements_from_chests(chests: list[dict], current_slug: str) -> list[dict]:
+    """Normaliza las cartas confirmadas obtenidas al gastar esencia."""
+    movements = []
+    seen_assets: set[str] = set()
+    own_slug = str(current_slug or "").casefold()
+    for chest in chests or []:
+        raw_card = chest.get("card") or {}
+        asset_id = str(raw_card.get("assetId") or "")
+        if not asset_id or asset_id in seen_assets:
+            continue
+        seen_assets.add(asset_id)
+        card = _card(raw_card)
+        owner_slug = str(
+            ((((raw_card.get("tokenOwner") or {}).get("user") or {}).get("slug")) or "")
+        )
+        own_ownerships = [
+            ownership for ownership in raw_card.get("ownershipHistory") or []
+            if str(((ownership.get("user") or {}).get("slug") or "")).casefold() == own_slug
+            and ownership.get("from")
+        ]
+        crafted_at = min(
+            (str(ownership["from"]) for ownership in own_ownerships),
+            default=(
+                str((raw_card.get("tokenOwner") or {}).get("from") or raw_card.get("ownerSince") or "")
+                if owner_slug.casefold() == own_slug else ""
+            ),
+        )
+        movements.append({
+            "id": f"craft:{chest.get('id') or asset_id}",
+            "occurred_at": crafted_at or None,
+            "direction": "craft",
+            "cash_direction": "other",
+            "market": "Crafting con esencia",
+            "category": "crafting",
+            "cards": [card],
+            "sent_cards": [],
+            "received_cards": [card],
+            "gross_eur": 0,
+            "net_eur": 0,
+            "fee_eur": 0,
+            "currency": "",
+            "eth": 0,
+            "essence_spent": int(chest.get("cardShardsCount") or 0),
+            "craft_rarity": str(chest.get("rarity") or card.get("rarity") or "").lower(),
+            "craft_owner_slug": owner_slug,
+            "craft_owned_by_me": bool(owner_slug and owner_slug.casefold() == own_slug),
+        })
+    return movements
 
 
 def _operation_from_trade(trade: dict) -> dict | None:
@@ -562,12 +633,21 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
     disposals: list[dict] = []
     cycles: list[dict] = []
     for movement in movements:
+        direction = movement.get("direction")
         sent_cards = movement.get("sent_cards") or (
-            movement.get("cards") or [] if movement.get("direction") == "sale" else []
+            movement.get("cards") or [] if direction == "sale" else []
         )
         received_cards = movement.get("received_cards") or (
-            movement.get("cards") or [] if movement.get("direction") == "purchase" else []
+            movement.get("cards") or [] if direction == "purchase" else []
         )
+
+        # Las cartas de premios y crafting tienen ``received_cards`` para poder
+        # representar su origen, pero no son una compra. Solo compras e
+        # intercambios pueden abrir un ciclo de compraventa.
+        if direction not in {"purchase", "trade"}:
+            received_cards = []
+        if direction not in {"sale", "trade"}:
+            sent_cards = []
 
         for received_card in received_cards:
             purchase_price = movement.get("gross_eur")
@@ -783,6 +863,56 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
     return result
 
 
+def build_crafting_history(movements: list[dict]) -> list[dict]:
+    """Enlaza cada carta creada con esencia con su salida posterior, si existe."""
+    disposals: dict[str, list[dict]] = {}
+    for movement in movements:
+        if movement.get("category") == "crafting":
+            continue
+        sent_cards = movement.get("sent_cards") or (
+            movement.get("cards") or [] if movement.get("direction") == "sale" else []
+        )
+        for card in sent_cards:
+            asset_id = str(card.get("asset_id") or "")
+            if asset_id:
+                disposals.setdefault(asset_id, []).append(movement)
+
+    history = []
+    for source in movements:
+        if source.get("category") != "crafting":
+            continue
+        row = dict(source)
+        card = (row.get("cards") or [{}])[0]
+        asset_id = str(card.get("asset_id") or "")
+        crafted_at = _movement_timestamp(row)
+        candidates = [
+            movement for movement in disposals.get(asset_id, [])
+            if _movement_timestamp(movement) >= crafted_at
+        ]
+        disposition = min(candidates, key=_movement_timestamp) if candidates else None
+        if disposition:
+            sent_cards = disposition.get("sent_cards") or disposition.get("cards") or []
+            cash_direction = disposition.get("cash_direction") or disposition.get("direction")
+            row["craft_status"] = "exchanged" if disposition.get("direction") == "trade" else "sold"
+            row["disposition"] = disposition
+            row["sale_at"] = disposition.get("occurred_at")
+            row["sale_market"] = disposition.get("market") or "Salida"
+            row["sale_net_eur"] = (
+                Decimal(str(disposition.get("net_eur") or 0))
+                if len(sent_cards) == 1 and cash_direction == "sale"
+                else None
+            )
+            row["sale_fee_eur"] = Decimal(str(disposition.get("fee_eur") or 0))
+            row["sale_received_cards"] = disposition.get("received_cards") or []
+        elif row.get("craft_owned_by_me"):
+            row["craft_status"] = "held"
+        else:
+            row["craft_status"] = "unknown"
+        history.append(row)
+    history.sort(key=lambda row: str(row.get("occurred_at") or ""), reverse=True)
+    return history
+
+
 def collect_public_reward_history(
     manager_slug: str,
     *,
@@ -994,6 +1124,15 @@ def collect_movement_history(
             break
         cursor = page_info.get("endCursor")
 
+    crafted_data = graphql_request(CRAFTED_CARDS_QUERY, {}, headers=headers)
+    crafted_user = crafted_data.get("currentUser") or {}
+    current_slug = current_slug or str(crafted_user.get("slug") or "")
+    crafting_movements = _crafting_movements_from_chests(
+        crafted_user.get("cardShardsChests") or [], current_slug,
+    )
+    if progress:
+        progress(len(trades), f"{len(crafting_movements)} cartas abiertas con esencia")
+
     reward_operations = [entry.get("tokenOperation") or {} for entry in reward_entries]
     asset_ids = sorted({
         str(card.get("assetId"))
@@ -1036,6 +1175,7 @@ def collect_movement_history(
         reward["market"] = _reward_market(entries[0].get("tokenOperation") or {})
         movements.append(reward)
         known_ids.add(reward["id"])
+    movements.extend(crafting_movements)
     if progress:
         progress(len(trades), f"{len(movements)} movimientos completados y recompensas")
 

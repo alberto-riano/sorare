@@ -1519,6 +1519,26 @@ body.modal-open { overflow: hidden; }
 .movement-tabs a b { color: var(--muted); font-family: "IBM Plex Mono",monospace; }
 .movement-tabs a.is-active { color: #fff; border-color: var(--accent); background: var(--accent); }
 .movement-tabs a.is-active b { color: #fff; }
+.movement-craft-row { background: linear-gradient(90deg, rgba(245,158,11,.045), rgba(20,184,166,.035)); }
+.movement-craft-detail { min-width: 480px; }
+.craft-journey { display: grid; grid-template-columns: minmax(170px,.85fr) auto minmax(230px,1fr) minmax(125px,.65fr); align-items: center; gap: .65rem; }
+.craft-journey > section, .craft-journey > aside { display: grid; gap: .12rem; min-height: 72px; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.craft-journey > section > span, .craft-journey > aside > span { color: var(--muted); font-size: .69rem; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.craft-journey > section > strong, .craft-journey > aside > strong { font-size: .93rem; }
+.craft-journey > section > small, .craft-journey > aside > small { color: var(--muted); font-size: .72rem; }
+.craft-journey > i { color: #d97706; }
+.craft-journey .craft-origin { border-color: #fcd34d; background: #fffbeb; }
+.craft-journey .craft-status.is-held { border-color: #99d8cf; background: #f0fdfa; }
+.craft-journey .craft-status.is-sold { border-color: #bfdbfe; background: #eff6ff; }
+.craft-journey .craft-status.is-unknown { border-color: #d1d5db; background: #f9fafb; }
+.craft-journey aside { border-color: #99d8cf; background: #f0fdfa; }
+.craft-journey aside div { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .2rem; }
+.craft-journey aside em { display: inline-flex; align-items: center; gap: .25rem; padding: .14rem .3rem; border: 1px solid var(--line); border-radius: 999px; background: #fff; font-size: .68rem; font-style: normal; }
+
+@media (max-width: 780px) {
+  .craft-journey { grid-template-columns: 1fr; }
+  .craft-journey > i { justify-self: center; transform: rotate(90deg); }
+}
 .reward-manager-switch { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-top: .85rem; padding-bottom: .85rem; }
 .reward-manager-switch > div { display: grid; gap: .12rem; }
 .reward-manager-switch > div span, .reward-manager-switch label > span { color: var(--muted); font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }

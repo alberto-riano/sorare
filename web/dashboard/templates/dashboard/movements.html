@@ -11,6 +11,14 @@
       <p class="kicker">Premios de competición</p>
       <h1><i class="fas fa-gift"></i> Recompensas de {{ manager_nickname }}</h1>
       <p>Dinero, esencia y cartas obtenidos en las jornadas de Sorare.</p>
+      {% elif selected_category == 'trading' %}
+      <p class="kicker">Operaciones cerradas</p>
+      <h1><i class="fas fa-arrow-right-arrow-left"></i> Compraventas</h1>
+      <p>Cartas con adquisición y salida relacionadas, mostrando el resultado completo de la operación.</p>
+      {% elif selected_category == 'crafting' %}
+      <p class="kicker">Cartas creadas con esencia</p>
+      <h1><i class="fas fa-wand-magic-sparkles"></i> Crafting</h1>
+      <p>Qué cartas abriste, cuáles continúan en tu galería y cómo salieron las que ya no conservas.</p>
       {% else %}
       <p class="kicker">Contabilidad de cartas</p>
       <h1><i class="fas fa-chart-pie"></i> Mis movimientos</h1>
@@ -28,6 +36,8 @@
   <nav class="movement-tabs panel" aria-label="Sección del historial">
     <a href="{% url 'movement_analytics' %}"><i class="fas fa-chart-line"></i> Análisis</a>
     <a href="?category=laliga_inseason" class="{% if selected_category == 'laliga_inseason' %}is-active{% endif %}"><i class="fas fa-shield-halved"></i> LaLiga <b>{{ laliga_count }}</b></a>
+    <a href="?category=trading" class="{% if selected_category == 'trading' %}is-active{% endif %}"><i class="fas fa-arrow-right-arrow-left"></i> Compraventas <b>{{ trading_count }}</b></a>
+    <a href="?category=crafting" class="{% if selected_category == 'crafting' %}is-active{% endif %}"><i class="fas fa-wand-magic-sparkles"></i> Crafting <b>{{ crafting_count }}</b></a>
     <a href="?category=reward" class="{% if selected_category == 'reward' %}is-active{% endif %}"><i class="fas fa-gift"></i> Recompensas <b>{{ reward_count }}</b></a>
     <a href="?category=other" class="{% if selected_category == 'other' %}is-active{% endif %}"><i class="fas fa-layer-group"></i> Otros movimientos <b>{{ other_count }}</b></a>
     <a href="?category=all" class="{% if selected_category == 'all' %}is-active{% endif %}"><i class="fas fa-list"></i> Todos <b>{{ all_count }}</b></a>
@@ -53,21 +63,26 @@
     <article class="panel reward-kpi"><span><i class="fas fa-coins"></i> Dinero recibido</span><strong class="is-in">+{{ totals.reward_money|floatformat:2 }} €</strong><small>Valor total de los premios monetarios</small></article>
     <article class="panel reward-kpi"><span><i class="fas fa-gem"></i> Esencia recibida</span><div class="essence-kpi-values"><strong class="rarity-limited"><i class="fas fa-gem"></i> {{ totals.essence_limited }}</strong><strong class="rarity-rare"><i class="fas fa-gem"></i> {{ totals.essence_rare }}</strong><strong class="rarity-super_rare"><i class="fas fa-gem"></i> {{ totals.essence_super_rare }}</strong></div><small>Limited · Rare · Super Rare</small></article>
     <article class="panel reward-kpi"><span><i class="fas fa-clone"></i> Cartas recibidas</span><strong class="reward-cards-total">{{ totals.reward_cards }}</strong><small>Cartas ganadas en la selección</small></article>
+    {% elif selected_category == 'crafting' %}
+    <article class="panel craft-kpi"><span><i class="fas fa-wand-magic-sparkles"></i> Cartas abiertas</span><strong>{{ totals.craft_total }}</strong><small>Obtenidas gastando esencia</small></article>
+    <article class="panel craft-kpi is-held"><span><i class="fas fa-folder-open"></i> En tu galería</span><strong>{{ totals.craft_held }}</strong><small>Sin una salida posterior registrada</small></article>
+    <article class="panel craft-kpi is-sold"><span><i class="fas fa-tag"></i> Vendidas o cambiadas</span><strong>{{ totals.craft_sold }}</strong><small>Salida exacta de la misma carta</small></article>
+    <article class="panel craft-kpi"><span><i class="fas fa-coins"></i> Recibido identificado</span><strong class="is-in">+{{ totals.craft_received|floatformat:2 }} €</strong><small>Solo importes que pueden atribuirse a una carta</small></article>
     {% else %}
-    <article class="panel spend-split-kpi"><span><i class="fas fa-cart-shopping"></i> Compras</span><div><strong><small>In-Season</small>−{{ totals.purchases_inseason|floatformat:2 }} €</strong><strong><small>Classic</small>−{{ totals.purchases_classic|floatformat:2 }} €</strong></div>{% if totals.purchases_mixed %}<small>−{{ totals.purchases_mixed|floatformat:2 }} € en lotes mixtos · {{ totals.purchase_count }} operaciones</small>{% else %}<small>{{ totals.purchase_count }} operaciones · precio total</small>{% endif %}</article>
-    <article class="panel sale-split-kpi"><span><i class="fas fa-tag"></i> Ventas</span><div><strong><small>In-Season</small>+{{ totals.sales_inseason|floatformat:2 }} €</strong><strong><small>Classic</small>+{{ totals.sales_classic|floatformat:2 }} €</strong></div>{% if totals.sales_mixed %}<small>+{{ totals.sales_mixed|floatformat:2 }} € en lotes mixtos · {{ totals.sale_count }} operaciones</small>{% else %}<small>{{ totals.sale_count }} operaciones · importe recibido</small>{% endif %}</article>
+    <article class="panel spend-split-kpi"><span><i class="fas fa-cart-shopping"></i> Compras</span><div><strong><small>In-Season</small>−{{ totals.purchases_inseason|floatformat:2 }} €</strong><strong><small>Classic</small>−{{ totals.purchases_classic|floatformat:2 }} €</strong></div>{% if totals.purchases_mixed %}<small>−{{ totals.purchases_mixed|floatformat:2 }} € en lotes mixtos · {{ totals.purchase_count }} operación{{ totals.purchase_count|pluralize:"es" }}</small>{% else %}<small>{{ totals.purchase_count }} operación{{ totals.purchase_count|pluralize:"es" }} · precio total</small>{% endif %}</article>
+    <article class="panel sale-split-kpi"><span><i class="fas fa-tag"></i> Ventas</span><div><strong><small>In-Season</small>+{{ totals.sales_inseason|floatformat:2 }} €</strong><strong><small>Classic</small>+{{ totals.sales_classic|floatformat:2 }} €</strong></div>{% if totals.sales_mixed %}<small>+{{ totals.sales_mixed|floatformat:2 }} € en lotes mixtos · {{ totals.sale_count }} operación{{ totals.sale_count|pluralize:"es" }}</small>{% else %}<small>{{ totals.sale_count }} operación{{ totals.sale_count|pluralize:"es" }} · importe recibido</small>{% endif %}</article>
     <article class="panel"><span><i class="fas fa-right-left"></i> Intercambios</span><strong>{{ totals.trade_count }}</strong><small>+{{ totals.trade_cash_in|floatformat:2 }} € recibidos · −{{ totals.trade_cash_out|floatformat:2 }} € enviados</small></article>
     <article class="panel"><span><i class="fas fa-scale-balanced"></i> Balance de efectivo</span><strong class="{% if totals.balance < 0 %}is-out{% else %}is-in{% endif %}">{% if totals.balance > 0 %}+{% endif %}{{ totals.balance|floatformat:2 }} €</strong><small>Ventas e intercambios menos compras</small></article>
     {% endif %}
   </section>
 
   <section class="panel movement-results reveal">
-    <div class="table-head"><div><p class="kicker">Selección actual</p><h2>{{ total_rows }} movimientos</h2></div><p class="movement-help">Las compras y ventas relacionadas se muestran juntas en una sola fila.</p></div>
+    <div class="table-head"><div><p class="kicker">Selección actual</p><h2>{{ total_rows }} movimiento{{ total_rows|pluralize:"s" }}</h2></div><p class="movement-help">{% if selected_category == 'crafting' %}Cada carta se enlaza con su salida posterior mediante su identificador único.{% elif selected_category == 'trading' %}Cada compra y su salida relacionada se muestran juntas en una sola fila.{% else %}Las compras y ventas relacionadas se muestran juntas en una sola fila.{% endif %}</p></div>
     <form method="get" id="movementFilters" class="movement-filters">
       <input type="hidden" name="category" value="{{ selected_category }}">
       <input type="hidden" name="manager" value="{{ selected_manager }}">
       {% if selected_category != 'reward' %}<label><span>Tipo de carta</span><select name="seasonality"><option value="">Classic e In-Season</option><option value="inseason" {% if selected_seasonality == 'inseason' %}selected{% endif %}>In-Season</option><option value="classic" {% if selected_seasonality == 'classic' %}selected{% endif %}>Classic</option></select></label>{% endif %}
-      {% if selected_category != 'reward' %}<label><span>Movimiento</span><select name="direction"><option value="">Todos</option><option value="purchase" {% if selected_direction == 'purchase' %}selected{% endif %}>Compras</option><option value="sale" {% if selected_direction == 'sale' %}selected{% endif %}>Ventas</option><option value="trade" {% if selected_direction == 'trade' %}selected{% endif %}>Intercambios</option></select></label>{% endif %}
+      {% if selected_category != 'reward' and selected_category != 'trading' and selected_category != 'crafting' %}<label><span>Movimiento</span><select name="direction"><option value="">Todos</option><option value="purchase" {% if selected_direction == 'purchase' %}selected{% endif %}>Compras</option><option value="sale" {% if selected_direction == 'sale' %}selected{% endif %}>Ventas</option><option value="trade" {% if selected_direction == 'trade' %}selected{% endif %}>Intercambios</option></select></label>{% endif %}
       {% if selected_category == 'reward' %}<label><span>Premio recibido</span><select name="reward_type"><option value="">Todos</option><option value="money" {% if selected_reward_type == 'money' %}selected{% endif %}>Dinero</option><option value="essence" {% if selected_reward_type == 'essence' %}selected{% endif %}>Esencia</option><option value="card" {% if selected_reward_type == 'card' %}selected{% endif %}>Cartas</option></select></label>{% endif %}
       <label><span>Rareza</span><select name="rarity"><option value="">Todas</option>{% for value in available_rarities %}<option value="{{ value }}" {% if selected_rarity == value %}selected{% endif %}>{% if value == 'limited' %}Limited{% elif value == 'rare' %}Rare{% elif value == 'super_rare' %}Super Rare{% else %}{{ value|title }}{% endif %}</option>{% endfor %}</select></label>
       <label><span>Desde</span><input type="date" name="date_from" value="{{ date_from }}"></label>
@@ -80,7 +95,23 @@
         <thead><tr><th>Fecha</th><th>Jugador / carta</th><th>Movimiento</th><th>Moneda</th><th>Importes</th></tr></thead>
         <tbody>
           {% for movement in page_obj %}
-          {% if movement.row_type == 'cycle' %}
+          {% if movement.row_type == 'craft' %}
+          <tr class="movement-craft-row">
+            <td class="movement-date"><strong>{{ movement.occurred_at_dt|date:'d/m/Y' }}</strong><small>{{ movement.occurred_at_dt|date:'H:i' }}</small></td>
+            <td>
+              {% with card=movement.cards.0 %}<div class="movement-card">{% if card.player_picture_url %}<img src="{{ card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="movement-avatar"><i class="fas fa-user"></i></span>{% endif %}<div><strong><span class="card-rarity-dot rarity-{{ card.rarity }}"></span>{{ card.player }} <span class="season-mark {% if card.in_season %}is-inseason{% else %}is-classic{% endif %}">{% if card.in_season %}In-Season{% else %}Classic{% endif %}</span></strong><small>{{ card.team }} · {% if card.rarity == 'super_rare' %}Super Rare{% else %}{{ card.rarity|title }}{% endif %} · #{{ card.serial_number|default:'—' }}</small></div></div>{% endwith %}
+            </td>
+            <td colspan="3" class="movement-craft-detail">
+              <div class="craft-journey">
+                <section class="craft-origin"><span><i class="fas fa-wand-magic-sparkles"></i> Abierta con esencia</span>{% if movement.essence_spent %}<strong>{{ movement.essence_spent }} esencia</strong>{% else %}<strong>Crafting</strong>{% endif %}<small>{{ movement.occurred_at_dt|date:'d/m/Y H:i' }}</small></section>
+                <i class="fas fa-arrow-right"></i>
+                {% if movement.craft_status == 'held' %}<section class="craft-status is-held"><span><i class="fas fa-folder-open"></i> En tu galería</span><strong>La sigues teniendo</strong><small>Propiedad confirmada en la última actualización</small></section>
+                {% elif movement.craft_status == 'sold' or movement.craft_status == 'exchanged' %}<section class="craft-status is-sold"><span><i class="fas {% if movement.craft_status == 'exchanged' %}fa-arrow-right-arrow-left{% else %}fa-tag{% endif %}"></i> {% if movement.craft_status == 'exchanged' %}Intercambiada{% else %}Vendida{% endif %}</span><strong>{{ movement.sale_market }}</strong><small>{{ movement.sale_at_dt|date:'d/m/Y H:i' }}</small></section><aside><span>Resultado</span>{% if movement.sale_net_eur != None %}<strong class="is-in">+{{ movement.sale_net_eur|floatformat:2 }} €</strong>{% if movement.sale_fee_eur %}<small>−{{ movement.sale_fee_eur|floatformat:2 }} € comisión</small>{% endif %}{% else %}<strong>Sin importe separable</strong>{% endif %}{% if movement.sale_received_cards %}<div>{% for card in movement.sale_received_cards %}<em><span class="card-rarity-dot rarity-{{ card.rarity }}"></span>{{ card.player }}</em>{% endfor %}</div>{% endif %}</aside>
+                {% else %}<section class="craft-status is-unknown"><span><i class="fas fa-circle-question"></i> Estado no determinado</span><strong>No figura como tuya</strong><small>No se encontró una salida exacta en el historial disponible</small></section>{% endif %}
+              </div>
+            </td>
+          </tr>
+          {% elif movement.row_type == 'cycle' %}
           <tr class="movement-grouped-row">
             <td class="movement-date"><strong>{{ movement.occurred_at_dt|date:'d/m/Y' }}</strong><small>{{ movement.occurred_at_dt|date:'H:i' }}</small></td>
             <td>

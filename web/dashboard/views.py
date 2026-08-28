@@ -24,7 +24,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from web_services.config_files import SorarePaths, load_telegram_alert_payload, save_telegram_alert_payload
 from web_services.process_runner import BidRequest, run_bid_scheduler, run_telegram_alert
-from web_services.movement_history import build_trade_cycles
+from web_services.movement_history import build_crafting_history, build_trade_cycles
 from web_services.sales_inventory import collection_display_name
 from .forms import BatchBidForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
 from .models import (
@@ -425,7 +425,7 @@ def _movement_seasonality(row):
 
 def movements(request):
     category = request.GET.get("category", "all")
-    if category not in {"laliga_inseason", "reward", "other", "all"}:
+    if category not in {"laliga_inseason", "trading", "crafting", "reward", "other", "all"}:
         category = "all"
     selected_manager = request.GET.get("manager", "me") if category == "reward" else "me"
     if selected_manager not in {"me", PUBLIC_REWARD_MANAGER_SLUG}:
@@ -447,7 +447,7 @@ def movements(request):
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
         stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 14 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 15 else None
         active_sync = MovementSyncJob.objects.filter(
             user=request.user,
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -458,7 +458,7 @@ def movements(request):
 
     all_movements = list(snapshot.movements if snapshot else [])
     direction = request.GET.get("direction", "")
-    if category == "reward" or direction not in {"", "purchase", "sale", "trade"}:
+    if category in {"reward", "trading", "crafting"} or direction not in {"", "purchase", "sale", "trade"}:
         direction = ""
     allowed_rarities = {"limited", "rare", "super_rare", "unique"}
     rarity = request.GET.get("rarity", "")
@@ -497,6 +497,15 @@ def movements(request):
         row["occurred_at_dt"] = occurred_at
         prepared_rows.append(row)
 
+    crafting_by_id = {
+        str(row.get("id") or ""): row
+        for row in build_crafting_history(prepared_rows)
+    }
+    prepared_rows = [
+        crafting_by_id.get(str(row.get("id") or ""), row)
+        for row in prepared_rows
+    ]
+
     def in_selected_window(row):
         occurred_at = row.get("occurred_at_dt")
         local_occurred_at = occurred_at.astimezone(ZoneInfo("Europe/Madrid")) if occurred_at else None
@@ -517,7 +526,9 @@ def movements(request):
         main_cards = _movement_main_cards(row)
         essence = row.get("essence") or []
         occurred_at = row.get("occurred_at_dt")
-        if category == "all" and row.get("category") == "reward":
+        if category == "all" and row.get("category") in {"reward", "crafting"}:
+            continue
+        if category == "trading":
             continue
         if category != "all" and row.get("category") != category:
             continue
@@ -539,11 +550,11 @@ def movements(request):
         rows.append(row)
 
     cycles = []
-    if not direction and category != "reward":
+    if not direction and category not in {"reward", "crafting"}:
         for cycle in build_trade_cycles(cycle_source_rows):
             cycle_cards = [cycle.get("purchase_card") or {}, cycle.get("sale_card") or {}]
             cycle_at = _movement_datetime(cycle.get("occurred_at"))
-            if category != "all" and cycle.get("category") != category:
+            if category not in {"all", "trading"} and cycle.get("category") != category:
                 continue
             if rarity and not any(card.get("rarity") == rarity for card in cycle_cards):
                 continue
@@ -568,7 +579,9 @@ def movements(request):
         cycle["occurred_at_dt"] = _movement_datetime(cycle.get("occurred_at"))
         consumed_movement_ids.update(str(value) for value in cycle.get("movement_ids") or [] if value)
     for row in rows:
-        row["row_type"] = "movement"
+        row["row_type"] = "craft" if row.get("category") == "crafting" else "movement"
+        if row["row_type"] == "craft":
+            row["sale_at_dt"] = _movement_datetime(row.get("sale_at"))
 
     display_rows = cycles + [
         row for row in rows
@@ -597,6 +610,7 @@ def movements(request):
     ]
     trades = [row for row in summary_rows if row.get("direction") == "trade"]
     rewards = [row for row in summary_rows if row.get("direction") == "reward"]
+    crafts = [row for row in summary_rows if row.get("category") == "crafting"]
     trade_cash_in = sum(
         Decimal(str(row.get("net_eur") or 0)) for row in trades if row.get("cash_direction") == "sale"
     )
@@ -645,6 +659,14 @@ def movements(request):
         "essence_limited": essence_totals["limited"],
         "essence_rare": essence_totals["rare"],
         "essence_super_rare": essence_totals["super_rare"],
+        "craft_total": len(crafts),
+        "craft_held": sum(row.get("craft_status") == "held" for row in crafts),
+        "craft_sold": sum(row.get("craft_status") in {"sold", "exchanged"} for row in crafts),
+        "craft_unknown": sum(row.get("craft_status") == "unknown" for row in crafts),
+        "craft_received": sum(
+            Decimal(str(row.get("sale_net_eur") or 0))
+            for row in crafts if row.get("sale_net_eur") is not None
+        ),
         "balance": (
             sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
             - sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases)
@@ -665,10 +687,12 @@ def movements(request):
         "active_sync": active_sync,
         "page_obj": page_obj,
         "total_rows": len(display_rows),
-        "all_count": sum(row.get("category") != "reward" for row in all_movements),
+        "all_count": sum(row.get("category") not in {"reward", "crafting"} for row in all_movements),
         "laliga_count": sum(row.get("category") == "laliga_inseason" for row in all_movements),
         "reward_count": sum(row.get("category") == "reward" for row in all_movements),
         "other_count": sum(row.get("category") == "other" for row in all_movements),
+        "trading_count": len(build_trade_cycles(all_movements)),
+        "crafting_count": sum(row.get("category") == "crafting" for row in all_movements),
         "totals": totals,
         "available_rarities": sorted(rarities),
         "selected_category": category,
@@ -687,7 +711,7 @@ def movements(request):
 
 
 def movement_analytics(request):
-    snapshot = MovementSnapshot.objects.filter(user=request.user, source_version__gte=14).first()
+    snapshot = MovementSnapshot.objects.filter(user=request.user, source_version__gte=15).first()
     if not snapshot:
         return render(request, "dashboard/movement_analytics.html", {"snapshot": None})
 
