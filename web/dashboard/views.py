@@ -1363,7 +1363,6 @@ def auctions_list(request):
 
     available_teams = sorted({auction['team'] for auction in auctions})
     available_positions = sorted({auction['position'] for auction in auctions})
-    filter_player = request.GET.get('player', '').strip()
     filter_teams = [team.strip() for team in request.GET.getlist('teams') if team.strip()]
     filter_positions = [position.strip() for position in request.GET.getlist('positions') if position.strip()]
     filter_status = request.GET.get('status', '').strip()
@@ -1384,8 +1383,6 @@ def auctions_list(request):
     )
 
     filtered_auctions = auctions
-    if filter_player:
-        filtered_auctions = [row for row in filtered_auctions if filter_player.casefold() in row['player'].casefold()]
     if filter_teams:
         filtered_auctions = [row for row in filtered_auctions if row['team'] in set(filter_teams)]
     if filter_positions:
@@ -1413,12 +1410,7 @@ def auctions_list(request):
         else:
             auction['end_date_madrid'] = end_at.strftime('%d/%m/%Y %H:%M')
 
-    try:
-        per_page = int(request.GET.get('per_page', 20))
-    except (TypeError, ValueError):
-        per_page = 20
-    if per_page not in {20, 50, 100}:
-        per_page = 20
+    per_page = 100
     paginator = Paginator(filtered_auctions, per_page)
     page_obj = paginator.get_page(request.GET.get('page'))
     query_params = request.GET.copy()
@@ -1438,7 +1430,6 @@ def auctions_list(request):
             "filtered_count": len(filtered_auctions),
             "available_teams": available_teams,
             "available_positions": available_positions,
-            "filter_player": filter_player,
             "filter_teams": filter_teams,
             "filter_positions": filter_positions,
             "filter_status": filter_status,

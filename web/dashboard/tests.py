@@ -233,6 +233,19 @@ class LaLigaAuctionTests(TestCase):
 
 
 class AuctionActionsTests(TestCase):
+    @patch("listar_subastas.fetch_la_liga_rare_auctions", return_value=[])
+    def test_auction_page_uses_compact_controls(self, _fetch):
+        user = get_user_model().objects.create_user(username="compact-auctions")
+        self.client.force_login(user)
+        response = self.client.get(reverse("auctions_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Guardar filtro")
+        self.assertNotContains(response, "Buscar jugador")
+        self.assertNotContains(response, "Por página")
+        self.assertNotContains(response, "Últimas 5")
+        self.assertNotContains(response, "Páginas de subastas")
+
     @patch("dashboard.views.render")
     @patch("listar_subastas.load_auction_cache")
     @patch("listar_subastas.fetch_la_liga_rare_auctions", return_value=[])
@@ -387,7 +400,7 @@ class AuctionActionsTests(TestCase):
 
     @patch("dashboard.views.render")
     @patch("listar_subastas.fetch_la_liga_rare_auctions")
-    def test_auctions_are_sorted_paginated_and_shown_in_madrid_time(self, fetch_auctions, render):
+    def test_auctions_show_up_to_one_hundred_and_use_madrid_time(self, fetch_auctions, render):
         fetch_auctions.return_value = [
             {
                 "player": f"Jugador {index}", "team": "Equipo", "position": "Forward",
@@ -400,21 +413,21 @@ class AuctionActionsTests(TestCase):
         render.side_effect = lambda request, template, context: context
         context = auctions_list(RequestFactory().get("/ofertas/"))
 
-        self.assertEqual(len(context["auctions"]), 20)
-        self.assertEqual(context["page_obj"].paginator.per_page, 20)
+        self.assertEqual(len(context["auctions"]), 25)
+        self.assertEqual(context["page_obj"].paginator.per_page, 100)
         self.assertEqual(context["auctions"][0]["end_date"], "2026-08-12T00:00:00Z")
         end_at = datetime.fromisoformat("2026-08-12T00:00:00+00:00").astimezone(ZoneInfo("Europe/Madrid"))
         days_until = (end_at.date() - datetime.now(ZoneInfo("Europe/Madrid")).date()).days
         expected_end = f"Hoy {end_at:%H:%M}" if days_until == 0 else f"Mañana {end_at:%H:%M}" if days_until == 1 else end_at.strftime("%d/%m/%Y %H:%M")
         self.assertEqual(context["auctions"][0]["end_date_madrid"], expected_end)
 
-        descending = auctions_list(RequestFactory().get("/ofertas/?end_order=desc&page=2"))
+        descending = auctions_list(RequestFactory().get("/ofertas/?end_order=desc"))
         self.assertEqual(descending["end_order"], "desc")
-        self.assertEqual(descending["page_obj"].number, 2)
-        self.assertEqual(descending["auctions"][0]["end_date"], "2026-08-12T04:00:00Z")
+        self.assertEqual(descending["page_obj"].number, 1)
+        self.assertEqual(descending["auctions"][0]["end_date"], "2026-08-12T23:00:00Z")
 
         fifty_per_page = auctions_list(RequestFactory().get("/ofertas/?per_page=50"))
-        self.assertEqual(fifty_per_page["page_obj"].paginator.per_page, 50)
+        self.assertEqual(fifty_per_page["page_obj"].paginator.per_page, 100)
         self.assertEqual(len(fifty_per_page["auctions"]), 25)
 
         multiple_values = auctions_list(RequestFactory().get("/ofertas/?teams=Equipo&teams=Otro&positions=Forward&positions=Goalkeeper"))

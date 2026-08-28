@@ -16,3 +16,13 @@ def eth_amount(value, places=6):
         return "—"
     rendered = f"{amount:.{precision}f}".rstrip("0").rstrip(".")
     return (rendered or "0").replace(".", ",")
+
+
+@register.filter
+def position_short(value):
+    return {
+        "Goalkeeper": "GK",
+        "Defender": "DF",
+        "Midfielder": "MD",
+        "Forward": "FW",
+    }.get(value, "O")

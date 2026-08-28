@@ -4,28 +4,17 @@
 {% block title %}Subastas Rare LaLiga 2026-2027 | Sorare{% endblock %}
 
 {% block content %}
-<section class="hero panel reveal auctions-page">
+<section class="hero panel reveal auctions-page auctions-command">
   <p class="kicker">Live auctions</p>
   <h1><i class="fas fa-fire"></i> Subastas Rare de LaLiga</h1>
-  <p class="hero-text">Cartas rojas de los 20 equipos de LaLiga correspondientes exclusivamente a la temporada {{ season_label }}.</p>
-</section>
-
-<section class="panel market-toolbar reveal" style="animation-delay: 100ms;">
+  <p class="hero-text">LaLiga · Rare · {{ season_label }}</p>
   <div class="market-toolbar-main">
-    <div>
-      <p class="market-toolbar-eyebrow">Mercado seleccionado</p>
-      <h2><i class="fas fa-filter"></i> LaLiga</h2>
-    </div>
-    <div class="market-tags" aria-label="Características del mercado">
-      <span><i class="fas fa-gem"></i> Rare</span>
-      <span><i class="fas fa-calendar"></i> {{ season_label }}</span>
-    </div>
-  </div>
-  <div class="market-refresh-form">
     <div class="market-refresh-actions">
       <button type="button" class="btn btn-accent market-refresh-button" data-mode="quick"><i class="fas fa-bolt"></i> Actualizar pujas</button>
       <button type="button" class="btn btn-secondary market-refresh-button" data-mode="full"><i class="fas fa-magnifying-glass-plus"></i> Buscar nuevas</button>
     </div>
+  </div>
+  <div class="market-refresh-form">
     <div class="market-sync-status">
       <small><i class="fas fa-bolt"></i> Pujas: <strong>{{ market_updated_at|default:"Pendiente" }}</strong></small>
       <small><i class="fas fa-globe"></i> Mercado completo: <strong>{{ full_market_updated_at|default:"Pendiente" }}</strong></small>
@@ -36,54 +25,49 @@
       <div class="market-refresh-track"><span id="market-refresh-bar"></span></div>
     </div>
   </div>
-</section>
-
-<section class="account-balance-strip reveal" style="animation-delay: 150ms;" aria-label="Saldo disponible para pujar">
-  <div class="balance-heading"><i class="fas fa-wallet"></i><span>Disponible para pujar</span></div>
-  {% if account_balances %}
-    <div class="balance-item"><small>EUR</small><strong>{{ account_balances.eur|floatformat:2 }} €</strong></div>
-    <div class="balance-item"><small>ETH</small><strong>{{ account_balances.eth|eth_amount }} ETH</strong></div>
-    <div class="balance-item"><small>Créditos</small><strong>{{ account_balances.credits_eur|floatformat:2 }} €</strong></div>
-  {% else %}
-    <span class="balance-unavailable">{{ balance_error|default:"Saldo no disponible" }}</span>
-  {% endif %}
+  <div class="auctions-balance" aria-label="Saldo disponible para pujar">
+    <span><i class="fas fa-wallet"></i> Disponible</span>
+    {% if account_balances %}
+      <strong>{{ account_balances.eur|floatformat:2 }} €</strong>
+      <strong>{{ account_balances.eth|eth_amount }} ETH</strong>
+      <strong>{{ account_balances.credits_eur|floatformat:2 }} € <small>créditos</small></strong>
+    {% else %}<small>{{ balance_error|default:"Saldo no disponible" }}</small>{% endif %}
+  </div>
 </section>
 
 {% if not loading and not error %}
-<section class="panel reveal" style="animation-delay: 200ms;">
+<section class="panel reveal auctions-results" style="animation-delay: 200ms;">
   <div class="table-head">
     <h2><i class="fas fa-list"></i> Resultados ({{ filtered_count }} subastas)</h2>
   </div>
 
-  <div class="saved-filter-bar">
-    <label><span>Filtros guardados</span><select id="saved-filter-select"><option value="">Seleccionar…</option>{% for preset in saved_filters %}<option value="?{{ preset.query_string }}">{{ preset.name }}</option>{% endfor %}</select></label>
-    <form method="post" action="{% url 'save_auction_filter' %}" class="save-filter-form">
-      {% csrf_token %}<input type="hidden" name="query" id="current-filter-query">
-      <label><span>Guardar selección actual</span><input name="name" maxlength="60" placeholder="Ej. Mis equipos" required></label>
-      <button class="btn btn-secondary btn-compact" type="submit"><i class="fas fa-bookmark"></i> Guardar</button>
-    </form>
-    {% if saved_filters %}<details class="manage-saved-filters"><summary>Gestionar</summary><div>{% for preset in saved_filters %}<form method="post" action="{% url 'delete_auction_filter' %}">{% csrf_token %}<input type="hidden" name="preset_id" value="{{ preset.id }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><span>{{ preset.name }}</span><button type="submit" title="Eliminar {{ preset.name }}" aria-label="Eliminar {{ preset.name }}">&times;</button></form>{% endfor %}</div></details>{% endif %}
-  </div>
-
-  <form method="get" class="auction-filters">
-    <input type="hidden" name="end_order" value="{{ end_order }}">
-    <label><span>Buscar jugador</span><input name="player" type="search" value="{{ filter_player }}" placeholder="Nombre"></label>
+  <div class="auction-filter-shell">
+    <label class="saved-filter-picker"><span><i class="fas fa-bookmark"></i> Guardados</span><select id="saved-filter-select"><option value="">Seleccionar…</option>{% for preset in saved_filters %}<option value="?{{ preset.query_string }}">{{ preset.name }}</option>{% endfor %}</select></label>
+    <form method="get" class="auction-filters">
+      <input type="hidden" name="end_order" value="{{ end_order }}">
     <div class="filter-multiselect filter-field" data-filter-group="teams"><span>Equipos</span><details><summary>{% if filter_teams %}{{ filter_teams|length }} seleccionados{% else %}Todos{% endif %}</summary><div class="filter-options"><label><input type="checkbox" class="select-all"{% if not filter_teams %} checked{% endif %}> Todos</label>{% for team in available_teams %}<label><input type="checkbox" name="teams" value="{{ team }}"{% if team in filter_teams %} checked{% endif %}><span>{{ team }}</span></label>{% endfor %}<button type="submit" class="btn btn-accent btn-compact">Aplicar</button></div></details></div>
     <div class="filter-multiselect filter-field" data-filter-group="positions"><span>Posiciones</span><details><summary>{% if filter_positions %}{{ filter_positions|length }} seleccionadas{% else %}Todas{% endif %}</summary><div class="filter-options"><label><input type="checkbox" class="select-all"{% if not filter_positions %} checked{% endif %}> Todas</label>{% for position in available_positions %}<label><input type="checkbox" name="positions" value="{{ position }}"{% if position in filter_positions %} checked{% endif %}><span>{{ position }}</span></label>{% endfor %}<button type="submit" class="btn btn-accent btn-compact">Aplicar</button></div></details></div>
     <label class="favorites-filter"><span>Participación</span><span class="favorite-filter-control"><input type="checkbox" name="has_bid" value="1"{% if has_bid_only %} checked{% endif %}> He pujado</span></label>
     <label><span>Estado</span><select name="status"><option value="">Todos</option><option value="winning"{% if filter_status == 'winning' %} selected{% endif %}>Voy ganando</option><option value="outbid"{% if filter_status == 'outbid' %} selected{% endif %}>Me han superado</option></select></label>
     <label class="favorites-filter"><span>Favoritos</span><span class="favorite-filter-control"><input type="checkbox" name="favorites" value="1"{% if favorites_only %} checked{% endif %}> Solo favoritos <small>({{ favorite_count }})</small></span></label>
-    <label><span>Por página</span><select name="per_page"><option value="20"{% if per_page == 20 %} selected{% endif %}>20</option><option value="50"{% if per_page == 50 %} selected{% endif %}>50</option><option value="100"{% if per_page == 100 %} selected{% endif %}>100</option></select></label>
-    <div class="filter-actions"><a class="btn btn-secondary btn-compact" href="{% url 'auctions_list' %}">Limpiar</a></div>
-  </form>
+      <div class="filter-actions"><a class="btn btn-secondary btn-compact" href="{% url 'auctions_list' %}" title="Limpiar filtros"><i class="fas fa-rotate-left"></i><span>Limpiar</span></a></div>
+    </form>
+    <details class="save-filter-menu">
+      <summary><i class="far fa-bookmark"></i><span>Guardar filtro</span></summary>
+      <form method="post" action="{% url 'save_auction_filter' %}" class="save-filter-form">
+        {% csrf_token %}<input type="hidden" name="query" id="current-filter-query">
+        <label><span>Nombre</span><input name="name" maxlength="60" placeholder="Ej. J1 Sorare" required></label>
+        <button class="btn btn-accent btn-compact" type="submit">Guardar</button>
+      </form>
+      {% if saved_filters %}<div class="saved-filter-management">{% for preset in saved_filters %}<form method="post" action="{% url 'delete_auction_filter' %}">{% csrf_token %}<input type="hidden" name="preset_id" value="{{ preset.id }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><span>{{ preset.name }}</span><button type="submit" title="Eliminar {{ preset.name }}" aria-label="Eliminar {{ preset.name }}">&times;</button></form>{% endfor %}</div>{% endif %}
+    </details>
+  </div>
   
   <div class="table-wrap">
-    <table class="data-table">
+    <table class="data-table auctions-table">
       <thead>
         <tr>
           <th><i class="fas fa-user"></i> Jugador</th>
-          <th><i class="fas fa-shield-alt"></i> Equipo</th>
-          <th><i class="fas fa-running"></i> Pos</th>
           <th><i class="fas fa-euro-sign"></i> Puja Actual</th>
           <th>
             <span class="sortable-heading">
@@ -94,14 +78,13 @@
               </span>
             </span>
           </th>
-          <th><i class="fas fa-chart-line"></i> Mercado</th>
           <th><i class="fas fa-gavel"></i> Pujar</th>
         </tr>
       </thead>
       <tbody>
         {% for auction in auctions %}
         <tr class="auction-main-row{% if auction.is_winning %} is-winning{% elif auction.is_outbid %} is-outbid{% endif %}"
-            data-player="{{ auction.player|lower }}" data-team="{{ auction.team }}"
+          data-player="{{ auction.player|lower }}" data-player-slug="{{ auction.player_slug }}" data-team="{{ auction.team }}"
             data-position="{{ auction.position }}" data-price="{{ auction.bid_eur|default_if_none:'' }}"
             data-winning="{% if auction.is_winning %}true{% else %}false{% endif %}"
             data-status="{% if auction.is_winning %}winning{% elif auction.is_outbid %}outbid{% endif %}"
@@ -109,7 +92,13 @@
           <td>
             <span class="auction-identity">
               {% if auction.player_picture_url %}<img class="player-thumb" src="{{ auction.player_picture_url }}" alt="" loading="lazy" decoding="async">{% else %}<span class="player-thumb image-fallback"><i class="fas fa-user"></i></span>{% endif %}
-              <strong>{{ auction.player }}</strong>
+              <span class="auction-player-copy">
+                <strong>{{ auction.player }}</strong>
+                <small>
+                  {% if auction.team_picture_url %}<img class="team-badge" src="{{ auction.team_picture_url }}" alt="{{ auction.team }}" title="{{ auction.team }}" loading="lazy" decoding="async">{% else %}<span class="team-badge image-fallback" title="{{ auction.team }}"><i class="fas fa-shield-alt"></i></span>{% endif %}
+                  <b>{{ auction.position|position_short }}</b>
+                </small>
+              </span>
               <button type="button" class="favorite-toggle{% if auction.is_favorite %} is-favorite{% endif %}"
                       data-player-slug="{{ auction.player_slug }}" data-player-name="{{ auction.player }}"
                       aria-label="{% if auction.is_favorite %}Quitar a {{ auction.player }} de favoritos{% else %}Añadir a {{ auction.player }} a favoritos{% endif %}"
@@ -118,13 +107,6 @@
               </button>
             </span>
           </td>
-          <td>
-            <span class="auction-identity team-identity">
-              {% if auction.team_picture_url %}<img class="team-badge" src="{{ auction.team_picture_url }}" alt="" loading="lazy" decoding="async">{% else %}<span class="team-badge image-fallback"><i class="fas fa-shield-alt"></i></span>{% endif %}
-              <span>{{ auction.team }}</span>
-            </span>
-          </td>
-          <td>{{ auction.position }}</td>
           <td>
             {% if auction.bid_eur %}
               <span style="color: var(--accent); font-weight: 600;">{{ auction.bid_eur|floatformat:2 }}€</span>
@@ -141,13 +123,6 @@
           </td>
           <td style="font-size: 0.78rem; font-family: 'IBM Plex Mono', monospace;">
             {{ auction.end_date_madrid }}
-          </td>
-          <td>
-            <button type="button" class="btn btn-compact btn-secondary history-toggle"
-                    data-player-slug="{{ auction.player_slug }}"
-                    data-target="history-{{ forloop.counter }}">
-              <i class="fas fa-chart-line"></i> Últimas 5
-            </button>
           </td>
           <td>
             <div class="inline-bid-form" onclick="event.stopPropagation()"
@@ -168,12 +143,12 @@
           </td>
         </tr>
         <tr id="history-{{ forloop.counter }}" class="history-row" hidden>
-          <td colspan="7">
+          <td colspan="4">
             <div class="history-content" aria-live="polite">Pulsa para cargar las ventas comparables.</div>
           </td>
         </tr>
         {% empty %}
-        <tr><td colspan="7" class="empty-auctions">No hay subastas que coincidan con estos filtros.</td></tr>
+        <tr><td colspan="4" class="empty-auctions">No hay subastas que coincidan con estos filtros.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -183,37 +158,6 @@
     <span id="batch-bid-count">Escribe uno o varios importes para preparar las pujas.</span>
     <button id="review-bids" class="btn btn-accent" type="button" disabled><i class="fas fa-list-check"></i> Revisar pujas</button>
   </div>
-
-  {% if page_obj.paginator.num_pages > 1 %}
-  <nav class="pagination" aria-label="Páginas de subastas">
-    {% if page_obj.has_previous %}
-      <a class="pagination-icon" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page=1" title="Primera página" aria-label="Primera página"><i class="fas fa-angles-left"></i></a>
-      <a class="pagination-icon" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}" title="Página anterior" aria-label="Página anterior"><i class="fas fa-chevron-left"></i></a>
-    {% else %}
-      <span class="pagination-icon is-disabled"><i class="fas fa-angles-left"></i></span><span class="pagination-icon is-disabled"><i class="fas fa-chevron-left"></i></span>
-    {% endif %}
-    <form method="get" class="page-jump">
-      {% if filter_player %}<input type="hidden" name="player" value="{{ filter_player }}">{% endif %}
-      {% for team in filter_teams %}<input type="hidden" name="teams" value="{{ team }}">{% endfor %}
-      {% for position in filter_positions %}<input type="hidden" name="positions" value="{{ position }}">{% endfor %}
-      {% if has_bid_only %}<input type="hidden" name="has_bid" value="1">{% endif %}
-      {% if filter_status %}<input type="hidden" name="status" value="{{ filter_status }}">{% endif %}
-      {% if favorites_only %}<input type="hidden" name="favorites" value="1">{% endif %}
-      <input type="hidden" name="per_page" value="{{ per_page }}">
-      <input type="hidden" name="end_order" value="{{ end_order }}">
-      <label for="page-number">Página</label>
-      <input id="page-number" name="page" type="number" min="1" max="{{ page_obj.paginator.num_pages }}" value="{{ page_obj.number }}" aria-label="Número de página">
-      <span>de {{ page_obj.paginator.num_pages }}</span>
-      <button class="btn btn-secondary btn-compact" type="submit">Ir</button>
-    </form>
-    {% if page_obj.has_next %}
-      <a class="pagination-icon" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}" title="Página siguiente" aria-label="Página siguiente"><i class="fas fa-chevron-right"></i></a>
-      <a class="pagination-icon" href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.paginator.num_pages }}" title="Última página" aria-label="Última página"><i class="fas fa-angles-right"></i></a>
-    {% else %}
-      <span class="pagination-icon is-disabled"><i class="fas fa-chevron-right"></i></span><span class="pagination-icon is-disabled"><i class="fas fa-angles-right"></i></span>
-    {% endif %}
-  </nav>
-  {% endif %}
 
 </section>
 
@@ -384,7 +328,6 @@ document.addEventListener('DOMContentLoaded', function () {
       params.delete('page');
       currentFilterQuery.value = params.toString();
     });
-    var searchTimer;
     filtersForm.querySelectorAll('select, input[type="checkbox"]').forEach(function (control) {
       control.addEventListener('change', function () {
         var multiselect = control.closest('.filter-multiselect');
@@ -403,11 +346,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         filtersForm.submit();
       });
-    });
-    var playerSearch = filtersForm.querySelector('input[name="player"]');
-    playerSearch.addEventListener('input', function () {
-      window.clearTimeout(searchTimer);
-      searchTimer = window.setTimeout(function () { filtersForm.submit(); }, 450);
     });
     document.querySelectorAll('.filter-multiselect details').forEach(function (details) {
       details.addEventListener('toggle', function () {
@@ -735,10 +673,10 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   pollBidJobs();
 
-  function toggleHistory(button) {
-    var row = document.getElementById(button.dataset.target);
+  function toggleHistory(source) {
+    var row = document.getElementById(source.dataset.historyTarget);
     row.hidden = !row.hidden;
-    if (!row.hidden && row.dataset.loaded !== 'true') loadHistory(button, row);
+    if (!row.hidden && row.dataset.loaded !== 'true') loadHistory(source, row);
   }
 
   function saleDateText(value) {
@@ -790,16 +728,10 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  document.querySelectorAll('.history-toggle').forEach(function (button) {
-    button.addEventListener('click', function (event) { event.stopPropagation(); toggleHistory(button); });
-  });
-
   document.querySelectorAll('.auction-main-row').forEach(function (row) {
-    row.addEventListener('click', function () {
-      toggleHistory(row.querySelector('.history-toggle'));
-    });
+    row.addEventListener('click', function () { toggleHistory(row); });
     row.addEventListener('keydown', function (event) {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleHistory(row.querySelector('.history-toggle')); }
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleHistory(row); }
     });
   });
 
