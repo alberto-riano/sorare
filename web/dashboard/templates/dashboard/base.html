@@ -25,10 +25,6 @@
         <i class="fas fa-bell"></i>
         <span>Alertas</span>
       </a>
-      <a href="{% url 'bid_scheduler' %}">
-        <i class="fas fa-gavel"></i>
-        <span>Pujas</span>
-      </a>
       <a href="{% url 'auctions_list' %}">
         <i class="fas fa-fire"></i>
         <span>Subastas</span>
@@ -40,6 +36,10 @@
       <a href="{% url 'instant_purchases' %}">
         <i class="fas fa-cart-shopping"></i>
         <span>Compras instantáneas</span>
+      </a>
+      <a href="{% url 'direct_offers' %}">
+        <i class="fas fa-paper-plane"></i>
+        <span>Lanzar oferta</span>
       </a>
       <a href="{% url 'sales_workbench' %}">
         <i class="fas fa-tag"></i>
@@ -53,10 +53,13 @@
         <i class="fas fa-chart-pie"></i>
         <span>Movimientos</span>
       </a>
-      <a href="{% url 'refresh_token' %}">
-        <i class="fas fa-key"></i>
-        <span>Token</span>
-      </a>
+      <details class="nav-settings">
+        <summary title="Configuración" aria-label="Configuración"><i class="fas fa-gear"></i><span>Configuración</span></summary>
+        <div>
+          <a href="{% url 'bid_scheduler' %}"><i class="fas fa-gavel"></i><span>Pujas</span></a>
+          <a href="{% url 'refresh_token' %}"><i class="fas fa-key"></i><span>Token</span></a>
+        </div>
+      </details>
     </nav>
     <div class="user-badge">
       <i class="fas fa-user-circle"></i>

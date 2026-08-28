@@ -32,9 +32,19 @@ function readConfig(filename = CONFIG_PATH) {
 }
 
 // --- Parámetros de entrada ---
-const [, , ASSET_ID, PRICE_CENTS, DAYS, TRADE_MINIMUM_CENTS] = process.argv;
+const DIRECT_OFFER_MODE = process.argv[2] === "--direct-offer";
+const inputArgs = DIRECT_OFFER_MODE ? process.argv.slice(3) : process.argv.slice(2);
+const [ASSET_ID, directManagerOrPrice, directPriceOrDays, directHoursOrMinimum] = inputArgs;
+const MANAGER_SLUG = DIRECT_OFFER_MODE ? directManagerOrPrice : "";
+const PRICE_CENTS = DIRECT_OFFER_MODE ? directPriceOrDays : directManagerOrPrice;
+const DAYS = DIRECT_OFFER_MODE ? "" : directPriceOrDays;
+const TRADE_MINIMUM_CENTS = DIRECT_OFFER_MODE ? "" : directHoursOrMinimum;
 if (!ASSET_ID || !PRICE_CENTS) {
-  console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias_en_venta] [minimo_intercambio_centimos]");
+  console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias] [minimo] o --direct-offer <asset_id> <manager_slug> <centimos> [horas]");
+  process.exit(1);
+}
+if (DIRECT_OFFER_MODE && !MANAGER_SLUG) {
+  console.error("La oferta directa requiere el slug del manager receptor.");
   process.exit(1);
 }
 const DURATION_DAYS = parseInt(DAYS || "7", 10);
@@ -45,6 +55,11 @@ if (!Number.isInteger(DURATION_DAYS) || DURATION_DAYS < 1 || DURATION_DAYS > 30)
 const TRADE_MINIMUM_AMOUNT_CENTS = Number.isFinite(parseInt(TRADE_MINIMUM_CENTS, 10))
   ? parseInt(TRADE_MINIMUM_CENTS, 10)
   : 0;
+const DIRECT_OFFER_HOURS = parseInt(DIRECT_OFFER_MODE ? (directHoursOrMinimum || "48") : "48", 10);
+if (!Number.isInteger(DIRECT_OFFER_HOURS) || DIRECT_OFFER_HOURS < 24 || DIRECT_OFFER_HOURS > 168) {
+  console.error("La duración de la oferta debe estar entre 24 y 168 horas.");
+  process.exit(1);
+}
 const NO_RELIST = process.argv.includes("--no-relist");
 const RELIST_RETRY_COUNT = 3;
 const RELIST_RETRY_DELAY_MS = 1500;
@@ -143,6 +158,15 @@ const CREATE_OFFER_MUTATION = gql`
       errors {
         message
       }
+    }
+  }
+`;
+
+const CREATE_DIRECT_OFFER_MUTATION = gql`
+  mutation CreateDirectOffer($input: createDirectOfferInput!) {
+    createDirectOffer(input: $input) {
+      tokenOffer { id startDate endDate }
+      errors { message }
     }
   }
 `;
@@ -564,6 +588,43 @@ async function sellCard(assetId, priceCents, durationDays, relistRetriesLeft = R
   console.log(tokenOffer);
 }
 
+async function createDirectOffer(assetId, managerSlug, amountCents, durationHours) {
+  const amount = { amount: amountCents.toString(), currency: CURRENCY };
+  const prepareData = await client.request(PREPARE_OFFER_MUTATION, {
+    input: {
+      sendAssetIds: [],
+      receiveAssetIds: [assetId],
+      settlementCurrencies: [CURRENCY],
+      sendAmount: amount,
+      receiverSlug: managerSlug,
+      clientMutationId: crypto.randomBytes(8).toString("hex"),
+    },
+  });
+  const prepared = prepareData.prepareOffer;
+  if (prepared.errors?.length) {
+    throw new Error(prepared.errors.map((error) => error.message).join(" · "));
+  }
+  const approvals = await buildApprovalsCombined(PRIVATE_KEY, SOLANA_PRIVATE_KEY, prepared.authorizations);
+  const createData = await client.request(CREATE_DIRECT_OFFER_MUTATION, {
+    input: {
+      approvals,
+      dealId: crypto.randomBytes(8).toString("hex"),
+      sendAssetIds: [],
+      receiveAssetIds: [assetId],
+      sendAmount: amount,
+      receiverSlug: managerSlug,
+      duration: durationHours * 60 * 60,
+      clientMutationId: crypto.randomBytes(8).toString("hex"),
+    },
+  });
+  const payload = createData.createDirectOffer;
+  if (payload.errors?.length) {
+    throw new Error(payload.errors.map((error) => error.message).join(" · "));
+  }
+  console.log("¡Oferta directa creada con éxito!");
+  console.log(payload.tokenOffer);
+}
+
 // --- Invocación principal ---
 async function setMinimumAndSell() {
   let previousMinimum;
@@ -594,7 +655,11 @@ async function setMinimumAndSell() {
   }
 }
 
-setMinimumAndSell().catch((err) => {
+const operation = DIRECT_OFFER_MODE
+  ? createDirectOffer(ASSET_ID, MANAGER_SLUG, PRICE_CENTS, DIRECT_OFFER_HOURS)
+  : setMinimumAndSell();
+
+operation.catch((err) => {
   if (err instanceof Error) {
     console.error(err.message);
   } else {

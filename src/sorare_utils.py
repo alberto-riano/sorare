@@ -201,6 +201,12 @@ def get_live_single_sale_offers(player_slug, headers=None):
             id
             startDate
             endDate
+            sender {
+              ... on User {
+                slug
+                nickname
+              }
+            }
             senderSide {
               amounts {
                 eurCents
@@ -217,6 +223,7 @@ def get_live_single_sale_offers(player_slug, headers=None):
                 serialNumber
                 grade
                 inSeasonEligible
+                pictureUrl
                 anyPlayer {
                   slug
                   displayName

@@ -1,0 +1,107 @@
+{% extends 'dashboard/base.html' %}
+
+{% block title %}Lanzar oferta | Sorare{% endblock %}
+
+{% block content %}
+<div class="direct-offers-page">
+  <section class="panel direct-offer-head reveal">
+    <div><p class="kicker">Mercado secundario · In-Season</p><h1><i class="fas fa-paper-plane"></i> Lanzar oferta</h1></div>
+    <label class="direct-player-search"><span>Jugador</span><input id="playerSearch" type="search" autocomplete="off" placeholder="Nombre del jugador"><div id="playerResults" hidden></div></label>
+  </section>
+
+  <section class="panel direct-offer-controls reveal" id="offerControls" hidden>
+    <div><p class="kicker">Selección</p><h2 id="selectedPlayer">Ventas disponibles</h2></div>
+    <div class="direct-rarity-filter" aria-label="Rarezas">
+      <label><input type="checkbox" value="limited" checked><span>Limited</span></label>
+      <label><input type="checkbox" value="rare" checked><span>Rare</span></label>
+      <label><input type="checkbox" value="super_rare" checked><span>Super Rare</span></label>
+      <label><input type="checkbox" value="unique" checked><span>Unique</span></label>
+    </div>
+    <div class="direct-offer-terms">
+      <label><span>Oferta por carta</span><span class="money-input"><input id="offerAmount" type="number" min="0.50" max="10000" step="0.01" inputmode="decimal"><b>€</b></span></label>
+      <label><span>Validez</span><select id="offerDuration"><option value="24">24 horas</option><option value="48" selected>48 horas</option><option value="72">3 días</option><option value="168">7 días</option></select></label>
+      <button class="btn btn-accent" id="sendOffers" type="button" disabled><i class="fas fa-paper-plane"></i> <span>Enviar ofertas</span></button>
+    </div>
+    <div class="direct-selection-summary"><label><input id="selectVisible" type="checkbox"> Seleccionar visibles</label><strong id="selectionCount">0 seleccionadas</strong><span id="maximumSpend">Máximo 0,00 €</span></div>
+  </section>
+
+  <section class="panel direct-offer-results reveal" id="offerResults">
+    <div class="direct-offer-empty" id="offerEmpty"><i class="fas fa-magnifying-glass"></i><h2>Busca un jugador</h2></div>
+    <div id="offerLoading" class="direct-offer-empty" hidden><i class="fas fa-circle-notch fa-spin"></i><h2>Consultando ventas</h2></div>
+    <div id="offerError" class="direct-offer-error" hidden></div>
+    <div class="direct-offer-table-wrap" id="offerTableWrap" hidden>
+      <table class="direct-offer-table"><thead><tr><th></th><th>Carta</th><th>Rareza</th><th>Venta</th><th>Manager</th><th>Estado</th></tr></thead><tbody id="offerRows"></tbody></table>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var search = document.getElementById('playerSearch');
+  var playerResults = document.getElementById('playerResults');
+  var controls = document.getElementById('offerControls');
+  var rowsNode = document.getElementById('offerRows');
+  var tableWrap = document.getElementById('offerTableWrap');
+  var empty = document.getElementById('offerEmpty');
+  var loading = document.getElementById('offerLoading');
+  var errorBox = document.getElementById('offerError');
+  var amount = document.getElementById('offerAmount');
+  var duration = document.getElementById('offerDuration');
+  var sendButton = document.getElementById('sendOffers');
+  var selectVisible = document.getElementById('selectVisible');
+  var listings = [];
+  var selectedPlayerSlug = '';
+  var searchTimer;
+  var csrf = '{{ csrf_token }}';
+
+  function escapeHtml(value) { var node = document.createElement('span'); node.textContent = value == null ? '' : value; return node.innerHTML; }
+  function rarityName(value) { return {limited:'Limited', rare:'Rare', super_rare:'Super Rare', unique:'Unique'}[value] || value; }
+  function selectedRarities() { return Array.from(document.querySelectorAll('.direct-rarity-filter input:checked')).map(function (input) { return input.value; }); }
+  function visibleRows() { var rarities = selectedRarities(); return Array.from(rowsNode.querySelectorAll('tr')).filter(function (row) { return rarities.includes(row.dataset.rarity); }); }
+  function updateSummary() {
+    var selected = Array.from(rowsNode.querySelectorAll('.direct-card-select:checked')).filter(function (input) { return !input.closest('tr').hidden; });
+    var total = selected.length * (parseFloat(amount.value) || 0);
+    document.getElementById('selectionCount').textContent = selected.length + ' seleccionadas';
+    document.getElementById('maximumSpend').textContent = 'Máximo ' + total.toLocaleString('es-ES', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' €';
+    sendButton.disabled = !selected.length || !(parseFloat(amount.value) >= .5);
+    var visible = visibleRows(); selectVisible.checked = visible.length > 0 && visible.every(function (row) { return row.querySelector('.direct-card-select').checked; });
+  }
+  function applyRarities() { var rarities = selectedRarities(); Array.from(rowsNode.children).forEach(function (row) { row.hidden = !rarities.includes(row.dataset.rarity); }); updateSummary(); }
+  function showError(message) { errorBox.textContent = message; errorBox.hidden = false; loading.hidden = true; }
+  function renderRows() {
+    rowsNode.innerHTML = listings.map(function (row, index) { return '<tr data-index="' + index + '" data-rarity="' + escapeHtml(row.rarity) + '"><td><input class="direct-card-select" type="checkbox" aria-label="Seleccionar carta"></td><td><div class="direct-card">' + (row.picture_url ? '<img src="' + escapeHtml(row.picture_url) + '" alt="">' : '<span class="image-fallback"><i class="fas fa-user"></i></span>') + '<div><strong>#' + escapeHtml(row.serial_number || '—') + '</strong><small>' + escapeHtml(row.season_year || '') + (row.team ? ' · ' + escapeHtml(row.team) : '') + '</small></div></div></td><td><span class="direct-rarity rarity-' + escapeHtml(row.rarity) + '">' + escapeHtml(rarityName(row.rarity)) + '</span></td><td><strong>' + Number(row.price_eur).toLocaleString('es-ES', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' €</strong></td><td><a href="https://sorare.com/football/my-club/' + encodeURIComponent(row.manager_slug) + '" target="_blank" rel="noopener">' + escapeHtml(row.manager) + '</a></td><td class="direct-offer-status"><span>Pendiente</span></td></tr>'; }).join('');
+    rowsNode.querySelectorAll('.direct-card-select').forEach(function (input) { input.addEventListener('change', updateSummary); });
+    tableWrap.hidden = false; controls.hidden = false; loading.hidden = true; applyRarities();
+  }
+  function loadListings(player) {
+    selectedPlayerSlug = player.slug; search.value = player.displayName; playerResults.hidden = true; empty.hidden = true; tableWrap.hidden = true; controls.hidden = true; errorBox.hidden = true; loading.hidden = false;
+    document.getElementById('selectedPlayer').textContent = player.displayName;
+    fetch('{% url "direct_offer_listings" %}?player_slug=' + encodeURIComponent(player.slug), {credentials:'same-origin'}).then(function (response) { return response.json().then(function (payload) { if (!response.ok) throw new Error(payload.error || 'No se pudieron cargar las ventas'); return payload; }); }).then(function (payload) { listings = payload.listings || []; if (!listings.length) { loading.hidden = true; empty.hidden = false; empty.querySelector('h2').textContent = 'No hay ventas In-Season'; return; } renderRows(); }).catch(function (error) { showError(error.message); });
+  }
+  search.addEventListener('input', function () {
+    clearTimeout(searchTimer); var query = search.value.trim(); if (query.length < 2) { playerResults.hidden = true; return; }
+    searchTimer = setTimeout(function () { fetch('{% url "direct_offer_player_search" %}?q=' + encodeURIComponent(query), {credentials:'same-origin'}).then(function (response) { return response.json(); }).then(function (payload) { if (payload.error) throw new Error(payload.error); playerResults.innerHTML = (payload.players || []).map(function (player, index) { return '<button type="button" data-index="' + index + '">' + escapeHtml(player.displayName) + '</button>'; }).join(''); playerResults.hidden = false; playerResults.querySelectorAll('button').forEach(function (button) { button.addEventListener('click', function () { loadListings(payload.players[Number(button.dataset.index)]); }); }); }).catch(function (error) { showError(error.message); }); }, 250);
+  });
+  document.querySelectorAll('.direct-rarity-filter input').forEach(function (input) { input.addEventListener('change', applyRarities); });
+  amount.addEventListener('input', updateSummary);
+  selectVisible.addEventListener('change', function () { visibleRows().forEach(function (row) { row.querySelector('.direct-card-select').checked = selectVisible.checked; }); updateSummary(); });
+  sendButton.addEventListener('click', async function () {
+    var selected = Array.from(rowsNode.querySelectorAll('.direct-card-select:checked')).filter(function (input) { return !input.closest('tr').hidden; });
+    var euros = Number(amount.value); var total = selected.length * euros;
+    if (!selected.length || euros < .5) return;
+    if (!window.confirm('Enviar ' + selected.length + ' ofertas de ' + euros.toLocaleString('es-ES', {minimumFractionDigits:2}) + ' € (máximo ' + total.toLocaleString('es-ES', {minimumFractionDigits:2}) + ' €)?')) return;
+    sendButton.disabled = true; amount.disabled = true; duration.disabled = true;
+    for (var input of selected) {
+      var rowNode = input.closest('tr'); var listing = listings[Number(rowNode.dataset.index)]; var status = rowNode.querySelector('.direct-offer-status');
+      status.innerHTML = '<span class="is-running"><i class="fas fa-circle-notch fa-spin"></i> Enviando</span>';
+      try {
+        var response = await fetch('{% url "create_direct_offer" %}', {method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':csrf, 'Content-Type':'application/json'}, body:JSON.stringify({player_slug:selectedPlayerSlug, asset_id:listing.asset_id, manager_slug:listing.manager_slug, euros:euros.toFixed(2), duration_hours:Number(duration.value)})});
+        var payload = await response.json(); if (!response.ok) throw new Error(payload.error || 'No se pudo enviar');
+        status.innerHTML = '<span class="is-success"><i class="fas fa-circle-check"></i> Enviada</span>'; input.disabled = true;
+      } catch (error) { status.innerHTML = '<span class="is-error" title="' + escapeHtml(error.message) + '"><i class="fas fa-triangle-exclamation"></i> Error</span>'; }
+    }
+    amount.disabled = false; duration.disabled = false; updateSummary();
+  });
+})();
+</script>
+{% endblock %}

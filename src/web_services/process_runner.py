@@ -143,3 +143,24 @@ def run_card_sale(
         "--no-relist",
     ]
     return _run_command(cmd, paths.repo_root)
+
+
+def run_direct_offer(
+    paths: SorarePaths,
+    *,
+    asset_id: str,
+    manager_slug: str,
+    euros: str,
+    duration_hours: int = 48,
+) -> ScriptResult:
+    amount_cents = int(round(float(euros) * 100))
+    cmd = [
+        "node",
+        str(paths.repo_root / "javascript" / "vender_carta.js"),
+        "--direct-offer",
+        asset_id.strip(),
+        manager_slug.strip(),
+        str(amount_cents),
+        str(int(duration_hours)),
+    ]
+    return _run_command(cmd, paths.repo_root)

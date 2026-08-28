@@ -15,6 +15,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -109,6 +113,13 @@ nav a:hover {
   background: rgba(255, 255, 255, 0.5);
 }
 
+.nav-settings { position: relative; align-self: center; }
+.nav-settings > summary { display: flex; align-items: center; gap: .45rem; padding: .55rem .9rem; border: 1px solid transparent; border-radius: 999px; cursor: pointer; font-size: .9rem; list-style: none; }
+.nav-settings > summary::-webkit-details-marker { display: none; }
+.nav-settings > summary:hover { border-color: var(--line); background: rgba(255,255,255,.5); }
+.nav-settings > div { position: absolute; z-index: 50; top: calc(100% + .4rem); right: 0; display: grid; min-width: 150px; padding: .35rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
+.nav-settings > div a { border-radius: 6px; }
+
 .user-badge {
   display: flex;
   align-items: center;
@@ -139,6 +150,58 @@ nav a:hover {
 
 .page:has(.movements-page) {
   width: min(1450px, 97vw);
+}
+
+.direct-offers-page { display: grid; gap: .75rem; }
+.direct-offer-head { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(240px,.7fr) minmax(300px,1fr); align-items: end; gap: 1rem; padding: .85rem 1rem; }
+.direct-offer-head h1 { margin: .1rem 0 0; }
+.direct-player-search { position: relative; display: grid; gap: .25rem; }
+.direct-player-search > span, .direct-offer-terms label > span:first-child { color: var(--muted); font-size: .72rem; font-weight: 700; }
+.direct-player-search input { width: 100%; }
+.direct-player-search > div { position: absolute; z-index: 30; top: calc(100% + .25rem); right: 0; left: 0; padding: .35rem; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: var(--shadow); }
+.direct-player-search > div button { display: block; width: 100%; padding: .55rem; border: 0; border-radius: 5px; background: transparent; text-align: left; cursor: pointer; }
+.direct-player-search > div button:hover { background: #eef8f6; }
+.direct-offer-controls { display: grid; grid-template-columns: minmax(180px,.65fr) auto minmax(380px,1fr); align-items: end; gap: .75rem 1rem; padding: .7rem 1rem; }
+.direct-offer-controls h2 { margin: .1rem 0 0; font-size: 1.05rem; }
+.direct-rarity-filter { display: flex; flex-wrap: wrap; gap: .3rem; }
+.direct-rarity-filter input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.direct-rarity-filter span { display: block; padding: .45rem .6rem; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--muted); font-size: .72rem; font-weight: 700; cursor: pointer; }
+.direct-rarity-filter input:checked + span { border-color: var(--accent); background: #e8f7f4; color: var(--accent); }
+.direct-offer-terms { display: grid; grid-template-columns: minmax(110px,1fr) minmax(110px,1fr) auto; align-items: end; gap: .45rem; }
+.direct-offer-terms label { display: grid; gap: .25rem; }
+.money-input { display: grid; grid-template-columns: 1fr auto; align-items: center; }
+.money-input input { grid-column: 1 / -1; grid-row: 1; padding-right: 1.8rem; }
+.money-input b { grid-column: 2; grid-row: 1; margin-right: .65rem; }
+.direct-selection-summary { grid-column: 1 / -1; display: flex; align-items: center; gap: 1rem; padding-top: .45rem; border-top: 1px solid var(--line); font-size: .78rem; }
+.direct-selection-summary span { color: var(--muted); }
+.direct-offer-results { min-height: 250px; padding: .75rem 1rem; }
+.direct-offer-empty { display: grid; min-height: 210px; place-items: center; align-content: center; gap: .6rem; color: var(--muted); }
+.direct-offer-empty i { font-size: 1.6rem; color: var(--accent); }
+.direct-offer-empty h2 { margin: 0; font-size: 1rem; }
+.direct-offer-error { padding: .7rem; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; color: var(--bad); }
+.direct-offer-table-wrap { overflow-x: auto; }
+.direct-offer-table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.direct-offer-table th, .direct-offer-table td { padding: .55rem; border-bottom: 1px solid var(--line); font-size: .8rem; text-align: left; }
+.direct-card { display: flex; align-items: center; gap: .5rem; }
+.direct-card img, .direct-card > span { width: 34px; height: 46px; object-fit: cover; border-radius: 4px; }
+.direct-card div { display: grid; gap: .1rem; }
+.direct-card small { color: var(--muted); }
+.direct-rarity { display: inline-block; padding: .22rem .4rem; border-radius: 5px; background: #eee; font-size: .7rem; font-weight: 700; }
+.direct-rarity.rarity-limited { background: #fff7d6; color: #8a6700; }
+.direct-rarity.rarity-rare { background: #fee2e2; color: #b91c1c; }
+.direct-rarity.rarity-super_rare { background: #dbeafe; color: #1d4ed8; }
+.direct-rarity.rarity-unique { background: #111827; color: #fff; }
+.direct-offer-status span { display: inline-flex; align-items: center; gap: .3rem; white-space: nowrap; }
+.direct-offer-status .is-running { color: var(--accent); }
+.direct-offer-status .is-success { color: var(--good); }
+.direct-offer-status .is-error { color: var(--bad); }
+
+@media (max-width: 1500px) and (min-width: 781px) {
+  .site-header nav { gap: .2rem; }
+  .site-header nav > a { justify-content: center; width: 40px; padding: .55rem; }
+  .site-header nav > a > span,
+  .nav-settings > summary > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .nav-settings > summary { justify-content: center; width: 40px; padding: .55rem; }
 }
 
 .panel {
@@ -1353,6 +1416,11 @@ pre {
     gap: .15rem;
   }
 
+  .nav-settings { width: 100%; }
+  .nav-settings > summary { justify-content: center; min-height: 34px; padding: .4rem 0; border-radius: 8px; }
+  .nav-settings > summary span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .nav-settings > div { position: fixed; top: 112px; right: .7rem; min-width: 165px; }
+
   nav a {
     justify-content: center;
     min-width: 0;
@@ -1376,6 +1444,24 @@ pre {
   }
 
   .user-badge > span { display: none; }
+
+  .direct-offer-head { grid-template-columns: 1fr; padding: .7rem; }
+  .direct-offer-head h1 { font-size: 1.25rem; }
+  .direct-offer-controls { grid-template-columns: 1fr; padding: .7rem; }
+  .direct-offer-terms { grid-template-columns: 1fr 1fr; }
+  .direct-offer-terms .btn { grid-column: 1 / -1; }
+  .direct-selection-summary { grid-column: 1; flex-wrap: wrap; gap: .45rem 1rem; }
+  .direct-offer-results { padding: .55rem; }
+  .direct-offer-table, .direct-offer-table tbody { display: block; min-width: 0; }
+  .direct-offer-table thead { display: none; }
+  .direct-offer-table tr { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: .25rem .5rem; margin-bottom: .45rem; padding: .55rem; border: 1px solid var(--line); border-radius: 8px; }
+  .direct-offer-table td { padding: 0; border: 0; }
+  .direct-offer-table td:nth-child(1) { grid-column: 1; grid-row: 1 / 3; }
+  .direct-offer-table td:nth-child(2) { grid-column: 2; grid-row: 1 / 3; }
+  .direct-offer-table td:nth-child(3) { grid-column: 3; grid-row: 1; }
+  .direct-offer-table td:nth-child(4) { grid-column: 3; grid-row: 2; text-align: right; }
+  .direct-offer-table td:nth-child(5) { grid-column: 2; grid-row: 3; overflow: hidden; text-overflow: ellipsis; }
+  .direct-offer-table td:nth-child(6) { grid-column: 3; grid-row: 3; text-align: right; }
 
   .table-head {
     flex-direction: column;
