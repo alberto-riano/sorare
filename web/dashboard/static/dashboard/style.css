@@ -1657,13 +1657,38 @@ body.modal-open { overflow: hidden; }
 .movement-summary-title p { margin: 0; }
 .movement-summary-title strong { font-size: .95rem; }
 .movement-summary-title > span { color: var(--muted); font-size: .78rem; }
-.trading-global-summary { display: grid; width: min(100%, 520px); gap: .28rem; padding-top: .9rem; padding-bottom: .9rem; }
-.trading-global-summary > span { color: var(--muted); font-size: .78rem; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
-.trading-global-summary > span i { color: var(--accent); }
-.trading-global-summary > div { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; }
-.trading-global-summary > div strong { font: 750 1.5rem "IBM Plex Mono",monospace; }
-.trading-global-summary > div b { color: var(--muted); font-size: 1.1rem; }
-.trading-global-summary > small { color: var(--muted); }
+.trading-global-summary { width: min(100%, 560px); padding-top: .9rem; padding-bottom: .9rem; transition: width .2s ease; }
+.trading-global-summary[open] { width: min(100%, 920px); }
+.trading-global-summary > summary { display: grid; gap: .28rem; list-style: none; cursor: pointer; }
+.trading-global-summary > summary::-webkit-details-marker { display: none; }
+.trading-global-summary > span, .trading-global-summary > summary > span { color: var(--muted); font-size: .78rem; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.trading-global-summary > span i, .trading-global-summary > summary > span i { color: var(--accent); }
+.trading-global-summary > div:not(.trading-pending-panel), .trading-global-summary > summary > div { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; }
+.trading-global-summary > div:not(.trading-pending-panel) strong, .trading-global-summary > summary > div strong { font: 750 1.5rem "IBM Plex Mono",monospace; }
+.trading-global-summary > div:not(.trading-pending-panel) b, .trading-global-summary > summary > div b { color: var(--muted); font-size: 1.1rem; }
+.trading-global-summary > small, .trading-global-summary > summary > small { color: var(--muted); }
+.trading-summary-chevron { margin-left: auto; color: var(--accent); font-size: .85rem; transition: transform .18s ease; }
+.trading-global-summary[open] .trading-summary-chevron { transform: rotate(180deg); }
+.trading-pending-panel { display: grid; gap: .7rem; margin-top: .85rem; padding-top: .8rem; border-top: 1px solid var(--line); }
+.trading-pending-panel > header { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
+.trading-pending-panel > header > div { display: grid; gap: .08rem; }
+.trading-pending-panel > header > div:last-child { justify-items: end; text-align: right; }
+.trading-pending-panel header span { color: var(--muted); font-size: .7rem; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.trading-pending-panel header strong { color: var(--accent); font: 750 1.12rem "IBM Plex Mono",monospace; }
+.trading-pending-panel header small { color: var(--muted); font-size: .72rem; }
+.trading-pending-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .45rem; }
+.trading-pending-list article { display: grid; grid-template-columns: 38px minmax(0,1fr) auto; align-items: center; gap: .55rem; min-width: 0; padding: .48rem .55rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.trading-pending-list article > img, .trading-pending-list article > .movement-avatar { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; }
+.trading-pending-list article > div { display: grid; min-width: 0; gap: .06rem; }
+.trading-pending-list article > div strong, .trading-pending-list article > div small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trading-pending-list article > div small { color: var(--muted); font-size: .69rem; }
+.trading-card-floor { display: grid; justify-items: end; color: var(--accent); font: 750 .88rem "IBM Plex Mono",monospace; white-space: nowrap; }
+.trading-card-floor small { color: var(--muted); font: 500 .6rem Inter,sans-serif; }
+.trading-card-floor.is-missing { color: var(--muted); font-family: Inter,sans-serif; font-size: .72rem; }
+@media (max-width: 680px) {
+  .trading-pending-panel > header { align-items: start; }
+  .trading-pending-list { grid-template-columns: 1fr; }
+}
 .movement-kpis { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .8rem; }
 .movement-kpis article { display: grid; gap: .2rem; }
 .movement-kpis span, .movement-kpis small { color: var(--muted); }

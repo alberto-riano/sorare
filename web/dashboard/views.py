@@ -447,7 +447,7 @@ def movements(request):
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
         stored_snapshot = MovementSnapshot.objects.filter(user=request.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 16 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 17 else None
         active_sync = MovementSyncJob.objects.filter(
             user=request.user,
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
@@ -645,6 +645,18 @@ def movements(request):
                 str(card.get("serial_number") or ""),
             ))
             pending_trading_cards[key] = card
+    pending_trading_card_rows = sorted(
+        pending_trading_cards.values(),
+        key=lambda card: str(card.get("player") or "").casefold(),
+    )
+    pending_trading_value = sum(
+        Decimal(str(card.get("market_floor_eur") or 0))
+        for card in pending_trading_card_rows
+    )
+    pending_trading_unvalued = sum(
+        card.get("market_floor_eur") is None
+        for card in pending_trading_card_rows
+    )
     totals = {
         "purchases": sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases),
         "sales_gross": sum(Decimal(str(row.get("gross_eur") or 0)) for row in sales),
@@ -681,6 +693,9 @@ def movements(request):
             for cycle in cycles if cycle.get("balance_eur") is not None
         ),
         "trading_pending_cards": len(pending_trading_cards),
+        "trading_pending_card_rows": pending_trading_card_rows,
+        "trading_pending_value": pending_trading_value,
+        "trading_pending_unvalued": pending_trading_unvalued,
         "balance": (
             sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
             - sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases)
@@ -725,7 +740,7 @@ def movements(request):
 
 
 def movement_analytics(request):
-    snapshot = MovementSnapshot.objects.filter(user=request.user, source_version__gte=16).first()
+    snapshot = MovementSnapshot.objects.filter(user=request.user, source_version__gte=17).first()
     if not snapshot:
         return render(request, "dashboard/movement_analytics.html", {"snapshot": None})
 

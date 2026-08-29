@@ -22,6 +22,21 @@ query MovementCards($assetIds: [String!]!) {{
 }}
 """
 
+PENDING_CARD_FLOORS_QUERY = """
+query MovementPendingFloors($assetIds: [String!]!) {
+  tokens {
+    anyCards(assetIds: $assetIds) {
+      assetId
+      lowestPriceCard {
+        liveSingleSaleOffer {
+          receiverSide { amounts { eurCents wei referenceCurrency } }
+        }
+      }
+    }
+  }
+}
+"""
+
 COMPLETED_TRADES_QUERY = """
 query CompletedTrades($first: Int!, $after: String) {
   currentUser {
@@ -937,6 +952,46 @@ def build_crafting_history(movements: list[dict]) -> list[dict]:
     return history
 
 
+def enrich_pending_card_floors(
+    movements: list[dict],
+    *,
+    headers: dict,
+    progress: Callable[[int, str], None] | None = None,
+) -> int:
+    """Guarda el suelo actual solo para las cartas recibidas aún no vendidas."""
+    pending_by_asset: dict[str, dict] = {}
+    for cycle in build_trade_cycles(movements):
+        for card in cycle.get("pending_received_cards") or []:
+            asset_id = str(card.get("asset_id") or "")
+            if asset_id:
+                pending_by_asset[asset_id] = card
+    if not pending_by_asset:
+        return 0
+
+    floors: dict[str, float | None] = {}
+    asset_ids = sorted(pending_by_asset)
+    for start in range(0, len(asset_ids), 20):
+        chunk = asset_ids[start:start + 20]
+        data = graphql_request(PENDING_CARD_FLOORS_QUERY, {"assetIds": chunk}, headers=headers)
+        for raw_card in (data.get("tokens") or {}).get("anyCards") or []:
+            asset_id = str((raw_card or {}).get("assetId") or "")
+            if not asset_id:
+                continue
+            offer = (((raw_card or {}).get("lowestPriceCard") or {}).get("liveSingleSaleOffer") or {})
+            amounts = ((offer.get("receiverSide") or {}).get("amounts") or {})
+            floors[asset_id] = _money(amounts).get("eur") or None
+        if progress:
+            progress(len(movements), f"Valorando cartas pendientes {min(start + 20, len(asset_ids))}/{len(asset_ids)}")
+
+    for movement in movements:
+        for field in ("cards", "sent_cards", "received_cards"):
+            for card in movement.get(field) or []:
+                asset_id = str(card.get("asset_id") or "")
+                if asset_id in pending_by_asset:
+                    card["market_floor_eur"] = floors.get(asset_id)
+    return len(asset_ids)
+
+
 def collect_public_reward_history(
     manager_slug: str,
     *,
@@ -1200,6 +1255,7 @@ def collect_movement_history(
         movements.append(reward)
         known_ids.add(reward["id"])
     movements.extend(crafting_movements)
+    enrich_pending_card_floors(movements, headers=headers, progress=progress)
     if progress:
         progress(len(trades), f"{len(movements)} movimientos completados y recompensas")
 

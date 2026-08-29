@@ -58,14 +58,40 @@
 
   {% if snapshot %}
   {% if selected_category == 'trading' %}
-  <section class="panel trading-global-summary">
-    <span><i class="fas fa-scale-balanced"></i> Balance global</span>
-    <div>
-      <strong class="{% if totals.trading_balance < 0 %}is-out{% else %}is-in{% endif %}">{% if totals.trading_balance > 0 %}+{% endif %}{{ totals.trading_balance|floatformat:2 }} €</strong>
-      {% if totals.trading_pending_cards %}<b>+</b><strong>{{ totals.trading_pending_cards }} carta{{ totals.trading_pending_cards|pluralize:"s" }}</strong>{% endif %}
+  {% if totals.trading_pending_cards %}
+  <details class="panel trading-global-summary">
+    <summary>
+      <span><i class="fas fa-scale-balanced"></i> Balance global</span>
+      <div>
+        <strong class="{% if totals.trading_balance < 0 %}is-out{% else %}is-in{% endif %}">{% if totals.trading_balance > 0 %}+{% endif %}{{ totals.trading_balance|floatformat:2 }} €</strong>
+        <b>+</b><strong>{{ totals.trading_pending_cards }} carta{{ totals.trading_pending_cards|pluralize:"s" }}</strong>
+        <i class="fas fa-chevron-down trading-summary-chevron" aria-hidden="true"></i>
+      </div>
+      <small>Haz clic para ver las cartas pendientes y su valor de mercado.</small>
+    </summary>
+    <div class="trading-pending-panel">
+      <header>
+        <div><span>Cartas aún sin vender</span><small>Valor orientativo según el suelo fijo activo de cada carta.</small></div>
+        <div><span>Valor observable</span><strong>{{ totals.trading_pending_value|floatformat:2 }} €</strong>{% if totals.trading_pending_unvalued %}<small>{{ totals.trading_pending_unvalued }} sin venta activa</small>{% endif %}</div>
+      </header>
+      <div class="trading-pending-list">
+        {% for card in totals.trading_pending_card_rows %}
+        <article>
+          {% if card.player_picture_url %}<img src="{{ card.player_picture_url }}" alt="" loading="lazy">{% else %}<span class="movement-avatar"><i class="fas fa-user"></i></span>{% endif %}
+          <div><strong><span class="card-rarity-dot rarity-{{ card.rarity }}"></span>{{ card.player }}</strong><small>{{ card.team }} · {% if card.in_season %}In-Season{% else %}Classic{% endif %} · #{{ card.serial_number|default:'—' }}</small></div>
+          {% if card.market_floor_eur != None %}<strong class="trading-card-floor">{{ card.market_floor_eur|floatformat:2 }} €<small>suelo actual</small></strong>{% else %}<strong class="trading-card-floor is-missing">Sin venta<small>activa</small></strong>{% endif %}
+        </article>
+        {% endfor %}
+      </div>
     </div>
-    <small>Efectivo realizado{% if totals.trading_pending_cards %} y cartas recibidas que aún no se han vendido{% endif %}.</small>
+  </details>
+  {% else %}
+  <section class="panel trading-global-summary is-static">
+    <span><i class="fas fa-scale-balanced"></i> Balance global</span>
+    <div><strong class="{% if totals.trading_balance < 0 %}is-out{% else %}is-in{% endif %}">{% if totals.trading_balance > 0 %}+{% endif %}{{ totals.trading_balance|floatformat:2 }} €</strong></div>
+    <small>Efectivo realizado.</small>
   </section>
+  {% endif %}
   {% else %}
   <div class="movement-summary-title"><div><p class="kicker">Resumen de la selección</p><strong>Calculado con los filtros aplicados</strong></div><span>{{ totals.movement_count }} operaciones contabilizadas</span></div>
   <section class="movement-kpis">
