@@ -2054,9 +2054,43 @@ class OpportunityMarketTests(TestCase):
         self.assertNotContains(response, "Buscar jugador")
         self.assertNotContains(response, "Descuento mínimo</span>")
         self.assertNotContains(response, "Por página")
+        self.assertNotContains(response, "Solo oportunidades")
+        self.assertNotContains(response, "Universo")
+        self.assertEqual(response.context["focus_rarity"], "limited")
+        self.assertEqual(response.context["sort"], "floor")
 
-        signals_only = self.client.get(reverse("opportunities"), {"signals_only": "1"})
-        self.assertNotContains(signals_only, ">Sin señal<")
+        rare_focus = self.client.get(reverse("opportunities"), {"focus": "rare"})
+        content = rare_focus.content.decode()
+        self.assertLess(content.index('class="rarity-rare is-focus"'), content.index('class="rarity-limited"'))
+
+    def test_shields_filter_teams_and_focused_rarity_orders_its_floor(self):
+        OpportunitySnapshot.objects.create(
+            rows=[{
+                "player": "Rare cara", "player_slug": "rare-cara", "team": "Real Madrid",
+                "team_slug": "real-madrid-madrid", "position": "Forward",
+                "recommended_rarity": None, "discount_percent": 0,
+                "limited": {"floor": 2}, "rare": {"floor": 20},
+            }, {
+                "player": "Rare barata", "player_slug": "rare-barata", "team": "FC Barcelona",
+                "team_slug": "barcelona-barcelona", "position": "Midfielder",
+                "recommended_rarity": None, "discount_percent": 0,
+                "limited": {"floor": 6}, "rare": {"floor": 10},
+            }],
+            metadata={"team_catalog": [
+                {"slug": "real-madrid-madrid", "name": "Real Madrid"},
+                {"slug": "barcelona-barcelona", "name": "FC Barcelona"},
+            ]},
+        )
+
+        focused = self.client.get(reverse("opportunities"), {"focus": "rare", "sort": "floor"})
+        self.assertEqual([row["player"] for row in focused.context["page_obj"]], ["Rare barata", "Rare cara"])
+
+        filtered = self.client.get(reverse("opportunities"), {
+            "focus": "rare", "teams": ["real-madrid-madrid"],
+        })
+        self.assertContains(filtered, "Rare cara")
+        self.assertNotContains(filtered, "Rare barata")
+        self.assertEqual(filtered.context["selected_team_slugs"], {"real-madrid-madrid"})
 
     def test_team_selector_uses_club_shields_and_accessible_names(self):
         OpportunitySnapshot.objects.create(
@@ -2075,6 +2109,7 @@ class OpportunityMarketTests(TestCase):
 
         self.assertContains(response, "deportivo-la-coruna-logo-png_seeklogo-187816.png")
         self.assertContains(response, 'title="Real Club Deportivo de La Coruña"')
+        self.assertContains(response, 'name="teams" value="deportivo-la-coruna-a-coruna"')
 
     @patch("web_services.opportunity_market.collect_opportunity_market")
     def test_worker_persists_snapshot_and_finishes_job(self, collect):

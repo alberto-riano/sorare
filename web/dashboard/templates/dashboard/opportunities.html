@@ -17,7 +17,7 @@
 
   <section class="panel opportunity-team-refresh reveal">
     <div class="opportunity-team-refresh-head">
-      <div><p class="kicker">Actualización por equipos</p><h2>Elige qué clubes analizar</h2><p>Puedes empezar por uno o varios equipos y completar el resto más adelante.</p></div>
+      <div><p class="kicker">Equipos</p><h2>Filtra y actualiza con los escudos</h2><p>Los clubes activos son los que ves en la tabla y los que se actualizarán.</p></div>
       <div class="opportunity-team-refresh-actions">
         <label><input type="checkbox" id="refreshAllTeams" {% if refresh_all_teams %}checked{% endif %}> <span>Seleccionar todos</span></label>
         <button class="btn btn-accent" type="button" id="refreshOpportunities" {% if active_refresh %}disabled{% endif %}>
@@ -28,7 +28,7 @@
     </div>
     {% if refresh_team_catalog %}<div class="opportunity-team-grid">
       {% for team in refresh_team_catalog %}<label class="opportunity-team-choice" title="{{ team.name }}">
-        <input type="checkbox" class="opportunity-refresh-team" value="{{ team.slug }}" {% if refresh_all_teams or team.slug in selected_refresh_team_slugs %}checked{% endif %}>
+        <input type="checkbox" class="opportunity-refresh-team" name="teams" value="{{ team.slug }}" form="opportunityFilters" {% if refresh_all_teams or team.slug in selected_team_slugs %}checked{% endif %}>
         {% if team.picture_url %}<img src="{{ team.picture_url }}" alt="{{ team.name }}">{% else %}<span class="opportunity-team-fallback">{{ team.name|slice:':2' }}</span>{% endif %}
         <span class="sr-only">{{ team.name }}</span>
         {% if team.slug in refreshed_team_slugs %}<i class="fas fa-circle-check" title="Ya tiene datos"></i>{% endif %}
@@ -39,8 +39,7 @@
   <section class="opportunity-kpis reveal">
     <article class="panel"><span><i class="fas fa-scale-balanced"></i> Relación Rare / Limited</span><strong>{{ metadata.rare_limited_ratio|default:'—' }}×</strong><small>{% if metadata.ratio_source == 'learned' %}Calculada con {{ metadata.ratio_sample }} jugadores comparables{% else %}Referencia prudente hasta tener más comparables{% endif %}</small></article>
     <article class="panel"><span><i class="fas fa-users"></i> Jugadores analizados</span><strong>{{ metadata.players_analyzed|default:0 }}</strong><small>{{ metadata.active_listings|default:0 }} precios suelo activos · plantillas completas</small></article>
-    <article class="panel opportunity-kpi-highlight"><span><i class="fas fa-bolt"></i> Señales detectadas</span><strong>{{ metadata.opportunities|default:0 }}</strong><small>Descuento mínimo del algoritmo: 12%</small></article>
-    <article class="panel"><span><i class="fas fa-filter-circle-dollar"></i> Universo</span><strong>Limited + Rare</strong><small>Venta fija y ofertas públicas · sin subastas</small></article>
+    <article class="panel opportunity-kpi-highlight"><span><i class="fas fa-bolt"></i> Señales detectadas</span><strong>{{ metadata.opportunities|default:0 }}</strong><small>Con al menos un 12% de diferencia</small></article>
   </section>
 
   <section class="panel opportunity-progress" id="opportunityProgress" {% if not active_refresh %}hidden{% endif %}>
@@ -51,26 +50,29 @@
   {% if snapshot %}
   <section class="panel opportunity-controls reveal">
     <form method="get" id="opportunityFilters" class="opportunity-filters">
-      <label class="opportunity-filter-field"><span><i class="fas fa-shield-halved"></i> Equipo</span><select name="team"><option value="">Todos los equipos</option>{% for team in available_teams %}<option value="{{ team }}" {% if selected_team == team %}selected{% endif %}>{{ team }}</option>{% endfor %}</select></label>
+      <fieldset class="opportunity-rarity-switch"><legend>Vista principal</legend><label class="is-limited"><input type="radio" name="focus" value="limited" {% if focus_rarity == 'limited' %}checked{% endif %}><span><i class="fas fa-gem"></i> Amarillas</span></label><label class="is-rare"><input type="radio" name="focus" value="rare" {% if focus_rarity == 'rare' %}checked{% endif %}><span><i class="fas fa-gem"></i> Rojas</span></label></fieldset>
       <label class="opportunity-filter-field"><span><i class="fas fa-person-running"></i> Posición</span><select name="position"><option value="">Todas las posiciones</option>{% for position in available_positions %}<option value="{{ position }}" {% if selected_position == position %}selected{% endif %}>{{ position }}</option>{% endfor %}</select></label>
-      <label class="opportunity-filter-field"><span><i class="fas fa-gem"></i> Oportunidad</span><select name="opportunity_rarity"><option value="">Limited y Rare</option><option value="limited" {% if selected_rarity == 'limited' %}selected{% endif %}>Solo Limited</option><option value="rare" {% if selected_rarity == 'rare' %}selected{% endif %}>Solo Rare</option></select></label>
-      <label class="opportunity-filter-field"><span><i class="fas fa-arrow-down-wide-short"></i> Ordenar</span><select name="sort"><option value="discount" {% if sort == 'discount' %}selected{% endif %}>Mayor oportunidad</option><option value="player" {% if sort == 'player' %}selected{% endif %}>Nombre del jugador</option><option value="floor" {% if sort == 'floor' %}selected{% endif %}>Menor precio suelo</option></select></label>
-      <label class="opportunity-check"><input type="checkbox" name="signals_only" value="1" {% if not show_all %}checked{% endif %}><span><i class="fas fa-bolt"></i><b>Solo oportunidades</b><small>{% if show_all %}Ahora se muestran todos{% else %}Filtro activo{% endif %}</small></span></label>
+      <label class="opportunity-filter-field"><span><i class="fas fa-arrow-down-wide-short"></i> Ordenar</span><select name="sort" id="opportunitySort"><option value="floor" {% if sort == 'floor' %}selected{% endif %}>Precio más bajo</option><option value="discount" {% if sort == 'discount' %}selected{% endif %}>Mayor oportunidad</option><option value="player" {% if sort == 'player' %}selected{% endif %}>Nombre del jugador</option></select></label>
       <a class="btn btn-secondary opportunity-clear" href="{% url 'opportunities' %}"><i class="fas fa-rotate-left"></i> Limpiar</a>
     </form>
   </section>
 
   <section class="panel opportunity-results reveal">
-    <div class="table-head"><div><p class="kicker">Mercado fijo</p><h2>{{ filtered_count }} resultados</h2></div><p>{% if show_all %}<i class="fas fa-users"></i> Plantillas completas, tengan suelo, ventas comparables o todavía no haya datos.{% else %}<i class="fas fa-bolt"></i> Solo señales de oportunidad.{% endif %}</p></div>
+    <div class="table-head"><div><p class="kicker">Mercado fijo</p><h2>{{ filtered_count }} resultados</h2></div><p><i class="fas fa-users"></i> Todos los jugadores de los equipos activos, tengan o no una señal.</p></div>
     <div class="opportunity-table-wrap">
       <table class="opportunity-table">
-        <thead><tr><th>Jugador</th><th class="rarity-limited">Limited</th><th class="rarity-rare">Rare</th><th>Señal</th><th></th></tr></thead>
+        <thead><tr><th>Jugador</th>{% if focus_rarity == 'rare' %}<th class="rarity-rare is-focus">Rare <small>principal</small></th><th class="rarity-limited">Limited <small>referencia</small></th>{% else %}<th class="rarity-limited is-focus">Limited <small>principal</small></th><th class="rarity-rare">Rare <small>referencia</small></th>{% endif %}<th>Señal</th><th></th></tr></thead>
         <tbody>
         {% for row in page_obj %}
           <tr class="opportunity-main-row" data-evidence="evidence-{{ forloop.counter }}">
             <td><div class="opportunity-player">{% if row.player_picture_url %}<img src="{{ row.player_picture_url }}" alt="">{% endif %}<div><strong>{{ row.player }}</strong><span>{% if row.team_picture_url %}<img src="{{ row.team_picture_url }}" alt="">{% endif %}{{ row.team }} · {{ row.position }}</span></div></div></td>
+            {% if focus_rarity == 'rare' %}
+            <td class="opportunity-focus-cell">{% if row.rare.floor %}<div class="opportunity-price"><small>Suelo fijo</small><strong>{{ row.rare.floor|floatformat:2 }} €</strong><span>Valor observado {{ row.rare.market_value|floatformat:2 }} €</span>{% if row.rare.sales_reference %}<em>{{ row.rare.sales|length }} comparables · ref. {{ row.rare.sales_reference|floatformat:2 }} €</em>{% else %}<em>Sin ventas comparables</em>{% endif %}</div>{% elif row.rare.sales_reference %}<div class="opportunity-price opportunity-price-estimated"><small>Sin suelo activo</small><strong>{{ row.rare.market_value|floatformat:2 }} €</strong><span>Valor estimado por ventas</span><em>{{ row.rare.sales|length }} comparables</em></div>{% else %}<span class="muted-dash">Sin datos de mercado</span>{% endif %}</td>
             <td>{% if row.limited.floor %}<div class="opportunity-price"><small>Suelo fijo</small><strong>{{ row.limited.floor|floatformat:2 }} €</strong><span>Valor observado {{ row.limited.market_value|floatformat:2 }} €</span>{% if row.limited.sales_reference %}<em>{{ row.limited.sales|length }} comparables · ref. {{ row.limited.sales_reference|floatformat:2 }} €</em>{% else %}<em>Sin ventas comparables</em>{% endif %}</div>{% elif row.limited.sales_reference %}<div class="opportunity-price opportunity-price-estimated"><small>Sin suelo activo</small><strong>{{ row.limited.market_value|floatformat:2 }} €</strong><span>Valor estimado por ventas</span><em>{{ row.limited.sales|length }} comparables</em></div>{% else %}<span class="muted-dash">Sin datos de mercado</span>{% endif %}</td>
+            {% else %}
+            <td class="opportunity-focus-cell">{% if row.limited.floor %}<div class="opportunity-price"><small>Suelo fijo</small><strong>{{ row.limited.floor|floatformat:2 }} €</strong><span>Valor observado {{ row.limited.market_value|floatformat:2 }} €</span>{% if row.limited.sales_reference %}<em>{{ row.limited.sales|length }} comparables · ref. {{ row.limited.sales_reference|floatformat:2 }} €</em>{% else %}<em>Sin ventas comparables</em>{% endif %}</div>{% elif row.limited.sales_reference %}<div class="opportunity-price opportunity-price-estimated"><small>Sin suelo activo</small><strong>{{ row.limited.market_value|floatformat:2 }} €</strong><span>Valor estimado por ventas</span><em>{{ row.limited.sales|length }} comparables</em></div>{% else %}<span class="muted-dash">Sin datos de mercado</span>{% endif %}</td>
             <td>{% if row.rare.floor %}<div class="opportunity-price"><small>Suelo fijo</small><strong>{{ row.rare.floor|floatformat:2 }} €</strong><span>Valor observado {{ row.rare.market_value|floatformat:2 }} €</span>{% if row.rare.sales_reference %}<em>{{ row.rare.sales|length }} comparables · ref. {{ row.rare.sales_reference|floatformat:2 }} €</em>{% else %}<em>Sin ventas comparables</em>{% endif %}</div>{% elif row.rare.sales_reference %}<div class="opportunity-price opportunity-price-estimated"><small>Sin suelo activo</small><strong>{{ row.rare.market_value|floatformat:2 }} €</strong><span>Valor estimado por ventas</span><em>{{ row.rare.sales|length }} comparables</em></div>{% else %}<span class="muted-dash">Sin datos de mercado</span>{% endif %}</td>
+            {% endif %}
             <td>{% if row.recommended_rarity %}<div class="opportunity-signal signal-{{ row.recommended_rarity }}"><small>Comprar {{ row.recommended_rarity|title }}</small><strong>−{{ row.discount_percent|floatformat:1 }}%</strong><span>Confianza {% if row.confidence == 'high' %}alta{% else %}media{% endif %}</span></div>{% else %}<div class="opportunity-no-signal"><strong>Sin señal</strong><span>Precio coherente o evidencia baja</span></div>{% endif %}</td>
             <td><div class="opportunity-actions"><button type="button" class="opportunity-evidence-button" title="Ver cálculo"><i class="fas fa-chevron-down"></i></button><a href="https://sorare.com/football/players/{{ row.player_slug }}" target="_blank" rel="noopener" title="Abrir en Sorare"><i class="fas fa-arrow-up-right-from-square"></i></a></div></td>
           </tr>
@@ -102,6 +104,8 @@
   var progress = document.getElementById('opportunityProgress');
   var allTeams = document.getElementById('refreshAllTeams');
   var teamInputs = Array.prototype.slice.call(document.querySelectorAll('.opportunity-refresh-team'));
+  var form = document.getElementById('opportunityFilters');
+  var filterTimer = null;
   var csrf = '{{ csrf_token }}';
   var activeJob = {% if active_refresh %}{{ active_refresh.id }}{% else %}null{% endif %};
   function poll() {
@@ -127,10 +131,19 @@
   function syncAllTeams() {
     if (allTeams) allTeams.checked = teamInputs.length > 0 && teamInputs.every(function (input) { return input.checked; });
   }
+  function submitFilters() {
+    if (!form) return;
+    window.clearTimeout(filterTimer);
+    filterTimer = window.setTimeout(function () { form.submit(); }, 220);
+  }
   if (allTeams) allTeams.addEventListener('change', function () {
     teamInputs.forEach(function (input) { input.checked = allTeams.checked; });
+    if (allTeams.checked) submitFilters();
   });
-  teamInputs.forEach(function (input) { input.addEventListener('change', syncAllTeams); });
+  teamInputs.forEach(function (input) { input.addEventListener('change', function () {
+    syncAllTeams();
+    if (teamInputs.some(function (teamInput) { return teamInput.checked; })) submitFilters();
+  }); });
   if (button) button.addEventListener('click', function () {
     var selectedTeams = teamInputs.filter(function (input) { return input.checked; }).map(function (input) { return input.value; });
     if (teamInputs.length && !selectedTeams.length) {
@@ -178,8 +191,10 @@
       row.querySelector('.opportunity-evidence-button i').className = 'fas ' + (evidence.hidden ? 'fa-chevron-down' : 'fa-chevron-up');
     });
   });
-  var form = document.getElementById('opportunityFilters');
-  if (form) form.querySelectorAll('select,input[type="checkbox"]').forEach(function (control) { control.addEventListener('change', function () { form.submit(); }); });
+  if (form) form.querySelectorAll('select,input[type="radio"]').forEach(function (control) { control.addEventListener('change', function () {
+    if (control.name === 'focus') document.getElementById('opportunitySort').value = 'floor';
+    form.submit();
+  }); });
 })();
 </script>
 {% endblock %}

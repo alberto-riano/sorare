@@ -189,60 +189,59 @@ def opportunities(request):
     ).order_by("-created_at").first()
 
     all_rows = list(snapshot.rows if snapshot else [])
-    team_filter = request.GET.get("team", "").strip()
+    team_catalog = _opportunity_team_catalog(snapshot, latest_refresh)
+    known_team_slugs = {team["slug"] for team in team_catalog}
+    selected_team_slugs = list(dict.fromkeys(
+        slug for slug in request.GET.getlist("teams")
+        if slug in known_team_slugs
+    ))
+    selected_team_set = set(selected_team_slugs)
     position_filter = request.GET.get("position", "").strip()
-    rarity_filter = request.GET.get("opportunity_rarity", "").strip().lower()
-    # La vista normal enseña el universo completo. El usuario puede reducirlo
-    # expresamente a las señales detectadas, pero limpiar filtros vuelve a
-    # mostrar todos los jugadores analizados.
-    show_all = request.GET.get("signals_only") != "1"
+    focus_rarity = request.GET.get("focus", "limited").strip().lower()
+    focus_rarity = focus_rarity if focus_rarity in {"limited", "rare"} else "limited"
 
     rows = []
     for row in all_rows:
-        if team_filter and row.get("team") != team_filter:
+        if selected_team_set and row.get("team_slug") not in selected_team_set:
             continue
         if position_filter and row.get("position") != position_filter:
             continue
-        if rarity_filter in {"limited", "rare"} and row.get("recommended_rarity") != rarity_filter:
-            continue
-        if not show_all and not row.get("recommended_rarity"):
-            continue
         rows.append(row)
 
-    sort = request.GET.get("sort", "discount")
+    sort = request.GET.get("sort", "floor")
+    sort = sort if sort in {"floor", "discount", "player"} else "floor"
     if sort == "player":
         rows.sort(key=lambda row: str(row.get("player") or "").casefold())
     elif sort == "floor":
-        rows.sort(key=lambda row: min(
-            [float((row.get(rarity) or {}).get("floor")) for rarity in ("limited", "rare") if (row.get(rarity) or {}).get("floor")]
-            or [10**9]
+        rows.sort(key=lambda row: (
+            float((row.get(focus_rarity) or {}).get("floor") or 10**9),
+            str(row.get("player") or "").casefold(),
         ))
     else:
-        rows.sort(key=lambda row: float(row.get("discount_percent") or 0), reverse=True)
+        rows.sort(key=lambda row: (
+            row.get("recommended_rarity") == focus_rarity,
+            float(row.get("discount_percent") or 0),
+        ), reverse=True)
     per_page = 50
     page_obj = Paginator(rows, per_page).get_page(request.GET.get("page", 1))
     pagination_params = request.GET.copy()
     pagination_params.pop("page", None)
     metadata = snapshot.metadata if snapshot else {}
-    selected_refresh_team_slugs = set(active_refresh.target_team_slugs or []) if active_refresh else set()
     return render(request, "dashboard/opportunities.html", {
         "snapshot": snapshot,
         "metadata": metadata,
         "active_refresh": active_refresh,
-        "refresh_team_catalog": _opportunity_team_catalog(snapshot, latest_refresh),
-        "selected_refresh_team_slugs": selected_refresh_team_slugs,
-        "refresh_all_teams": not selected_refresh_team_slugs,
+        "refresh_team_catalog": team_catalog,
+        "selected_team_slugs": selected_team_set,
+        "refresh_all_teams": not selected_team_set or selected_team_set == known_team_slugs,
         "refreshed_team_slugs": set(metadata.get("refreshed_team_slugs") or []),
         "team_updated_at": metadata.get("team_updated_at") or {},
         "page_obj": page_obj,
         "total_market_rows": len(all_rows),
         "filtered_count": len(rows),
-        "available_teams": sorted({row.get("team") for row in all_rows if row.get("team")}),
         "available_positions": sorted({row.get("position") for row in all_rows if row.get("position")}),
-        "selected_team": team_filter,
         "selected_position": position_filter,
-        "selected_rarity": rarity_filter,
-        "show_all": show_all,
+        "focus_rarity": focus_rarity,
         "sort": sort,
         "per_page": per_page,
         "pagination_query": pagination_params.urlencode(),
