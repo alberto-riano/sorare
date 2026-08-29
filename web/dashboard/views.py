@@ -19,6 +19,7 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.http import FileResponse
 from django.shortcuts import redirect, render
+from django.templatetags.static import static
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
@@ -134,11 +135,8 @@ def index(request):
 
 
 def _opportunity_team_catalog(snapshot=None, latest_job=None):
-    picture_fallbacks = {
-        "deportivo-la-coruna-a-coruna": (
-            "https://images.seeklogo.com/logo-png/18/1/"
-            "deportivo-la-coruna-logo-png_seeklogo-187816.png"
-        ),
+    picture_overrides = {
+        "deportivo-la-coruna-a-coruna": static("dashboard/deportivo-coruna-2026.png"),
     }
     by_slug = {}
 
@@ -148,10 +146,13 @@ def _opportunity_team_catalog(snapshot=None, latest_job=None):
         if not slug or not name:
             return
         current = by_slug.setdefault(slug, {
-            "slug": slug, "name": name, "picture_url": picture_fallbacks.get(slug, ""),
+            "slug": slug, "name": name, "picture_url": picture_overrides.get(slug, ""),
         })
         current["name"] = name
-        current["picture_url"] = team.get("picture_url") or current["picture_url"] or picture_fallbacks.get(slug, "")
+        if slug in picture_overrides:
+            current["picture_url"] = picture_overrides[slug]
+        else:
+            current["picture_url"] = team.get("picture_url") or current["picture_url"]
 
     for team in ((snapshot.metadata if snapshot else {}) or {}).get("team_catalog") or []:
         merge(team)

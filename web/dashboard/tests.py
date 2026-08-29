@@ -2091,6 +2091,8 @@ class OpportunityMarketTests(TestCase):
         self.assertContains(filtered, "Rare cara")
         self.assertNotContains(filtered, "Rare barata")
         self.assertEqual(filtered.context["selected_team_slugs"], {"real-madrid-madrid"})
+        self.assertContains(filtered, 'value="real-madrid-madrid" form="opportunityFilters" checked')
+        self.assertNotContains(filtered, 'opportunity-all-teams is-active')
 
     def test_team_selector_uses_club_shields_and_accessible_names(self):
         OpportunitySnapshot.objects.create(
@@ -2107,9 +2109,12 @@ class OpportunityMarketTests(TestCase):
 
         response = self.client.get(reverse("opportunities"))
 
-        self.assertContains(response, "deportivo-la-coruna-logo-png_seeklogo-187816.png")
+        self.assertContains(response, "dashboard/deportivo-coruna-2026.png")
         self.assertContains(response, 'title="Real Club Deportivo de La Coruña"')
         self.assertContains(response, 'name="teams" value="deportivo-la-coruna-a-coruna"')
+        self.assertContains(response, 'id="showAllTeams"')
+        self.assertContains(response, 'opportunity-all-teams is-active')
+        self.assertNotContains(response, "Seleccionar todos")
 
     @patch("web_services.opportunity_market.collect_opportunity_market")
     def test_worker_persists_snapshot_and_finishes_job(self, collect):

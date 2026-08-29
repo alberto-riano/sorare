@@ -17,18 +17,18 @@
 
   <section class="panel opportunity-team-refresh reveal">
     <div class="opportunity-team-refresh-head">
-      <div><p class="kicker">Equipos</p><h2>Filtra y actualiza con los escudos</h2><p>Los clubes activos son los que ves en la tabla y los que se actualizarán.</p></div>
+      <div><p class="kicker">Equipos</p><h2>Filtra con los escudos</h2><p>Pulsa un club para verlo al instante; puedes combinar varios o volver a «Todos».</p></div>
       <div class="opportunity-team-refresh-actions">
-        <label><input type="checkbox" id="refreshAllTeams" {% if refresh_all_teams %}checked{% endif %}> <span>Seleccionar todos</span></label>
-        <button class="btn btn-accent" type="button" id="refreshOpportunities" {% if active_refresh %}disabled{% endif %}>
+        <button class="opportunity-all-teams{% if refresh_all_teams %} is-active{% endif %}" type="button" id="showAllTeams"><i class="fas fa-border-all"></i> Todos</button>
+        <button class="btn btn-secondary" type="button" id="refreshOpportunities" {% if active_refresh %}disabled{% endif %}>
           <i class="fas fa-arrows-rotate{% if active_refresh %} fa-spin{% endif %}"></i>
-          {% if active_refresh %}Analizando…{% else %}Actualizar selección{% endif %}
+          {% if active_refresh %}Analizando…{% else %}Actualizar mercado{% endif %}
         </button>
       </div>
     </div>
     {% if refresh_team_catalog %}<div class="opportunity-team-grid">
-      {% for team in refresh_team_catalog %}<label class="opportunity-team-choice" title="{{ team.name }}">
-        <input type="checkbox" class="opportunity-refresh-team" name="teams" value="{{ team.slug }}" form="opportunityFilters" {% if refresh_all_teams or team.slug in selected_team_slugs %}checked{% endif %}>
+      {% for team in refresh_team_catalog %}<label class="opportunity-team-choice{% if team.slug == 'deportivo-la-coruna-a-coruna' %} is-depor{% endif %}" title="{{ team.name }}">
+        <input type="checkbox" class="opportunity-refresh-team" name="teams" value="{{ team.slug }}" form="opportunityFilters" {% if team.slug in selected_team_slugs %}checked{% endif %}>
         {% if team.picture_url %}<img src="{{ team.picture_url }}" alt="{{ team.name }}">{% else %}<span class="opportunity-team-fallback">{{ team.name|slice:':2' }}</span>{% endif %}
         <span class="sr-only">{{ team.name }}</span>
         {% if team.slug in refreshed_team_slugs %}<i class="fas fa-circle-check" title="Ya tiene datos"></i>{% endif %}
@@ -102,7 +102,7 @@
 (function () {
   var button = document.getElementById('refreshOpportunities');
   var progress = document.getElementById('opportunityProgress');
-  var allTeams = document.getElementById('refreshAllTeams');
+  var allTeams = document.getElementById('showAllTeams');
   var teamInputs = Array.prototype.slice.call(document.querySelectorAll('.opportunity-refresh-team'));
   var form = document.getElementById('opportunityFilters');
   var filterTimer = null;
@@ -129,42 +129,36 @@
       });
   }
   function syncAllTeams() {
-    if (allTeams) allTeams.checked = teamInputs.length > 0 && teamInputs.every(function (input) { return input.checked; });
+    if (allTeams) allTeams.classList.toggle('is-active', !teamInputs.some(function (input) { return input.checked; }));
   }
   function submitFilters() {
     if (!form) return;
     window.clearTimeout(filterTimer);
     filterTimer = window.setTimeout(function () { form.submit(); }, 220);
   }
-  if (allTeams) allTeams.addEventListener('change', function () {
-    teamInputs.forEach(function (input) { input.checked = allTeams.checked; });
-    if (allTeams.checked) submitFilters();
+  if (allTeams) allTeams.addEventListener('click', function () {
+    teamInputs.forEach(function (input) { input.checked = false; });
+    syncAllTeams();
+    submitFilters();
   });
   teamInputs.forEach(function (input) { input.addEventListener('change', function () {
     syncAllTeams();
-    if (teamInputs.some(function (teamInput) { return teamInput.checked; })) submitFilters();
+    submitFilters();
   }); });
   if (button) button.addEventListener('click', function () {
     var selectedTeams = teamInputs.filter(function (input) { return input.checked; }).map(function (input) { return input.value; });
-    if (teamInputs.length && !selectedTeams.length) {
-      progress.hidden = false;
-      progress.classList.add('is-error');
-      document.getElementById('opportunityProgressIcon').className = 'fas fa-triangle-exclamation';
-      document.getElementById('opportunityProgressTitle').textContent = 'Selecciona algún equipo';
-      document.getElementById('opportunityProgressLabel').textContent = 'Marca uno, varios o todos los clubes antes de actualizar.';
-      return;
-    }
+    var allSelected = !selectedTeams.length;
     progress.classList.remove('is-error');
     progress.hidden = false;
     document.getElementById('opportunityProgressIcon').className = 'fas fa-circle-notch fa-spin';
     document.getElementById('opportunityProgressTitle').textContent = 'Analizando mercado';
-    document.getElementById('opportunityProgressLabel').textContent = selectedTeams.length === teamInputs.length ? 'Preparando todos los equipos' : 'Preparando ' + selectedTeams.length + ' equipos';
+    document.getElementById('opportunityProgressLabel').textContent = allSelected ? 'Preparando todos los equipos' : 'Preparando ' + selectedTeams.length + ' equipos';
     button.disabled = true;
     button.innerHTML = '<i class="fas fa-arrows-rotate fa-spin"></i> Analizando…';
     fetch('{% url "enqueue_opportunity_refresh" %}', {
       method:'POST', credentials:'same-origin',
       headers:{'X-CSRFToken':csrf, 'Content-Type':'application/json'},
-      body: JSON.stringify({teams: selectedTeams.length === teamInputs.length ? [] : selectedTeams})
+      body: JSON.stringify({teams: selectedTeams})
     })
       .then(function (response) {
         return response.json().then(function (payload) {
