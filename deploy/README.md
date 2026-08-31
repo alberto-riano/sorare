@@ -33,6 +33,16 @@ scp config/config.txt ubuntu@IP_EC2:/ruta/al/repo/config/config.txt
 ssh ubuntu@IP_EC2 'chmod 600 /ruta/al/repo/config/config.txt'
 ```
 
+Los pagos ETH actuales se firman en Base y necesitan la clave Ethereum del
+wallet Sorare, distinta de la clave StarkEx histórica. Expórtala desde tu wallet
+en Sorare y añádela directamente en `config/config.txt` (nunca en Git):
+
+```text
+ETHEREUM_PRIVATE_KEY=0x...
+```
+
+No sustituyas `PRIVATE_KEY`: se sigue utilizando para autorizaciones StarkEx.
+
 Si se usa un dominio, activa TLS al terminar:
 
 ```bash

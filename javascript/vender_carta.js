@@ -76,7 +76,13 @@ const RELIST_RETRY_COUNT = 3;
 const RELIST_RETRY_DELAY_MS = 1500;
 
 // --- Leer configuración ---
-const { JWT_TOKEN, PRIVATE_KEY, JWT_AUD, SOLANA_PRIVATE_KEY } = readConfig();
+const {
+  JWT_TOKEN,
+  PRIVATE_KEY,
+  ETHEREUM_PRIVATE_KEY,
+  JWT_AUD,
+  SOLANA_PRIVATE_KEY,
+} = readConfig();
 
 if (!JWT_TOKEN || !PRIVATE_KEY || !JWT_AUD) {
   console.error("Faltan JWT_TOKEN, PRIVATE_KEY o JWT_AUD en config.txt");
@@ -377,6 +383,7 @@ async function buildSolanaTokenTransferApproval(
 // --- Construcción de approvals combinados ---
 async function buildApprovalsCombined(
   starkPrivateKey,
+  ethereumPrivateKey,
   solanaPrivateKeyBase58,
   authorizations
 ) {
@@ -411,7 +418,12 @@ async function buildApprovalsCombined(
     }
 
     if (request.__typename === "EthereumBankTransferAuthorizationRequest") {
-      approvals.push(await buildEthereumBankTransferApproval(starkPrivateKey, fingerprint, request));
+      if (!ethereumPrivateKey) {
+        throw new Error(
+          "Falta ETHEREUM_PRIVATE_KEY en config/config.txt para pagar ETH en Base."
+        );
+      }
+      approvals.push(await buildEthereumBankTransferApproval(ethereumPrivateKey, fingerprint, request));
       continue;
     }
 
@@ -571,6 +583,7 @@ async function sellCard(assetId, priceCents, durationDays, relistRetriesLeft = R
   const authorizations = prepareOffer.authorizations;
   const approvals = await buildApprovalsCombined(
     PRIVATE_KEY,
+    ETHEREUM_PRIVATE_KEY,
     SOLANA_PRIVATE_KEY,
     authorizations
   );
@@ -653,7 +666,12 @@ async function createDirectOffer(assetId, managerSlug, amountCents, durationHour
   if (prepared.errors?.length) {
     throw new Error(prepared.errors.map((error) => error.message).join(" · "));
   }
-  const approvals = await buildApprovalsCombined(PRIVATE_KEY, SOLANA_PRIVATE_KEY, prepared.authorizations);
+  const approvals = await buildApprovalsCombined(
+    PRIVATE_KEY,
+    ETHEREUM_PRIVATE_KEY,
+    SOLANA_PRIVATE_KEY,
+    prepared.authorizations
+  );
   const createData = await client.request(CREATE_DIRECT_OFFER_MUTATION, {
     input: {
       approvals,

@@ -23,6 +23,12 @@ export async function buildEthereumBankTransferApproval(privateKey, fingerprint,
     salt, proxyAddress, contractAddress,
   } = request;
 
+  if (account.address.toLowerCase() !== senderAddress.toLowerCase()) {
+    throw new Error(
+      "ETHEREUM_PRIVATE_KEY no corresponde con la dirección Base de tu wallet Sorare."
+    );
+  }
+
   const encodedMessage = encodeAbiParameters(
     [
       { type: "address" }, { type: "address" }, { type: "uint256" },

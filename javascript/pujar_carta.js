@@ -57,7 +57,13 @@ if (!AUCTION_ID || !BID_AMOUNT_CENTS) {
 }
 
 // --- Leer configuración ---
-const { JWT_TOKEN, PRIVATE_KEY, JWT_AUD, SOLANA_PRIVATE_KEY } = readConfig();
+const {
+  JWT_TOKEN,
+  PRIVATE_KEY,
+  ETHEREUM_PRIVATE_KEY,
+  JWT_AUD,
+  SOLANA_PRIVATE_KEY,
+} = readConfig();
 
 if (!JWT_TOKEN || !PRIVATE_KEY || !JWT_AUD) {
   console.error("Faltan JWT_TOKEN, PRIVATE_KEY o JWT_AUD en config.txt");
@@ -333,6 +339,7 @@ async function buildSolanaTokenTransferApproval(
 // --- Construcción de approvals combinados ---
 async function buildApprovalsCombined(
   starkPrivateKey,
+  ethereumPrivateKey,
   solanaPrivateKeyBase58,
   authorizations
 ) {
@@ -367,7 +374,12 @@ async function buildApprovalsCombined(
     }
 
     if (request.__typename === "EthereumBankTransferAuthorizationRequest") {
-      approvals.push(await buildEthereumBankTransferApproval(starkPrivateKey, fingerprint, request));
+      if (!ethereumPrivateKey) {
+        throw new Error(
+          "Falta ETHEREUM_PRIVATE_KEY en config/config.txt para pagar ETH en Base."
+        );
+      }
+      approvals.push(await buildEthereumBankTransferApproval(ethereumPrivateKey, fingerprint, request));
       continue;
     }
 
@@ -460,6 +472,7 @@ async function bidOnAuction(auctionId, bidAmountCents) {
   console.log("🔐 Firmando autorizaciones...");
   const approvals = await buildApprovalsCombined(
     PRIVATE_KEY,
+    ETHEREUM_PRIVATE_KEY,
     SOLANA_PRIVATE_KEY,
     authorizations
   );
