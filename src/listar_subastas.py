@@ -480,6 +480,79 @@ def refresh_cached_auction_prices(progress=None):
         return payload
 
 
+def refresh_cached_auction_ids(auction_ids):
+    """Actualiza únicamente las subastas indicadas y devuelve su estado actual."""
+    requested_ids = list(dict.fromkeys(auction_id for auction_id in auction_ids if auction_id))
+    if not requested_ids:
+        return {}
+
+    with _auction_cache_lock():
+        previous = load_auction_cache()
+        if not previous:
+            raise RuntimeError("Todavía no existe una caché de mercado.")
+        previous_rows = previous.get('auctions') or []
+        known_ids = {row.get('auction_id') for row in previous_rows}
+        requested_ids = [auction_id for auction_id in requested_ids if auction_id in known_ids]
+        if not requested_ids:
+            return {}
+
+        headers = build_headers()
+        details, fetched_nickname = _fetch_known_auction_details(headers, requested_ids)
+        my_nickname = fetched_nickname or previous.get('my_nickname', '')
+        now = datetime.now(timezone.utc)
+        requested_set = set(requested_ids)
+        refreshed_by_id = {}
+        untouched = []
+
+        for old_row in previous_rows:
+            auction_id = old_row.get('auction_id')
+            if auction_id not in requested_set:
+                untouched.append(old_row)
+                continue
+            detail = details.get(auction_id)
+            if not detail or not detail.get('open'):
+                continue
+            end_date = detail.get('endDate') or old_row.get('end_date')
+            if not end_date or datetime.fromisoformat(end_date.replace('Z', '+00:00')) <= now:
+                continue
+            row = dict(old_row)
+            best_bid = detail.get('bestBid') or {}
+            bidder = ((best_bid.get('userBidder') or {}).get('nickname') or '').strip() or None
+            eur_cents = (best_bid.get('amounts') or {}).get('eurCents')
+            my_last_bid = detail.get('myLastBid') or {}
+            my_max_cents = (my_last_bid.get('maximumAmounts') or {}).get('eurCents')
+            row.update({
+                'bid_eur': eur_cents / 100 if eur_cents is not None else None,
+                'bidder': bidder,
+                'is_winning': bool(bidder and my_nickname and bidder.casefold() == my_nickname.casefold()),
+                'has_bid': bool(my_last_bid),
+                'my_bid_eur': my_max_cents / 100 if my_max_cents is not None else None,
+                'end_date': end_date,
+            })
+            row['is_outbid'] = row['has_bid'] and not row['is_winning']
+            row['bid_position'] = 1 if row['is_winning'] else None
+            refreshed_by_id[auction_id] = row
+
+        outbid = [row for row in refreshed_by_id.values() if row['is_outbid']]
+        positions = fetch_bid_positions(headers, outbid, my_nickname)
+        for row in outbid:
+            row['bid_position'] = positions.get(row['auction_id'])
+
+        refreshed = untouched + list(refreshed_by_id.values())
+        refreshed.sort(key=lambda row: row['end_date'])
+        payload = dict(previous)
+        payload.update({
+            'updated_at': now.isoformat(),
+            'quick_refreshed_at': now.isoformat(),
+            'last_refresh_mode': 'targeted',
+            'my_nickname': my_nickname,
+            'quick_refreshed_count': len(requested_ids),
+            'auctions': refreshed,
+        })
+        _save_auction_cache(payload)
+        return refreshed_by_id
+
+
 def match_team_slug(partial, team_slugs):
     """Encuentra el slug completo dado un nombre parcial."""
     partial_lower = partial.lower()

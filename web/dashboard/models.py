@@ -178,6 +178,7 @@ class BidBatchItem(models.Model):
     currency = models.CharField(max_length=3, choices=(("EUR", "EUR"), ("ETH", "ETH")), default="EUR")
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED)
     error = models.TextField(blank=True)
+    market_status = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ("position",)

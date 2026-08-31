@@ -311,6 +311,62 @@ class AuctionActionsTests(TestCase):
         self.assertEqual(item.error, "La puja mínima es 15,00 €")
         self.assertEqual(run_bid.call_args.args[1].currency, "ETH")
 
+    @patch("dashboard.management.commands.process_bid_queue.time.sleep")
+    @patch("dashboard.management.commands.process_bid_queue.listar_subastas.refresh_cached_auction_ids")
+    @patch("dashboard.management.commands.process_bid_queue.run_bid_scheduler")
+    def test_worker_refreshes_successful_bid_status(self, run_bid, refresh_auctions, sleep):
+        user = get_user_model().objects.create_user(username="worker-refresh-user")
+        job = BidBatchJob.objects.create(user=user, total_count=2)
+        BidBatchItem.objects.create(
+            job=job, position=1, auction_id="EnglishAuction:first",
+            player_name="Jugador ganador", euros="12.50",
+        )
+        BidBatchItem.objects.create(
+            job=job, position=2, auction_id="EnglishAuction:second",
+            player_name="Jugador superado", euros="18.00",
+        )
+        run_bid.return_value = ScriptResult("mock", 0, "Puja enviada", "")
+        refresh_auctions.return_value = {
+            "EnglishAuction:first": {
+                "has_bid": True, "is_winning": True, "is_outbid": False,
+                "bid_position": 1, "bid_eur": 12.5, "my_bid_eur": 15.0,
+            },
+            "EnglishAuction:second": {
+                "has_bid": True, "is_winning": False, "is_outbid": True,
+                "bid_position": 2, "bid_eur": 19.0, "my_bid_eur": 18.0,
+            },
+        }
+
+        process_next_job()
+
+        job.refresh_from_db()
+        first, second = list(job.items.all())
+        self.assertEqual(job.status, BidBatchJob.Status.SUCCEEDED)
+        self.assertTrue(first.market_status["is_winning"])
+        self.assertEqual(second.market_status["bid_position"], 2)
+        refresh_auctions.assert_called_once_with([
+            "EnglishAuction:first", "EnglishAuction:second",
+        ])
+        sleep.assert_called_once_with(1)
+
+    def test_bid_status_includes_refreshed_market_state(self):
+        user = get_user_model().objects.create_user(username="job-status-user")
+        job = BidBatchJob.objects.create(
+            user=user, total_count=1, success_count=1, status=BidBatchJob.Status.SUCCEEDED,
+        )
+        BidBatchItem.objects.create(
+            job=job, position=1, auction_id="EnglishAuction:status",
+            player_name="Oyarzabal", euros="12.50", status=BidBatchItem.Status.SUCCEEDED,
+            market_status={"is_winning": False, "is_outbid": True, "bid_position": 3},
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("bid_jobs_status"), {"ids": str(job.id)})
+
+        item = response.json()["jobs"][0]["items"][0]
+        self.assertEqual(item["auction_id"], "EnglishAuction:status")
+        self.assertEqual(item["market"]["bid_position"], 3)
+
     def test_bid_status_does_not_expose_another_users_jobs(self):
         owner = get_user_model().objects.create_user(username="job-owner")
         viewer = get_user_model().objects.create_user(username="job-viewer")

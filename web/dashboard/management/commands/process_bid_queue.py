@@ -1,5 +1,6 @@
 import time
 
+import listar_subastas
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
@@ -7,6 +8,19 @@ from django.utils import timezone
 from dashboard.models import BidBatchItem, BidBatchJob
 from dashboard.views import PATHS
 from web_services.process_runner import BidRequest, bid_error_message, run_bid_scheduler
+
+
+def _market_status(row):
+    if not row:
+        return {}
+    return {
+        "has_bid": bool(row.get("has_bid")),
+        "is_winning": bool(row.get("is_winning")),
+        "is_outbid": bool(row.get("is_outbid")),
+        "bid_position": row.get("bid_position"),
+        "bid_eur": row.get("bid_eur"),
+        "my_bid_eur": row.get("my_bid_eur"),
+    }
 
 
 def process_next_job():
@@ -43,6 +57,31 @@ def process_next_job():
             item.error = f"Error inesperado al enviar la puja: {exc}"[:2000]
             failures += 1
         item.save(update_fields=("status", "error"))
+
+    succeeded_items = list(job.items.filter(status=BidBatchItem.Status.SUCCEEDED))
+    if succeeded_items:
+        # Sorare puede tardar un instante en reflejar la última puja. Esta consulta
+        # es dirigida y no recorre el mercado completo.
+        time.sleep(1)
+        try:
+            refreshed = listar_subastas.refresh_cached_auction_ids(
+                [item.auction_id for item in succeeded_items]
+            )
+            missing = [
+                item.auction_id for item in succeeded_items
+                if not (refreshed.get(item.auction_id) or {}).get("has_bid")
+            ]
+            if missing:
+                time.sleep(2)
+                refreshed.update(listar_subastas.refresh_cached_auction_ids(missing))
+            for item in succeeded_items:
+                item.market_status = _market_status(refreshed.get(item.auction_id))
+                item.save(update_fields=("market_status",))
+        except Exception as exc:
+            # La puja ya ha sido enviada: un fallo de refresco no cambia su resultado.
+            for item in succeeded_items:
+                item.market_status = {"refresh_error": str(exc)[:500]}
+                item.save(update_fields=("market_status",))
 
     job.success_count = successes
     job.failure_count = failures

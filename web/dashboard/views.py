@@ -1628,7 +1628,13 @@ def bid_jobs_status(request):
     return JsonResponse({"jobs": [{
         "id": job.id, "status": job.status, "total": job.total_count,
         "successes": job.success_count, "failures": job.failure_count,
-        "items": [{"player": item.player_name, "status": item.status, "error": item.error} for item in job.items.all()],
+        "items": [{
+            "player": item.player_name,
+            "auction_id": item.auction_id,
+            "status": item.status,
+            "error": item.error,
+            "market": item.market_status,
+        } for item in job.items.all()],
     } for job in jobs]})
 
 

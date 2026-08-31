@@ -84,7 +84,7 @@
       <tbody>
         {% for auction in auctions %}
         <tr class="auction-main-row{% if auction.is_winning %} is-winning{% elif auction.is_outbid %} is-outbid{% endif %}"
-          data-player="{{ auction.player|lower }}" data-player-slug="{{ auction.player_slug }}" data-team="{{ auction.team }}"
+          data-auction-id="{{ auction.auction_id }}" data-player="{{ auction.player|lower }}" data-player-slug="{{ auction.player_slug }}" data-team="{{ auction.team }}"
             data-position="{{ auction.position }}" data-price="{{ auction.bid_eur|default_if_none:'' }}"
             data-winning="{% if auction.is_winning %}true{% else %}false{% endif %}"
             data-status="{% if auction.is_winning %}winning{% elif auction.is_outbid %}outbid{% endif %}"
@@ -673,8 +673,54 @@ document.addEventListener('DOMContentLoaded', function () {
     var notice = id ? document.getElementById(id) : null;
     if (!notice) { notice = document.createElement('div'); notice.className = 'bid-job-notice'; if (id) notice.id = id; container.appendChild(notice); }
     notice.className = 'bid-job-notice is-' + kind;
-    notice.innerHTML = '<i class="fas ' + (kind === 'success' ? 'fa-circle-check' : kind === 'pending' ? 'fa-spinner fa-spin' : 'fa-circle-exclamation') + '"></i><div>' + html + '</div><button type="button" aria-label="Cerrar">&times;</button>';
+    notice.innerHTML = '<i class="fas ' + (kind === 'success' ? 'fa-circle-check' : kind === 'pending' ? 'fa-spinner fa-spin' : kind === 'warning' ? 'fa-triangle-exclamation' : 'fa-circle-exclamation') + '"></i><div>' + html + '</div><button type="button" aria-label="Cerrar">&times;</button>';
     notice.querySelector('button').addEventListener('click', function () { notice.remove(); });
+  }
+  function eurText(value) {
+    return Number(value).toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '€';
+  }
+  function updateAuctionRow(item) {
+    if (!item.market || !item.auction_id) return;
+    var row = Array.from(document.querySelectorAll('.auction-main-row')).find(function (candidate) {
+      return candidate.dataset.auctionId === item.auction_id;
+    });
+    if (!row) return;
+    var market = item.market;
+    row.classList.toggle('is-winning', !!market.is_winning);
+    row.classList.toggle('is-outbid', !!market.is_outbid);
+    row.dataset.winning = market.is_winning ? 'true' : 'false';
+    row.dataset.status = market.is_winning ? 'winning' : market.is_outbid ? 'outbid' : '';
+    row.dataset.price = market.bid_eur == null ? '' : market.bid_eur;
+    var cell = row.children[1];
+    if (!cell) return;
+    var html = market.bid_eur == null
+      ? '<span style="color: var(--muted);">Sin pujas</span>'
+      : '<span style="color: var(--accent); font-weight: 600;">' + eurText(market.bid_eur) + '</span>';
+    if (market.is_winning) {
+      html += '<span class="winning-badge"><i class="fas fa-trophy"></i> Vas ganando</span>';
+      if (market.my_bid_eur != null) html += '<span class="max-bid-badge"><i class="fas fa-shield-halved"></i> Tu máx. ' + eurText(market.my_bid_eur) + '</span>';
+    } else if (market.is_outbid) {
+      html += '<span class="outbid-badge"><i class="fas fa-arrow-trend-down"></i> Te han superado' + (market.bid_position ? ' · ' + market.bid_position + '.º' : '') + '</span>';
+    }
+    cell.innerHTML = html;
+  }
+  function bidResultSummary(items) {
+    var succeeded = items.filter(function (item) { return item.status === 'succeeded'; });
+    succeeded.forEach(updateAuctionRow);
+    var winning = succeeded.filter(function (item) { return item.market && item.market.is_winning; });
+    var outbid = succeeded.filter(function (item) { return item.market && item.market.is_outbid; });
+    var unchecked = succeeded.length - winning.length - outbid.length;
+    var parts = [];
+    if (winning.length) parts.push(winning.length + ' ganando');
+    if (outbid.length) parts.push(outbid.length + (outbid.length === 1 ? ' te sigue superando' : ' te siguen superando'));
+    if (unchecked) parts.push(unchecked + ' sin estado confirmado');
+    var html = parts.length ? '<span>' + parts.join(' · ') + '</span>' : '';
+    if (outbid.length) {
+      html += '<ul>' + outbid.map(function (item) {
+        return '<li><strong>' + escapeHtml(item.player) + ':</strong> te superan' + (item.market.bid_position ? ', vas ' + item.market.bid_position + '.º' : '') + '</li>';
+      }).join('') + '</ul>';
+    }
+    return {html: html, hasOutbid: outbid.length > 0};
   }
   async function pollBidJobs() {
     if (polling) return;
@@ -693,12 +739,13 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         finished.push(job.id);
         var failures = job.items.filter(function (item) { return item.status === 'failed'; });
+        var result = bidResultSummary(job.items);
         if (!failures.length) {
-          showJobNotice('success', '<strong>' + job.successes + (job.successes === 1 ? ' puja enviada correctamente' : ' pujas enviadas correctamente') + '</strong>', 'job-' + job.id);
+          showJobNotice(result.hasOutbid ? 'warning' : 'success', '<strong>' + job.successes + (job.successes === 1 ? ' puja realizada' : ' pujas realizadas') + '</strong>' + result.html, 'job-' + job.id);
         } else {
           var details = failures.map(function (item) { return '<li><strong>' + escapeHtml(item.player) + ':</strong> ' + escapeHtml(item.error) + '</li>'; }).join('');
           var summary = job.successes ? job.successes + ' correctas y ' + job.failures + ' fallidas' : 'No se pudieron enviar las pujas';
-          showJobNotice('error', '<strong>' + summary + '</strong><ul>' + details + '</ul>', 'job-' + job.id);
+          showJobNotice('error', '<strong>' + summary + '</strong>' + result.html + '<ul>' + details + '</ul>', 'job-' + job.id);
         }
       });
       if (finished.length) savePendingJobs(ids.filter(function (id) { return !finished.includes(id); }));
