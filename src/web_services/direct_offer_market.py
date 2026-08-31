@@ -22,6 +22,19 @@ query DirectOfferEthRate {
 }
 """
 
+WEI_PAYMENT_QUANTUM = 10**14
+
+
+def eur_cents_to_valid_wei(amount_cents, rate_cents):
+    """Redondea al paso de 0,0001 ETH que admite Sorare para pagos en WEI."""
+    amount_cents = int(amount_cents)
+    rate_cents = int(rate_cents)
+    if rate_cents <= 0:
+        raise RuntimeError("Sorare no devolvió una tasa EUR/ETH válida")
+    denominator = rate_cents * WEI_PAYMENT_QUANTUM
+    units = (amount_cents * 10**18 + denominator // 2) // denominator
+    return max(1, units) * WEI_PAYMENT_QUANTUM
+
 
 def direct_offer_payment_amount(amount_cents, currency="EUR", *, headers=None):
     """Convierte un importe expresado en céntimos EUR al rail elegido por Sorare."""
@@ -33,9 +46,7 @@ def direct_offer_payment_amount(amount_cents, currency="EUR", *, headers=None):
         raise ValueError("La moneda de pago debe ser EUR o ETH")
     data = graphql_request(DIRECT_OFFER_ETH_RATE_QUERY, headers=headers)
     rate_cents = int((((data.get("config") or {}).get("exchangeRate") or {}).get("ethRates") or {}).get("eurCents") or 0)
-    if rate_cents <= 0:
-        raise RuntimeError("Sorare no devolvió una tasa EUR/ETH válida")
-    wei = max(1, amount_cents * 10**18 // rate_cents)
+    wei = eur_cents_to_valid_wei(amount_cents, rate_cents)
     return {"amount": str(wei), "currency": "WEI"}
 
 

@@ -10,6 +10,7 @@ from web_services.config_files import SorarePaths
 from web_services.direct_offer_market import (
     check_direct_offer_eur,
     direct_offer_payment_amount,
+    eur_cents_to_valid_wei,
     player_in_season_listings,
 )
 from web_services.process_runner import ScriptResult, run_direct_offer
@@ -22,7 +23,13 @@ class DirectOfferMarketTests(TestCase):
 
         amount = direct_offer_payment_amount(2403, "ETH", headers={"Authorization": "hidden"})
 
-        self.assertEqual(amount, {"amount": "12015000000000000", "currency": "WEI"})
+        self.assertEqual(amount, {"amount": "12000000000000000", "currency": "WEI"})
+
+    def test_eth_payment_uses_sorare_four_decimal_precision(self):
+        wei = eur_cents_to_valid_wei(1517, 200000)
+
+        self.assertEqual(wei, 7600000000000000)
+        self.assertEqual(wei % 10**14, 0)
 
     @patch("web_services.direct_offer_market.graphql_request")
     def test_eur_preflight_uses_eur_settlement_without_creating_offer(self, graphql):

@@ -394,6 +394,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var currencyControls = Array.from(document.querySelectorAll('input[name="review-currency"]'));
   var currencyHelp = document.getElementById('payment-currency-help');
   var submitAllButton = document.getElementById('submit-all-bids');
+  var ethEurCentsRate = Number('{{ account_balances.eth_eur_cents_rate|default:0 }}');
 
   function storedPaymentCurrency() {
     try {
@@ -404,6 +405,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function rememberPaymentCurrency(value) {
     try { localStorage.setItem('sorarePaymentCurrency', value); } catch (_error) {}
+  }
+
+  function ethAmountForEuros(euros) {
+    if (!ethEurCentsRate) return null;
+    var cents = Math.round(Number(euros) * 100);
+    return Math.max(0.0001, Math.round((cents / ethEurCentsRate) * 10000) / 10000);
   }
 
   function bidFromControl(control) {
@@ -434,8 +441,22 @@ document.addEventListener('DOMContentLoaded', function () {
   function syncReviewCurrency(currency) {
     var selected = currency === 'ETH' ? 'ETH' : 'EUR';
     reviewedBids.forEach(function (bid) { bid.currency = selected; });
+    var ethTotal = 0;
+    document.querySelectorAll('.bid-review-item').forEach(function (row, index) {
+      var bid = reviewedBids[index];
+      var ethAmount = bid ? ethAmountForEuros(bid.euros) : null;
+      var equivalent = row.querySelector('.bid-review-payment-amount');
+      if (equivalent) {
+        equivalent.textContent = selected === 'ETH' && ethAmount !== null
+          ? ethAmount.toFixed(4) + ' ETH'
+          : '';
+      }
+      if (selected === 'ETH' && ethAmount !== null) ethTotal += ethAmount;
+    });
     currencyHelp.textContent = selected === 'ETH'
-      ? 'Los importes siguen expresados en EUR; la puja se preparará y pagará con el equivalente en Ethereum.'
+      ? (ethEurCentsRate
+        ? 'Se prepararán ' + ethTotal.toFixed(4) + ' ETH en total. Los importes EUR quedan como referencia.'
+        : 'El equivalente ETH se calculará con la tasa de Sorare en el momento del envío.')
       : 'Los importes se muestran en EUR y se descontarán de tu saldo en euros.';
     submitAllButton.innerHTML = '<i class="fas fa-gavel"></i> Confirmar y enviar todas · ' + selected;
   }
@@ -489,7 +510,7 @@ document.addEventListener('DOMContentLoaded', function () {
       var row = document.createElement('div');
       row.className = 'bid-review-item';
       row.dataset.auctionId = bid.auction_id;
-      row.innerHTML = '<span class="bid-review-visuals"><span class="bid-review-player"></span><span class="bid-review-team"></span></span><span class="bid-review-details"><strong></strong><small class="bid-review-comparison is-loading">Calculando comparación…</small></span><span class="bid-review-price"></span><label class="review-credit"><input type="checkbox" checked> <span>Usar créditos</span></label><button type="button" class="review-remove" title="Quitar esta puja" aria-label="Quitar esta puja"><i class="fas fa-trash-can"></i></button>';
+      row.innerHTML = '<span class="bid-review-visuals"><span class="bid-review-player"></span><span class="bid-review-team"></span></span><span class="bid-review-details"><strong></strong><small class="bid-review-comparison is-loading">Calculando comparación…</small></span><span class="bid-review-price"><strong></strong><small class="bid-review-payment-amount"></small></span><label class="review-credit"><input type="checkbox" checked> <span>Usar créditos</span></label><button type="button" class="review-remove" title="Quitar esta puja" aria-label="Quitar esta puja"><i class="fas fa-trash-can"></i></button>';
       var playerImage = row.querySelector('.bid-review-player');
       var teamImage = row.querySelector('.bid-review-team');
       if (bid.player_image) playerImage.innerHTML = '<img alt="" loading="lazy">';
@@ -499,7 +520,7 @@ document.addEventListener('DOMContentLoaded', function () {
       else teamImage.innerHTML = '<i class="fas fa-shield-alt"></i>';
       if (bid.team_image) teamImage.querySelector('img').src = bid.team_image;
       row.querySelector('strong').textContent = bid.player;
-      row.querySelector('.bid-review-price').textContent = bid.euros + ' €';
+      row.querySelector('.bid-review-price strong').textContent = bid.euros + ' €';
       row.querySelector('.review-credit input').addEventListener('change', function (event) {
         bid.use_credit = event.target.checked;
         var values = Array.from(document.querySelectorAll('.bid-review-item .review-credit input')).map(function (input) { return input.checked; });
@@ -516,6 +537,8 @@ document.addEventListener('DOMContentLoaded', function () {
         creditAll.checked = remainingCredits.length > 0 && remainingCredits.every(Boolean);
         creditAll.indeterminate = remainingCredits.some(Boolean) && !creditAll.checked;
         submitAllButton.disabled = reviewedBids.length === 0;
+        var activeCurrency = currencyControls.find(function (control) { return control.checked; });
+        syncReviewCurrency(activeCurrency ? activeCurrency.value : 'EUR');
         if (!reviewedBids.length) {
           modal.hidden = true;
           document.body.classList.remove('modal-open');

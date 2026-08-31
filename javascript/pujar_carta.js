@@ -2,7 +2,11 @@ import { GraphQLClient, gql } from "graphql-request";
 import crypto from "crypto";
 import fs from "fs";
 import { signAuthorizationRequest } from "@sorare/crypto";
-import { buildEthereumBankTransferApproval } from "./ethereum_bank_transfer.js";
+import {
+  buildEthereumBankTransferApproval,
+  eurCentsToValidWei,
+  weiToEthLabel,
+} from "./ethereum_bank_transfer.js";
 import {
   createKeyPairFromBytes,
   createSignerFromKeyPair,
@@ -408,9 +412,15 @@ async function bidOnAuction(auctionId, bidAmountCents) {
   const configData = await client.request(CONFIG_QUERY);
   const exchangeRateId = configData.config.exchangeRate.id;
   const amount = PAYMENT_CURRENCY === "ETH"
-    ? (BigInt(bidAmountCents) * 1000000000000000000n / BigInt(configData.config.exchangeRate.ethRates.eurCents)).toString()
+    ? eurCentsToValidWei(
+        bidAmountCents,
+        configData.config.exchangeRate.ethRates.eurCents
+      ).toString()
     : bidAmountCents.toString();
   console.log(`  Exchange Rate ID: ${exchangeRateId}`);
+  if (PAYMENT_CURRENCY === "ETH") {
+    console.log(`  Importe ETH: ${weiToEthLabel(amount)} ETH`);
+  }
   console.log("");
 
   // 3. Preparar la puja

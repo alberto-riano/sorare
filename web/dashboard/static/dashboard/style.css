@@ -1122,6 +1122,8 @@ textarea {
 .bid-review-item small { color: var(--muted); }
 .bid-review-details { display: grid; min-width: 0; gap: .18rem; }
 .bid-review-details strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bid-review-price { display: grid; gap: .12rem; text-align: right; white-space: nowrap; }
+.bid-review-payment-amount { color: var(--accent) !important; font-family: 'IBM Plex Mono', monospace; font-weight: 700; }
 .bid-review-comparison { font-size: .72rem; font-weight: 700; }
 .bid-review-comparison.is-loading { font-weight: 500; }
 .bid-review-comparison.is-above { color: #dc2626; }

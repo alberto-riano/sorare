@@ -85,6 +85,7 @@ def get_account_balances(headers=None):
     """Devuelve los saldos disponibles de la cuenta autenticada."""
     query = '''
     query AccountBalances {
+      config { exchangeRate { ethRates { eurCents } } }
       currentUser {
         availableBalances {
           eurCents { eurCents }
@@ -94,7 +95,9 @@ def get_account_balances(headers=None):
       }
     }
     '''
-    current_user = (graphql_request(query, headers=headers).get('currentUser') or {})
+    data = graphql_request(query, headers=headers)
+    current_user = (data.get('currentUser') or {})
+    eth_rate_cents = int(((((data.get('config') or {}).get('exchangeRate') or {}).get('ethRates') or {}).get('eurCents')) or 0)
     available = current_user.get('availableBalances') or {}
     eur_cents = ((available.get('eurCents') or {}).get('eurCents') or 0)
     wei = ((available.get('wei') or {}).get('wei') or 0)
@@ -103,6 +106,7 @@ def get_account_balances(headers=None):
         'eur': int(eur_cents) / 100,
         'eth': int(wei) / 1e18,
         'credits_eur': int(credit_cents) / 100,
+        'eth_eur_cents_rate': eth_rate_cents,
     }
 
 

@@ -2,7 +2,11 @@ import { GraphQLClient, gql } from "graphql-request";
 import crypto from "crypto";
 import fs from "fs";
 import { signAuthorizationRequest } from "@sorare/crypto";
-import { buildEthereumBankTransferApproval } from "./ethereum_bank_transfer.js";
+import {
+  buildEthereumBankTransferApproval,
+  eurCentsToValidWei,
+  weiToEthLabel,
+} from "./ethereum_bank_transfer.js";
 import {
   createKeyPairFromBytes,
   createSignerFromKeyPair,
@@ -625,12 +629,11 @@ async function createDirectOffer(assetId, managerSlug, amountCents, durationHour
   let settlementCurrency;
   if (PAYMENT_CURRENCY === "ETH") {
     const rateData = await client.request(CONFIG_QUERY);
-    const rateCents = BigInt(rateData?.config?.exchangeRate?.ethRates?.eurCents || 0);
-    if (rateCents <= 0n) throw new Error("Sorare no devolvió una tasa EUR/ETH válida.");
-    const wei = (BigInt(amountCents) * 10n ** 18n) / rateCents;
+    const rateCents = rateData?.config?.exchangeRate?.ethRates?.eurCents || 0;
+    const wei = eurCentsToValidWei(amountCents, rateCents);
     amount = { amount: wei.toString(), currency: "WEI" };
     settlementCurrency = "WEI";
-    console.log(`Pago seleccionado: Ethereum (≈ ${Number(wei) / 1e18} ETH)`);
+    console.log(`Pago seleccionado: Ethereum (${weiToEthLabel(wei)} ETH)`);
   } else {
     amount = { amount: amountCents.toString(), currency: CURRENCY };
     settlementCurrency = CURRENCY;

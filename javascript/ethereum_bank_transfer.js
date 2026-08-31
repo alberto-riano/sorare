@@ -1,6 +1,20 @@
 import { encodeAbiParameters, encodePacked, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
+export const WEI_PAYMENT_QUANTUM = 100000000000000n;
+
+export function eurCentsToValidWei(amountCents, eurCentsPerEth) {
+  const numerator = BigInt(amountCents) * 10n ** 18n;
+  const denominator = BigInt(eurCentsPerEth) * WEI_PAYMENT_QUANTUM;
+  if (denominator <= 0n) throw new Error("Sorare no devolvió una tasa EUR/ETH válida.");
+  const units = (numerator + denominator / 2n) / denominator;
+  return (units > 0n ? units : 1n) * WEI_PAYMENT_QUANTUM;
+}
+
+export function weiToEthLabel(wei) {
+  return (Number(BigInt(wei)) / 1e18).toFixed(4);
+}
+
 export async function buildEthereumBankTransferApproval(privateKey, fingerprint, request) {
   const normalizedPrivateKey = privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`;
   const account = privateKeyToAccount(normalizedPrivateKey);
