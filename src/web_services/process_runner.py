@@ -152,7 +152,11 @@ def run_direct_offer(
     manager_slug: str,
     euros: str,
     duration_hours: int = 48,
+    currency: str = "EUR",
 ) -> ScriptResult:
+    currency = str(currency or "EUR").strip().upper()
+    if currency not in {"EUR", "ETH"}:
+        raise ValueError("La moneda de pago debe ser EUR o ETH")
     amount_cents = int(round(float(euros) * 100))
     cmd = [
         "node",
@@ -162,5 +166,7 @@ def run_direct_offer(
         manager_slug.strip(),
         str(amount_cents),
         str(int(duration_hours)),
+        "--currency",
+        currency,
     ]
     return _run_command(cmd, paths.repo_root)

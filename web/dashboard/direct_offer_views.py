@@ -7,15 +7,20 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from django.http import JsonResponse
+from django.core.cache import cache
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_POST
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from sorare_utils import build_headers, search_players_by_name  # noqa: E402
+from sorare_utils import build_headers, get_account_balances, search_players_by_name  # noqa: E402
 from web_services.config_files import SorarePaths  # noqa: E402
-from web_services.direct_offer_market import check_direct_offer_eur, player_in_season_listings  # noqa: E402
+from web_services.direct_offer_market import (  # noqa: E402
+    check_direct_offer_payment,
+    direct_offer_payment_amount,
+    player_in_season_listings,
+)
 from web_services.process_runner import run_direct_offer, sale_error_message  # noqa: E402
 
 
@@ -24,7 +29,17 @@ PLAYER_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,178}$")
 
 
 def direct_offers(request):
-    return render(request, "dashboard/direct_offers.html")
+    balance_cache = cache.get("sorare_account_balances")
+    if balance_cache is None:
+        try:
+            balance_cache = {"balances": get_account_balances(headers=build_headers()), "error": None}
+        except (Exception, SystemExit):
+            balance_cache = {"balances": None, "error": "No se pudo consultar ahora"}
+        cache.set("sorare_account_balances", balance_cache, 60)
+    return render(request, "dashboard/direct_offers.html", {
+        "account_balances": balance_cache["balances"],
+        "balance_error": balance_cache["error"],
+    })
 
 
 @require_GET
@@ -57,11 +72,14 @@ def preview_direct_offers(request):
         payload = json.loads(request.body or "{}")
         player_slug = str(payload.get("player_slug") or "").strip()
         euros = Decimal(str(payload.get("euros"))).quantize(Decimal("0.01"))
+        currency = str(payload.get("currency") or "EUR").strip().upper()
         requested = payload.get("offers") or []
     except (json.JSONDecodeError, InvalidOperation, TypeError, ValueError):
         return JsonResponse({"error": "Datos no válidos."}, status=400)
     if not PLAYER_SLUG_RE.fullmatch(player_slug) or euros < Decimal("0.01") or euros > Decimal("10000"):
         return JsonResponse({"error": "Jugador o importe no válido."}, status=400)
+    if currency not in {"EUR", "ETH"}:
+        return JsonResponse({"error": "La moneda debe ser EUR o ETH."}, status=400)
     if not isinstance(requested, list) or not requested or len(requested) > 50:
         return JsonResponse({"error": "Selecciona entre 1 y 50 cartas."}, status=400)
 
@@ -72,6 +90,10 @@ def preview_direct_offers(request):
         return JsonResponse({"error": str(exc)}, status=502)
     by_key = {(row["asset_id"], row["manager_slug"]): row for row in listings}
     amount_cents = int(euros * 100)
+    try:
+        payment_amount = direct_offer_payment_amount(amount_cents, currency, headers=headers)
+    except (Exception, SystemExit) as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
     results = []
     for item in requested:
         if not isinstance(item, dict):
@@ -93,8 +115,8 @@ def preview_direct_offers(request):
                 "rarity": listing.get("rarity"),
             })
             try:
-                errors = check_direct_offer_eur(
-                    asset_id, manager_slug, amount_cents, headers=headers,
+                errors = check_direct_offer_payment(
+                    asset_id, manager_slug, payment_amount, headers=headers,
                 )
                 result["compatible"] = not errors
                 if errors:
@@ -103,8 +125,9 @@ def preview_direct_offers(request):
                 result["error"] = str(exc)[:500]
         results.append(result)
     return JsonResponse({
-        "currency": "EUR",
+        "currency": currency,
         "euros": str(euros),
+        "payment_eth": str(Decimal(payment_amount["amount"]) / Decimal(10**18)) if currency == "ETH" else None,
         "results": results,
         "compatible_count": sum(1 for result in results if result["compatible"]),
     })
@@ -123,6 +146,7 @@ def create_direct_offer(request):
     try:
         euros = Decimal(str(payload.get("euros"))).quantize(Decimal("0.01"))
         duration_hours = int(payload.get("duration_hours", 48))
+        currency = str(payload.get("currency") or "EUR").strip().upper()
     except (InvalidOperation, TypeError, ValueError):
         return JsonResponse({"error": "Importe o duración no válidos."}, status=400)
 
@@ -130,6 +154,8 @@ def create_direct_offer(request):
         return JsonResponse({"error": "Faltan datos de la carta o del manager."}, status=400)
     if euros < Decimal("0.01") or euros > Decimal("10000"):
         return JsonResponse({"error": "La oferta debe estar entre 0,01 € y 10.000 €."}, status=400)
+    if currency not in {"EUR", "ETH"}:
+        return JsonResponse({"error": "La moneda debe ser EUR o ETH."}, status=400)
     if duration_hours not in {24, 48, 72, 168}:
         return JsonResponse({"error": "Duración no válida."}, status=400)
 
@@ -150,6 +176,7 @@ def create_direct_offer(request):
         manager_slug=manager_slug,
         euros=str(euros),
         duration_hours=duration_hours,
+        currency=currency,
     )
     if result.exit_code != 0:
         return JsonResponse({"error": sale_error_message(result)}, status=502)

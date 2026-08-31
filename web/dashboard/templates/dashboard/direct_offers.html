@@ -1,4 +1,5 @@
 {% extends 'dashboard/base.html' %}
+{% load dashboard_filters %}
 
 {% block title %}Lanzar oferta | Sorare{% endblock %}
 
@@ -22,7 +23,15 @@
       <label><span>Validez</span><select id="offerDuration"><option value="24">24 horas</option><option value="48" selected>48 horas</option><option value="72">3 días</option><option value="168">7 días</option></select></label>
       <button class="btn btn-accent" id="sendOffers" type="button" disabled><i class="fas fa-paper-plane"></i> <span>Enviar ofertas</span></button>
     </div>
-    <div class="direct-selection-summary"><label><input id="selectVisible" type="checkbox"> Seleccionar visibles</label><strong id="selectionCount">0 seleccionadas</strong><span id="maximumSpend">Máximo 0,00 €</span></div>
+    <div class="direct-selection-summary">
+      <label><input id="selectVisible" type="checkbox"> Seleccionar visibles</label>
+      <strong id="selectionCount">0 seleccionadas</strong><span id="maximumSpend">Máximo 0,00 €</span>
+      <div class="bid-payment-choice direct-payment-choice" aria-label="Moneda de pago">
+        <span>Pagar con</span>
+        <label><input type="radio" name="direct-payment-currency" value="EUR" checked> EUR</label>
+        <label><input type="radio" name="direct-payment-currency" value="ETH"> Ethereum</label>
+      </div>
+    </div>
   </section>
 
   <section class="panel direct-offer-results reveal" id="offerResults">
@@ -39,9 +48,17 @@
   <div class="bid-modal-backdrop" data-close-offer-review></div>
   <section class="bid-modal-card direct-offer-review-card" role="dialog" aria-modal="true" aria-labelledby="directOfferReviewTitle">
     <button type="button" class="bid-modal-close" data-close-offer-review aria-label="Cerrar">&times;</button>
-    <p class="kicker">Comprobación de moneda</p>
-    <h2 id="directOfferReviewTitle"><i class="fas fa-euro-sign"></i> Resumen de ofertas</h2>
+    <p class="kicker">Comprobación de pago</p>
+    <h2 id="directOfferReviewTitle"><i class="fas fa-wallet"></i> Resumen de ofertas</h2>
     <p id="directOfferReviewSummary"></p>
+    <div class="modal-balances">
+      {% if account_balances %}
+        <span><small>EUR disponibles</small><strong>{{ account_balances.eur|floatformat:2 }} €</strong></span>
+        <span><small>ETH disponibles</small><strong>{{ account_balances.eth|eth_amount }} ETH</strong></span>
+      {% else %}
+        <span><small>Saldos</small><strong>{{ balance_error|default:'No disponibles' }}</strong></span>
+      {% endif %}
+    </div>
     <div class="direct-offer-review-list" id="directOfferReviewList"></div>
     <div class="bid-modal-actions">
       <button class="btn btn-secondary" type="button" data-close-offer-review>Volver</button>
@@ -66,13 +83,18 @@
   var selectVisible = document.getElementById('selectVisible');
   var reviewModal = document.getElementById('directOfferReview');
   var confirmButton = document.getElementById('confirmDirectOffers');
+  var paymentControls = Array.from(document.querySelectorAll('input[name="direct-payment-currency"]'));
   var listings = [];
   var reviewedInputs = [];
+  var reviewedCurrency = 'EUR';
   var selectedPlayerSlug = '';
   var searchTimer;
   var csrf = '{{ csrf_token }}';
 
   function escapeHtml(value) { var node = document.createElement('span'); node.textContent = value == null ? '' : value; return node.innerHTML; }
+  function paymentCurrency() { var selected = paymentControls.find(function (input) { return input.checked; }); return selected ? selected.value : 'EUR'; }
+  function storedPaymentCurrency() { try { var value = localStorage.getItem('sorarePaymentCurrency'); return ['EUR','ETH'].includes(value) ? value : 'EUR'; } catch (_error) { return 'EUR'; } }
+  function rememberPaymentCurrency(value) { try { localStorage.setItem('sorarePaymentCurrency', value); } catch (_error) {} }
   function rarityName(value) { return {limited:'Limited', rare:'Rare', super_rare:'Super Rare', unique:'Unique'}[value] || value; }
   function priceHtml(row) {
     var euro = Number(row.price_eur).toLocaleString('es-ES', {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -108,22 +130,27 @@
   });
   document.querySelectorAll('.direct-rarity-filter input').forEach(function (input) { input.addEventListener('change', applyRarities); });
   amount.addEventListener('input', updateSummary);
+  paymentControls.forEach(function (input) { input.addEventListener('change', function () { if (input.checked) rememberPaymentCurrency(input.value); }); });
+  var initialCurrency = storedPaymentCurrency();
+  paymentControls.forEach(function (input) { input.checked = input.value === initialCurrency; });
   selectVisible.addEventListener('change', function () { visibleRows().forEach(function (row) { row.querySelector('.direct-card-select').checked = selectVisible.checked; }); updateSummary(); });
   document.querySelectorAll('[data-close-offer-review]').forEach(function (button) { button.addEventListener('click', function () { reviewModal.hidden = true; document.body.classList.remove('modal-open'); }); });
   sendButton.addEventListener('click', async function () {
     var selected = Array.from(rowsNode.querySelectorAll('.direct-card-select:checked')).filter(function (input) { return !input.closest('tr').hidden; });
-    var euros = Number(amount.value); var total = selected.length * euros;
+    var euros = Number(amount.value); var currency = paymentCurrency();
     if (!selected.length) return;
     if (!amount.reportValidity()) return;
     sendButton.disabled = true;
-    sendButton.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> <span>Comprobando EUR</span>';
+    sendButton.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> <span>Comprobando ' + currency + '</span>';
     try {
-      var response = await fetch('{% url "preview_direct_offers" %}', {method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':csrf,'Content-Type':'application/json'}, body:JSON.stringify({player_slug:selectedPlayerSlug,euros:euros.toFixed(2),offers:selected.map(function (input) { var listing=listings[Number(input.closest('tr').dataset.index)]; return {asset_id:listing.asset_id,manager_slug:listing.manager_slug}; })})});
-      var payload = await response.json(); if (!response.ok) throw new Error(payload.error || 'No se pudo comprobar la compatibilidad EUR');
+      var response = await fetch('{% url "preview_direct_offers" %}', {method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':csrf,'Content-Type':'application/json'}, body:JSON.stringify({player_slug:selectedPlayerSlug,euros:euros.toFixed(2),currency:currency,offers:selected.map(function (input) { var listing=listings[Number(input.closest('tr').dataset.index)]; return {asset_id:listing.asset_id,manager_slug:listing.manager_slug}; })})});
+      var payload = await response.json(); if (!response.ok) throw new Error(payload.error || 'No se pudo comprobar la moneda de pago');
+      reviewedCurrency = payload.currency || currency;
       reviewedInputs = selected.filter(function (input) { var listing=listings[Number(input.closest('tr').dataset.index)]; return payload.results.some(function (result) { return result.asset_id === listing.asset_id && result.manager_slug === listing.manager_slug && result.compatible; }); });
-      document.getElementById('directOfferReviewSummary').textContent = payload.compatible_count + ' de ' + selected.length + ' ofertas se pueden preparar ahora en EUR. Se enviarían ' + (payload.compatible_count * euros).toLocaleString('es-ES', {minimumFractionDigits:2,maximumFractionDigits:2}) + ' € como máximo.';
-      document.getElementById('directOfferReviewList').innerHTML = payload.results.map(function (result) { return '<div class="direct-offer-review-item ' + (result.compatible ? 'is-compatible' : 'is-blocked') + '"><span><strong>#' + escapeHtml(result.serial_number || '—') + ' · ' + escapeHtml(result.manager || result.manager_slug) + '</strong><small>' + euros.toLocaleString('es-ES', {minimumFractionDigits:2,maximumFractionDigits:2}) + ' EUR</small></span><span class="direct-offer-review-state"><i class="fas ' + (result.compatible ? 'fa-circle-check' : 'fa-circle-xmark') + '"></i> ' + (result.compatible ? 'EUR disponible' : escapeHtml(result.error || 'EUR no disponible')) + '</span></div>'; }).join('');
-      selected.forEach(function (input) { var listing=listings[Number(input.closest('tr').dataset.index)]; var result=payload.results.find(function (candidate) { return candidate.asset_id === listing.asset_id && candidate.manager_slug === listing.manager_slug; }); if (result && !result.compatible) { input.checked=false; var status=input.closest('tr').querySelector('.direct-offer-status'); status.innerHTML='<span class="is-error" title="' + escapeHtml(result.error || 'EUR no disponible') + '"><i class="fas fa-circle-xmark"></i> EUR no disponible</span>'; } });
+      var ethTotal = payload.payment_eth ? ' (≈ ' + (Number(payload.payment_eth) * payload.compatible_count).toLocaleString('es-ES', {maximumFractionDigits:6}) + ' ETH)' : '';
+      document.getElementById('directOfferReviewSummary').textContent = payload.compatible_count + ' de ' + selected.length + ' ofertas se pueden preparar con ' + reviewedCurrency + '. Máximo: ' + (payload.compatible_count * euros).toLocaleString('es-ES', {minimumFractionDigits:2,maximumFractionDigits:2}) + ' €' + ethTotal + '.';
+      document.getElementById('directOfferReviewList').innerHTML = payload.results.map(function (result) { return '<div class="direct-offer-review-item ' + (result.compatible ? 'is-compatible' : 'is-blocked') + '"><span><strong>#' + escapeHtml(result.serial_number || '—') + ' · ' + escapeHtml(result.manager || result.manager_slug) + '</strong><small>' + euros.toLocaleString('es-ES', {minimumFractionDigits:2,maximumFractionDigits:2}) + ' € · pago ' + escapeHtml(reviewedCurrency) + '</small></span><span class="direct-offer-review-state"><i class="fas ' + (result.compatible ? 'fa-circle-check' : 'fa-circle-xmark') + '"></i> ' + (result.compatible ? reviewedCurrency + ' disponible' : escapeHtml(result.error || reviewedCurrency + ' no disponible')) + '</span></div>'; }).join('');
+      selected.forEach(function (input) { var listing=listings[Number(input.closest('tr').dataset.index)]; var result=payload.results.find(function (candidate) { return candidate.asset_id === listing.asset_id && candidate.manager_slug === listing.manager_slug; }); if (result && !result.compatible) { input.checked=false; var status=input.closest('tr').querySelector('.direct-offer-status'); status.innerHTML='<span class="is-error" title="' + escapeHtml(result.error || reviewedCurrency + ' no disponible') + '"><i class="fas fa-circle-xmark"></i> ' + reviewedCurrency + ' no disponible</span>'; } });
       confirmButton.disabled = !reviewedInputs.length;
       confirmButton.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar ' + reviewedInputs.length + (reviewedInputs.length === 1 ? ' compatible' : ' compatibles');
       updateSummary(); reviewModal.hidden = false; document.body.classList.add('modal-open');
@@ -134,18 +161,18 @@
     var selected = reviewedInputs.slice();
     var euros = Number(amount.value);
     reviewModal.hidden = true; document.body.classList.remove('modal-open');
-    sendButton.disabled = true; amount.disabled = true; duration.disabled = true;
+    sendButton.disabled = true; amount.disabled = true; duration.disabled = true; paymentControls.forEach(function (input) { input.disabled = true; });
     for (var input of selected) {
       var rowNode = input.closest('tr'); var listing = listings[Number(rowNode.dataset.index)]; var status = rowNode.querySelector('.direct-offer-status');
       status.innerHTML = '<span class="is-running"><i class="fas fa-circle-notch fa-spin"></i> Enviando</span>';
       try {
-        var response = await fetch('{% url "create_direct_offer" %}', {method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':csrf, 'Content-Type':'application/json'}, body:JSON.stringify({player_slug:selectedPlayerSlug, asset_id:listing.asset_id, manager_slug:listing.manager_slug, euros:euros.toFixed(2), duration_hours:Number(duration.value)})});
+        var response = await fetch('{% url "create_direct_offer" %}', {method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':csrf, 'Content-Type':'application/json'}, body:JSON.stringify({player_slug:selectedPlayerSlug, asset_id:listing.asset_id, manager_slug:listing.manager_slug, euros:euros.toFixed(2), currency:reviewedCurrency, duration_hours:Number(duration.value)})});
         var payload = await response.json(); if (!response.ok) throw new Error(payload.error || 'No se pudo enviar');
         status.innerHTML = '<span class="is-success"><i class="fas fa-circle-check"></i> Enviada</span>'; input.disabled = true;
       } catch (error) { status.innerHTML = '<span class="is-error" title="' + escapeHtml(error.message) + '"><i class="fas fa-triangle-exclamation"></i> Error</span>'; }
     }
     reviewedInputs = [];
-    amount.disabled = false; duration.disabled = false; updateSummary();
+    amount.disabled = false; duration.disabled = false; paymentControls.forEach(function (input) { input.disabled = false; }); updateSummary();
   });
 })();
 </script>

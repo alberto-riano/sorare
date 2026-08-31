@@ -16,24 +16,58 @@ mutation PrepareDirectOffer($input: prepareOfferInput!) {
 }
 """
 
+DIRECT_OFFER_ETH_RATE_QUERY = """
+query DirectOfferEthRate {
+    config { exchangeRate { ethRates { eurCents } } }
+}
+"""
+
+
+def direct_offer_payment_amount(amount_cents, currency="EUR", *, headers=None):
+    """Convierte un importe expresado en céntimos EUR al rail elegido por Sorare."""
+    amount_cents = int(amount_cents)
+    currency = str(currency or "EUR").strip().upper()
+    if currency == "EUR":
+        return {"amount": str(amount_cents), "currency": "EUR"}
+    if currency != "ETH":
+        raise ValueError("La moneda de pago debe ser EUR o ETH")
+    data = graphql_request(DIRECT_OFFER_ETH_RATE_QUERY, headers=headers)
+    rate_cents = int((((data.get("config") or {}).get("exchangeRate") or {}).get("ethRates") or {}).get("eurCents") or 0)
+    if rate_cents <= 0:
+        raise RuntimeError("Sorare no devolvió una tasa EUR/ETH válida")
+    wei = max(1, amount_cents * 10**18 // rate_cents)
+    return {"amount": str(wei), "currency": "WEI"}
+
+
+def check_direct_offer_payment(asset_id, manager_slug, payment_amount, *, headers=None):
+    settlement_currency = str(payment_amount.get("currency") or "").upper()
+    if settlement_currency not in {"EUR", "WEI"}:
+        raise ValueError("El importe de pago no tiene una moneda compatible")
+    data = graphql_request(
+        PREPARE_DIRECT_OFFER_QUERY,
+        {
+            "input": {
+                "sendAssetIds": [],
+                "receiveAssetIds": [asset_id],
+                "settlementCurrencies": [settlement_currency],
+                "sendAmount": payment_amount,
+                "receiverSlug": manager_slug,
+                "clientMutationId": f"payment-check-{asset_id}",
+            }
+        },
+        headers=headers,
+    )
+    errors = (data.get("prepareOffer") or {}).get("errors") or []
+    return [str(error.get("message") or "").strip() for error in errors if error.get("message")]
+
 
 def check_direct_offer_eur(asset_id, manager_slug, amount_cents, *, headers=None):
-        data = graphql_request(
-                PREPARE_DIRECT_OFFER_QUERY,
-                {
-                        "input": {
-                                "sendAssetIds": [],
-                                "receiveAssetIds": [asset_id],
-                                "settlementCurrencies": ["EUR"],
-                                "sendAmount": {"amount": str(amount_cents), "currency": "EUR"},
-                                "receiverSlug": manager_slug,
-                                "clientMutationId": f"eur-check-{asset_id}",
-                        }
-                },
-                headers=headers,
-        )
-        errors = (data.get("prepareOffer") or {}).get("errors") or []
-        return [str(error.get("message") or "").strip() for error in errors if error.get("message")]
+    return check_direct_offer_payment(
+        asset_id,
+        manager_slug,
+        {"amount": str(amount_cents), "currency": "EUR"},
+        headers=headers,
+    )
 
 
 def _original_price(amounts):

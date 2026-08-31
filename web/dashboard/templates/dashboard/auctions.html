@@ -395,6 +395,17 @@ document.addEventListener('DOMContentLoaded', function () {
   var currencyHelp = document.getElementById('payment-currency-help');
   var submitAllButton = document.getElementById('submit-all-bids');
 
+  function storedPaymentCurrency() {
+    try {
+      var value = localStorage.getItem('sorarePaymentCurrency');
+      return ['EUR', 'ETH'].includes(value) ? value : 'EUR';
+    } catch (_error) { return 'EUR'; }
+  }
+
+  function rememberPaymentCurrency(value) {
+    try { localStorage.setItem('sorarePaymentCurrency', value); } catch (_error) {}
+  }
+
   function bidFromControl(control) {
       var input = control.querySelector('.batch-bid-euros');
       var normalized = input.value.trim().replace(',', '.');
@@ -514,8 +525,9 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     creditAll.checked = bids.every(function (bid) { return bid.use_credit; });
     creditAll.indeterminate = bids.some(function (bid) { return bid.use_credit; }) && !creditAll.checked;
-    currencyControls.forEach(function (control) { control.checked = control.value === 'EUR'; });
-    syncReviewCurrency('EUR');
+    var preferredCurrency = storedPaymentCurrency();
+    currencyControls.forEach(function (control) { control.checked = control.value === preferredCurrency; });
+    syncReviewCurrency(preferredCurrency);
     document.getElementById('batch-bids-payload').value = JSON.stringify(bids.map(function (bid) {
       return {auction_id: bid.auction_id, euros: bid.euros, use_credit: bid.use_credit, currency: bid.currency};
     }));
@@ -533,7 +545,10 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   currencyControls.forEach(function (control) {
     control.addEventListener('change', function () {
-      if (control.checked) syncReviewCurrency(control.value);
+      if (control.checked) {
+        rememberPaymentCurrency(control.value);
+        syncReviewCurrency(control.value);
+      }
     });
   });
 

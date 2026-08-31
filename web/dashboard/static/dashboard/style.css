@@ -174,6 +174,8 @@ nav a:hover {
 .money-input b { grid-column: 2; grid-row: 1; margin-right: .65rem; }
 .direct-selection-summary { grid-column: 1 / -1; display: flex; align-items: center; gap: 1rem; padding-top: .45rem; border-top: 1px solid var(--line); font-size: .78rem; }
 .direct-selection-summary span { color: var(--muted); }
+.direct-payment-choice { margin-left: auto; }
+.direct-payment-choice > span { color: var(--muted); }
 .direct-offer-results { min-height: 250px; padding: .75rem 1rem; }
 .direct-offer-empty { display: grid; min-height: 210px; place-items: center; align-content: center; gap: .6rem; color: var(--muted); }
 .direct-offer-empty i { font-size: 1.6rem; color: var(--accent); }

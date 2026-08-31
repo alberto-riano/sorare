@@ -2,6 +2,7 @@ import { GraphQLClient, gql } from "graphql-request";
 import crypto from "crypto";
 import fs from "fs";
 import { signAuthorizationRequest } from "@sorare/crypto";
+import { buildEthereumBankTransferApproval } from "./ethereum_bank_transfer.js";
 import {
   createKeyPairFromBytes,
   createSignerFromKeyPair,
@@ -108,6 +109,16 @@ const authorizationRequestFragment = gql`
         currency
         operationHash
         mangopayWalletId
+      }
+      ... on EthereumBankTransferAuthorizationRequest {
+        contractAddress
+        deadline
+        amount
+        feeAmount
+        proxyAddress
+        receiverAddress
+        salt
+        senderAddress
       }
       ... on SolanaTokenTransferAuthorizationRequest {
         leafIndex
@@ -348,6 +359,11 @@ async function buildApprovalsCombined(
         request
       );
       approvals.push(solanaApproval);
+      continue;
+    }
+
+    if (request.__typename === "EthereumBankTransferAuthorizationRequest") {
+      approvals.push(await buildEthereumBankTransferApproval(starkPrivateKey, fingerprint, request));
       continue;
     }
 

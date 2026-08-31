@@ -1081,6 +1081,7 @@ def bid_scheduler(request):
                     sniper=bool(payload.get("sniper")),
                     background=bool(payload.get("background")),
                     use_credit=bool(payload.get("use_credit")),
+                    currency=payload["currency"],
                 ),
             )
             if script_result.exit_code == 0:

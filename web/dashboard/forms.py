@@ -40,6 +40,9 @@ class BidScheduleForm(forms.Form):
     sniper = forms.BooleanField(required=False)
     background = forms.BooleanField(required=False)
     use_credit = forms.BooleanField(required=False, initial=True)
+    currency = forms.ChoiceField(
+        choices=(("EUR", "EUR"), ("ETH", "Ethereum")), initial="EUR", required=False,
+    )
 
     def clean(self):
         cleaned_data = super().clean()
@@ -49,6 +52,7 @@ class BidScheduleForm(forms.Form):
 
         if not now and not sniper and not hora:
             raise forms.ValidationError("Debes indicar hora o activar now/sniper.")
+        cleaned_data["currency"] = cleaned_data.get("currency") or "EUR"
         return cleaned_data
 
 

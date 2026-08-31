@@ -7,11 +7,23 @@ from django.test import TestCase
 from django.urls import reverse
 
 from web_services.config_files import SorarePaths
-from web_services.direct_offer_market import check_direct_offer_eur, player_in_season_listings
+from web_services.direct_offer_market import (
+    check_direct_offer_eur,
+    direct_offer_payment_amount,
+    player_in_season_listings,
+)
 from web_services.process_runner import ScriptResult, run_direct_offer
 
 
 class DirectOfferMarketTests(TestCase):
+    @patch("web_services.direct_offer_market.graphql_request")
+    def test_eth_payment_converts_eur_reference_to_wei(self, graphql):
+        graphql.return_value = {"config": {"exchangeRate": {"ethRates": {"eurCents": 200000}}}}
+
+        amount = direct_offer_payment_amount(2403, "ETH", headers={"Authorization": "hidden"})
+
+        self.assertEqual(amount, {"amount": "12015000000000000", "currency": "WEI"})
+
     @patch("web_services.direct_offer_market.graphql_request")
     def test_eur_preflight_uses_eur_settlement_without_creating_offer(self, graphql):
         graphql.return_value = {"prepareOffer": {"errors": []}}
@@ -99,15 +111,17 @@ class DirectOfferViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["players"][0]["slug"], "jugador-uno")
 
-    @patch("dashboard.direct_offer_views.check_direct_offer_eur")
+    @patch("dashboard.direct_offer_views.direct_offer_payment_amount")
+    @patch("dashboard.direct_offer_views.check_direct_offer_payment")
     @patch("dashboard.direct_offer_views.player_in_season_listings")
     @patch("dashboard.direct_offer_views.build_headers", return_value={})
-    def test_preview_reports_eur_compatibility_and_stale_sales(self, _headers, listings, check_eur):
+    def test_preview_reports_eur_compatibility_and_stale_sales(self, _headers, listings, check_payment, payment_amount):
         listings.return_value = [self.listing, {
             **self.listing, "asset_id": "asset-two", "manager_slug": "seller-two",
             "manager": "Seller Two", "serial_number": 22,
         }]
-        check_eur.side_effect = [[], ["El manager no puede recibir EUR."]]
+        payment_amount.return_value = {"amount": "22", "currency": "EUR"}
+        check_payment.side_effect = [[], ["El manager no puede recibir EUR."]]
 
         response = self.client.post(
             reverse("preview_direct_offers"),
@@ -130,7 +144,7 @@ class DirectOfferViewTests(TestCase):
         self.assertFalse(payload["results"][1]["compatible"])
         self.assertIn("no puede recibir EUR", payload["results"][1]["error"])
         self.assertIn("ya no está disponible", payload["results"][2]["error"])
-        self.assertEqual(check_eur.call_count, 2)
+        self.assertEqual(check_payment.call_count, 2)
 
     @patch("dashboard.direct_offer_views.run_direct_offer")
     @patch("dashboard.direct_offer_views.player_in_season_listings")
@@ -151,7 +165,30 @@ class DirectOfferViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         run_offer.assert_called_once_with(
             unittest_mock_any_paths(), asset_id="asset-one", manager_slug="seller-one",
-            euros="0.22", duration_hours=48,
+            euros="0.22", duration_hours=48, currency="EUR",
+        )
+
+    @patch("dashboard.direct_offer_views.run_direct_offer")
+    @patch("dashboard.direct_offer_views.player_in_season_listings")
+    @patch("dashboard.direct_offer_views.build_headers", return_value={})
+    def test_create_offer_preserves_eth_payment_choice(self, _headers, listings, run_offer):
+        listings.return_value = [self.listing]
+        run_offer.return_value = ScriptResult("node", 0, "ok", "")
+
+        response = self.client.post(
+            reverse("create_direct_offer"),
+            data={
+                "player_slug": "jugador-uno", "asset_id": "asset-one",
+                "manager_slug": "seller-one", "euros": "24.03",
+                "currency": "ETH", "duration_hours": 48,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        run_offer.assert_called_once_with(
+            unittest_mock_any_paths(), asset_id="asset-one", manager_slug="seller-one",
+            euros="24.03", duration_hours=48, currency="ETH",
         )
 
     @patch("dashboard.direct_offer_views.run_direct_offer")
@@ -184,8 +221,14 @@ class DirectOfferRunnerTests(TestCase):
 
         self.assertEqual(run_command.call_args.args[0], [
             "node", "/repo/javascript/vender_carta.js", "--direct-offer",
-            "asset-one", "seller-one", "1025", "72",
+            "asset-one", "seller-one", "1025", "72", "--currency", "EUR",
         ])
+
+        run_direct_offer(
+            paths, asset_id="asset-two", manager_slug="seller-two",
+            euros="24.03", duration_hours=48, currency="ETH",
+        )
+        self.assertEqual(run_command.call_args.args[0][-2:], ["--currency", "ETH"])
 
 
 def unittest_mock_any_paths():

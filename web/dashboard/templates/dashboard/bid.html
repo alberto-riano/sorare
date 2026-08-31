@@ -17,8 +17,12 @@
       {{ form.identifier }}
     </label>
     <label>
-      <span>Euros</span>
+      <span>Importe máximo (referencia en EUR)</span>
       {{ form.euros }}
+    </label>
+    <label>
+      <span>Pagar con</span>
+      {{ form.currency }}
     </label>
     <label>
       <span>Hora (HH:MM o HH:MM:SS)</span>
@@ -41,6 +45,20 @@
     <button class="btn btn-accent" type="submit">Ejecutar puja</button>
   </div>
 </form>
+
+<script>
+(function () {
+  var currency = document.getElementById('id_currency');
+  if (!currency) return;
+  try {
+    var stored = localStorage.getItem('sorarePaymentCurrency');
+    if (stored === 'EUR' || stored === 'ETH') currency.value = stored;
+  } catch (_error) {}
+  currency.addEventListener('change', function () {
+    try { localStorage.setItem('sorarePaymentCurrency', currency.value); } catch (_error) {}
+  });
+})();
+</script>
 
 {% if script_result %}
 <section class="panel reveal" style="animation-delay: 180ms;">

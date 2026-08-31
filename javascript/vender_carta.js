@@ -2,6 +2,7 @@ import { GraphQLClient, gql } from "graphql-request";
 import crypto from "crypto";
 import fs from "fs";
 import { signAuthorizationRequest } from "@sorare/crypto";
+import { buildEthereumBankTransferApproval } from "./ethereum_bank_transfer.js";
 import {
   createKeyPairFromBytes,
   createSignerFromKeyPair,
@@ -34,6 +35,8 @@ function readConfig(filename = CONFIG_PATH) {
 // --- Parámetros de entrada ---
 const DIRECT_OFFER_MODE = process.argv[2] === "--direct-offer";
 const inputArgs = DIRECT_OFFER_MODE ? process.argv.slice(3) : process.argv.slice(2);
+const currencyIndex = inputArgs.indexOf("--currency");
+const PAYMENT_CURRENCY = currencyIndex >= 0 ? inputArgs[currencyIndex + 1] : "EUR";
 const [ASSET_ID, directManagerOrPrice, directPriceOrDays, directHoursOrMinimum] = inputArgs;
 const MANAGER_SLUG = DIRECT_OFFER_MODE ? directManagerOrPrice : "";
 const PRICE_CENTS = DIRECT_OFFER_MODE ? directPriceOrDays : directManagerOrPrice;
@@ -45,6 +48,10 @@ if (!ASSET_ID || !PRICE_CENTS) {
 }
 if (DIRECT_OFFER_MODE && !MANAGER_SLUG) {
   console.error("La oferta directa requiere el slug del manager receptor.");
+  process.exit(1);
+}
+if (!["EUR", "ETH"].includes(PAYMENT_CURRENCY)) {
+  console.error("La moneda de pago debe ser EUR o ETH.");
   process.exit(1);
 }
 const DURATION_DAYS = parseInt(DAYS || "7", 10);
@@ -119,6 +126,16 @@ const authorizationRequestFragment = gql`
         operationHash
         mangopayWalletId
       }
+      ... on EthereumBankTransferAuthorizationRequest {
+        contractAddress
+        deadline
+        amount
+        feeAmount
+        proxyAddress
+        receiverAddress
+        salt
+        senderAddress
+      }
       ... on SolanaTokenTransferAuthorizationRequest {
         leafIndex
         merkleTreeAddress
@@ -133,6 +150,16 @@ const authorizationRequestFragment = gql`
 `;
 
 // --- Mutaciones GraphQL ---
+const CONFIG_QUERY = gql`
+  query DirectOfferExchangeRate {
+    config {
+      exchangeRate {
+        ethRates { eurCents }
+      }
+    }
+  }
+`;
+
 const PREPARE_OFFER_MUTATION = gql`
   mutation PrepareOffer($input: prepareOfferInput!) {
     prepareOffer(input: $input) {
@@ -379,6 +406,11 @@ async function buildApprovalsCombined(
       continue;
     }
 
+    if (request.__typename === "EthereumBankTransferAuthorizationRequest") {
+      approvals.push(await buildEthereumBankTransferApproval(starkPrivateKey, fingerprint, request));
+      continue;
+    }
+
     throw new Error("Tipo de autorización desconocido: " + request.__typename);
   }
 
@@ -589,12 +621,26 @@ async function sellCard(assetId, priceCents, durationDays, relistRetriesLeft = R
 }
 
 async function createDirectOffer(assetId, managerSlug, amountCents, durationHours) {
-  const amount = { amount: amountCents.toString(), currency: CURRENCY };
+  let amount;
+  let settlementCurrency;
+  if (PAYMENT_CURRENCY === "ETH") {
+    const rateData = await client.request(CONFIG_QUERY);
+    const rateCents = BigInt(rateData?.config?.exchangeRate?.ethRates?.eurCents || 0);
+    if (rateCents <= 0n) throw new Error("Sorare no devolvió una tasa EUR/ETH válida.");
+    const wei = (BigInt(amountCents) * 10n ** 18n) / rateCents;
+    amount = { amount: wei.toString(), currency: "WEI" };
+    settlementCurrency = "WEI";
+    console.log(`Pago seleccionado: Ethereum (≈ ${Number(wei) / 1e18} ETH)`);
+  } else {
+    amount = { amount: amountCents.toString(), currency: CURRENCY };
+    settlementCurrency = CURRENCY;
+    console.log("Pago seleccionado: EUR");
+  }
   const prepareData = await client.request(PREPARE_OFFER_MUTATION, {
     input: {
       sendAssetIds: [],
       receiveAssetIds: [assetId],
-      settlementCurrencies: [CURRENCY],
+      settlementCurrencies: [settlementCurrency],
       sendAmount: amount,
       receiverSlug: managerSlug,
       clientMutationId: crypto.randomBytes(8).toString("hex"),
