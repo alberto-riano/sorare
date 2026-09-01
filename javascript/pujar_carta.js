@@ -508,7 +508,12 @@ async function bidOnAuction(auctionId, bidAmountCents) {
 }
 
 // --- Invocación principal ---
-bidOnAuction(AUCTION_ID, parseInt(BID_AMOUNT_CENTS)).catch((error) => {
-  console.error("❌ Error:", error.message || error);
-  process.exit(1);
-});
+// Algunas librerías de firma mantienen conexiones internas abiertas, sobre todo
+// en pagos ETH. Cerramos explícitamente una vez que Sorare confirma la puja para
+// que el worker pueda continuar con el resto del lote y publicar el resumen.
+bidOnAuction(AUCTION_ID, parseInt(BID_AMOUNT_CENTS))
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error("❌ Error:", error.message || error);
+    process.exit(1);
+  });

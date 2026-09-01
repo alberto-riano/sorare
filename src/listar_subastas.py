@@ -281,12 +281,23 @@ def load_auction_cache():
 
 
 @contextmanager
-def _auction_cache_lock():
+def _auction_cache_lock(timeout_seconds=None):
     """Evita que el barrido automático y un refresco manual se pisen."""
     lock_path = CACHE_PATH.with_suffix('.lock')
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open('w') as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        if timeout_seconds is None:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        else:
+            deadline = time.monotonic() + max(0, float(timeout_seconds))
+            while True:
+                try:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("El mercado se está actualizando; se omitió el refresco posterior.")
+                    time.sleep(0.1)
         try:
             yield
         finally:
@@ -486,7 +497,9 @@ def refresh_cached_auction_ids(auction_ids):
     if not requested_ids:
         return {}
 
-    with _auction_cache_lock():
+    # Una sincronización completa puede durar minutos. La puja ya está enviada,
+    # así que esta comprobación auxiliar nunca debe dejar su lote bloqueado.
+    with _auction_cache_lock(timeout_seconds=5):
         previous = load_auction_cache()
         if not previous:
             raise RuntimeError("Todavía no existe una caché de mercado.")

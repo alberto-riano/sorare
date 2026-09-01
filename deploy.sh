@@ -36,9 +36,32 @@ info "Instalando dependencias Python"
 "$VENV_DIR/bin/pip" install --disable-pip-version-check -r requirements.txt
 
 if command -v npm >/dev/null 2>&1; then
-    info "Instalando dependencias Node para las operaciones firmadas"
-    npm ci --no-audit --no-fund
-    npm --prefix javascript ci --no-audit --no-fund
+    install_node_dependencies() {
+        local directory="$1"
+        local label="$2"
+        local state_file="$3"
+        local lock_file="$directory/package-lock.json"
+        local lock_hash installed_hash=""
+
+        [ -f "$lock_file" ] || fail "Falta $lock_file"
+        lock_hash="$(sha256sum "$lock_file" | awk '{print $1}')"
+        [ -f "$state_file" ] && installed_hash="$(tr -d '[:space:]' < "$state_file")"
+
+        if [ -d "$directory/node_modules" ] && npm --prefix "$directory" ls --omit=dev --depth=0 >/dev/null 2>&1; then
+            if [ -z "$installed_hash" ] || [ "$installed_hash" = "$lock_hash" ]; then
+                printf '%s\n' "$lock_hash" > "$state_file"
+                info "Dependencias Node de $label sin cambios"
+                return
+            fi
+        fi
+
+        info "Instalando dependencias Node de $label"
+        npm --prefix "$directory" ci --prefer-offline --no-audit --no-fund --no-progress
+        printf '%s\n' "$lock_hash" > "$state_file"
+    }
+
+    install_node_dependencies "$PROJECT_DIR" "la aplicación" "$DEPLOY_STATE_DIR/node-root.sha256"
+    install_node_dependencies "$PROJECT_DIR/javascript" "las operaciones firmadas" "$DEPLOY_STATE_DIR/node-javascript.sha256"
 else
     fail "Node/npm no esta instalado y es necesario para pujas y ventas. Ejecuta setup.sh."
 fi

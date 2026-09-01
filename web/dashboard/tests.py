@@ -349,6 +349,27 @@ class AuctionActionsTests(TestCase):
         ])
         sleep.assert_called_once_with(1)
 
+    @patch("dashboard.management.commands.process_bid_queue.time.sleep")
+    @patch("dashboard.management.commands.process_bid_queue.listar_subastas.refresh_cached_auction_ids")
+    @patch("dashboard.management.commands.process_bid_queue.run_bid_scheduler")
+    def test_refresh_failure_does_not_leave_successful_bid_running(self, run_bid, refresh_auctions, _sleep):
+        user = get_user_model().objects.create_user(username="worker-refresh-timeout")
+        job = BidBatchJob.objects.create(user=user, total_count=1)
+        BidBatchItem.objects.create(
+            job=job, position=1, auction_id="EnglishAuction:busy-cache",
+            player_name="Jugador", euros="12.50",
+        )
+        run_bid.return_value = ScriptResult("mock", 0, "Puja enviada", "")
+        refresh_auctions.side_effect = TimeoutError("El mercado se está actualizando")
+
+        process_next_job()
+
+        job.refresh_from_db()
+        item = job.items.get()
+        self.assertEqual(job.status, BidBatchJob.Status.SUCCEEDED)
+        self.assertEqual(item.status, BidBatchItem.Status.SUCCEEDED)
+        self.assertIn("mercado se está actualizando", item.market_status["refresh_error"])
+
     def test_bid_status_includes_refreshed_market_state(self):
         user = get_user_model().objects.create_user(username="job-status-user")
         job = BidBatchJob.objects.create(
