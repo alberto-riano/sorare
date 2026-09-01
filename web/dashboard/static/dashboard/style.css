@@ -158,9 +158,15 @@ nav a:hover {
 .direct-player-search { position: relative; display: grid; gap: .25rem; }
 .direct-player-search > span, .direct-offer-terms label > span:first-child { color: var(--muted); font-size: .72rem; font-weight: 700; }
 .direct-player-search input { width: 100%; }
-.direct-player-search > div { position: absolute; z-index: 30; top: calc(100% + .25rem); right: 0; left: 0; padding: .35rem; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: var(--shadow); }
-.direct-player-search > div button { display: block; width: 100%; padding: .55rem; border: 0; border-radius: 5px; background: transparent; text-align: left; cursor: pointer; }
+.direct-player-search > div { position: absolute; z-index: 30; top: calc(100% + .25rem); right: 0; left: 0; max-height: min(430px, 65vh); overflow-y: auto; padding: .35rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: var(--shadow); }
+.direct-player-search > div button { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: .65rem; width: 100%; padding: .45rem .55rem; border: 0; border-radius: 7px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .direct-player-search > div button:hover { background: #eef8f6; }
+.direct-player-search > div button > .fa-chevron-right { color: var(--muted); font-size: .7rem; }
+.direct-player-result-photo { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; background: #eef2f1; }
+.direct-player-result-copy { display: grid; gap: .1rem; min-width: 0; }
+.direct-player-result-copy strong, .direct-player-result-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.direct-player-result-copy small { display: flex; align-items: center; gap: .3rem; color: var(--muted); font-size: .72rem; }
+.direct-player-result-team { width: 18px; height: 18px; object-fit: contain; }
 .direct-offer-controls { display: grid; grid-template-columns: minmax(180px,.65fr) auto minmax(380px,1fr); align-items: end; gap: .75rem 1rem; padding: .7rem 1rem; }
 .direct-offer-controls h2 { margin: .1rem 0 0; font-size: 1.05rem; }
 .direct-rarity-filter { display: flex; flex-wrap: wrap; gap: .3rem; }

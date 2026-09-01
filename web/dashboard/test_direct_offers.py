@@ -14,9 +14,39 @@ from web_services.direct_offer_market import (
     player_in_season_listings,
 )
 from web_services.process_runner import ScriptResult, run_direct_offer
+from sorare_utils import search_players_by_name
 
 
 class DirectOfferMarketTests(TestCase):
+    @patch("sorare_utils.graphql_request")
+    def test_player_search_distinguishes_homonyms_and_prioritizes_exact_names(self, graphql):
+        graphql.return_value = {"searchPlayers": {"hits": [
+            {"player": {
+                "slug": "juan-cruz-cerrudo", "displayName": "Juan Cerrudo",
+                "squaredPictureUrl": "https://example.com/cerrudo.png",
+                "activeClub": {"name": "Chaco For Ever", "slug": "chaco", "pictureUrl": ""},
+            }},
+            {"player": {
+                "slug": "juan-cruz-diaz-esposito", "displayName": "Juan Cruz",
+                "squaredPictureUrl": "https://example.com/juan-cruz.png",
+                "activeClub": {"name": "Málaga CF", "slug": "malaga", "pictureUrl": "https://example.com/malaga.png"},
+            }},
+            {"player": {
+                "slug": "juan-manuel-cruz", "displayName": "Juan Cruz",
+                "squaredPictureUrl": "https://example.com/otro.png",
+                "activeClub": {"name": "Hellas Verona FC", "slug": "verona", "pictureUrl": ""},
+            }},
+        ]}}
+
+        results = search_players_by_name("  Juan   Cruz  ", headers={})
+
+        self.assertEqual([row["slug"] for row in results[:2]], [
+            "juan-cruz-diaz-esposito", "juan-manuel-cruz",
+        ])
+        self.assertEqual(results[0]["team"], "Málaga CF")
+        self.assertEqual(results[0]["pictureUrl"], "https://example.com/juan-cruz.png")
+        self.assertEqual(results[0]["teamPictureUrl"], "https://example.com/malaga.png")
+
     @patch("web_services.direct_offer_market.graphql_request")
     def test_eth_payment_converts_eur_reference_to_wei(self, graphql):
         graphql.return_value = {"config": {"exchangeRate": {"ethRates": {"eurCents": 200000}}}}

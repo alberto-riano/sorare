@@ -113,7 +113,7 @@ def get_account_balances(headers=None):
 def search_players_by_name(query_text, headers=None):
     """Busca jugadores por nombre usando `searchPlayers`.
 
-    Devuelve lista de dicts: {"slug": str, "displayName": str}.
+    Devuelve la identidad suficiente para distinguir jugadores homónimos.
     """
     query = '''
     query SearchPlayers($query: String!) {
@@ -124,6 +124,12 @@ def search_players_by_name(query_text, headers=None):
             player {
               slug
               displayName
+              squaredPictureUrl
+              activeClub {
+                name
+                slug
+                pictureUrl
+              }
             }
           }
         }
@@ -141,8 +147,23 @@ def search_players_by_name(query_text, headers=None):
         slug = player.get('slug')
         display_name = player.get('displayName')
         if slug and display_name:
-            results.append({'slug': slug, 'displayName': display_name})
-    return results
+            club = player.get('activeClub') or {}
+            results.append({
+                'slug': slug,
+                'displayName': display_name,
+                'pictureUrl': player.get('squaredPictureUrl') or '',
+                'team': club.get('name') or '',
+                'teamSlug': club.get('slug') or '',
+                'teamPictureUrl': club.get('pictureUrl') or '',
+            })
+
+    # Sorare mezcla coincidencias exactas con nombres que solo contienen los
+    # términos buscados. Las exactas van primero, manteniendo el orden del API.
+    normalized_query = ' '.join(str(query_text or '').casefold().split())
+    return sorted(
+        results,
+        key=lambda result: ' '.join(result['displayName'].casefold().split()) != normalized_query,
+    )
 
 
 # ---------------------------------------------------------------------------
