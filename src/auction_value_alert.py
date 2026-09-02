@@ -24,7 +24,7 @@ from web_services.opportunity_market import _floor_query, robust_sales_reference
 
 SETTINGS_PATH = ROOT / "config" / "telegram_alert_settings.txt"
 STATE_PATH = ROOT / "output" / "auction_value_alert_state.json"
-VALUE_TTL = timedelta(hours=6)
+VALUE_TTL = timedelta(minutes=15)
 SEASON_YEAR = 2026
 
 
