@@ -8,8 +8,10 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import html
 import json
+import math
 from pathlib import Path
 import sys
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -27,7 +29,7 @@ STATE_PATH = ROOT / "output" / "auction_value_alert_state.json"
 VALUE_TTL = timedelta(minutes=15)
 SEASON_YEAR = 2026
 ALLOWED_RARITIES = {"rare", "super_rare"}
-RARITY_LABELS = {"rare": "Rare · roja", "super_rare": "Super Rare · azul"}
+RARITY_LABELS = {"rare": "🔴 Rare", "super_rare": "🔵 Super Rare"}
 
 
 def parse_date(value):
@@ -219,26 +221,24 @@ def _message(row, detail, valuation, next_eur, saving, remaining_minutes):
         "https://sorare.com/football/market/shop/auctions?card=" + card_slug
         if card_slug else "https://sorare.com/football/players/" + row.get("player_slug", "")
     )
-    sources = []
-    if valuation.get("floor") is not None:
-        sources.append(f"suelo {valuation['floor']:.2f} €")
-    if valuation.get("sales_reference") is not None:
-        sources.append(f"ventas {valuation['sales_reference']:.2f} €")
-    evidence = " · ".join(sources)
     rarity_label = RARITY_LABELS.get(row.get("rarity"), row.get("rarity") or "Rare")
-    limited_line = (
-        f"\nSuelo Limited equivalente: <b>{valuation['limited_floor']:.2f} €</b>"
-        if valuation.get("limited_floor") is not None else "\nSuelo Limited equivalente: no disponible"
-    )
+    end_at = parse_date(detail.get("endDate") or row.get("end_date"))
+    end_label = end_at.astimezone(ZoneInfo("Europe/Madrid")).strftime("%H:%M") if end_at else "--:--"
+    market_parts = []
+    if valuation.get("floor") is not None:
+        market_parts.append(f"Suelo {valuation['floor']:.2f} €")
+    if valuation.get("sales_reference") is not None:
+        market_parts.append(f"Ventas {valuation['sales_reference']:.2f} €")
+    if valuation.get("limited_floor") is not None:
+        market_parts.append(f"Limited {valuation['limited_floor']:.2f} €")
+    market_line = " · ".join(market_parts) or "Sin referencias de mercado"
     return (
-        "🚨 <b>Oportunidad de subasta</b>\n"
-        f"<b>{html.escape(str(row.get('player') or 'Jugador'))}</b> · {html.escape(str(row.get('team') or 'LaLiga'))}\n"
-        f"{html.escape(str(rarity_label))}\n"
-        f"Siguiente puja: <b>{next_eur:.2f} €</b>\n"
-        f"Valor estimado: <b>{valuation['value']:.2f} €</b> ({html.escape(evidence)})"
-        f"{limited_line}\n"
-        f"Ahorro: <b>{saving:.1f}%</b> · quedan aprox. {max(1, remaining_minutes)} min\n"
-        f"<a href=\"{html.escape(url, quote=True)}\">Abrir y pujar en Sorare</a>"
+        f"🚨 <b>{html.escape(str(row.get('player') or 'Jugador'))}</b> · {html.escape(str(rarity_label))}\n"
+        f"{html.escape(str(row.get('team') or 'LaLiga'))}\n\n"
+        f"Puja: <b>{next_eur:.2f} €</b> · Valor: <b>{valuation['value']:.2f} €</b> · Ahorro: <b>{saving:.1f}%</b>\n"
+        f"{html.escape(market_line)}\n"
+        f"⏱ Termina a las <b>{end_label}</b> · quedan <b>{max(1, remaining_minutes)} min</b>\n\n"
+        f"<a href=\"{html.escape(url, quote=True)}\">Abrir subasta y pujar</a>"
     )
 
 
@@ -309,7 +309,7 @@ def run(*, dry_run=False, now=None):
             checked[auction_id] = now.isoformat()
             continue
         saving = (float(value) - next_eur) / float(value) * 100
-        remaining_minutes = max(0, int((end - now).total_seconds() // 60))
+        remaining_minutes = max(1, math.ceil((end - now).total_seconds() / 60))
         if saving >= min_saving:
             message = _message(row, detail, cached, next_eur, saving, remaining_minutes)
             if dry_run:
