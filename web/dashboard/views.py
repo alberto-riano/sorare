@@ -427,14 +427,14 @@ def movements(request):
     category = request.GET.get("category", "all")
     if category not in {"laliga_inseason", "trading", "crafting", "reward", "other", "all"}:
         category = "all"
-    selected_manager = request.GET.get("manager", "me") if category == "reward" else "me"
+    selected_manager = request.GET.get("manager", "me")
     if selected_manager not in {"me", PUBLIC_REWARD_MANAGER_SLUG}:
         selected_manager = "me"
     public_rewards = selected_manager == PUBLIC_REWARD_MANAGER_SLUG
 
     if public_rewards:
         stored_snapshot = PublicRewardSnapshot.objects.filter(manager_slug=selected_manager).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 1 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 2 else None
         active_sync = PublicRewardSyncJob.objects.filter(
             manager_slug=selected_manager,
             status__in=(PublicRewardSyncJob.Status.QUEUED, PublicRewardSyncJob.Status.RUNNING),
@@ -732,6 +732,7 @@ def movements(request):
         "selected_manager": selected_manager,
         "manager_nickname": manager_nickname,
         "public_rewards": public_rewards,
+        "public_manager": public_rewards,
         "date_from": date_from,
         "date_to": date_to,
         "per_page": per_page,

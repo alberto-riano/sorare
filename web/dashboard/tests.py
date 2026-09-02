@@ -1539,6 +1539,11 @@ class MovementHistoryTests(TestCase):
         }
 
         def response(query, _variables, headers=None):
+            if "PublicCompletedTrades" in query:
+                return {
+                    "user": {"slug": "blasco93", "nickname": "Blasco93"},
+                    "trades": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}},
+                }
             if "PublicManagerRewards" in query:
                 return {
                     "user": {"slug": "blasco93", "nickname": "Blasco93"},
@@ -1563,6 +1568,46 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(result["movements"][0]["essence_quantity"], 510)
         self.assertEqual(result["movements"][0]["market"], "GW5 · Champ. – Rare · Puesto 66")
 
+    @patch("web_services.movement_history.graphql_request")
+    def test_public_collector_includes_completed_trades_without_guessing_wallet(self, request):
+        card = self._api_card(player="Canales")
+        trade = {
+            "__typename": "TokenAuction", "id": "auction-public",
+            "transactionDate": "2026-08-27T10:30:00Z", "dealStatus": "SETTLED",
+            "anyCards": [{"assetId": card["assetId"]}],
+            "bestBid": {
+                "id": "bid-public", "fiatPayment": False,
+                "amounts": {"eurCents": 498, "wei": "2400000000000000", "referenceCurrency": "WEI"},
+            },
+        }
+
+        def response(query, _variables, headers=None):
+            if "PublicCompletedTrades" in query:
+                return {
+                    "user": {
+                        "slug": "blasco93", "nickname": "Blasco93",
+                        "trades": {"nodes": [trade], "pageInfo": {"hasNextPage": False, "endCursor": None}},
+                    },
+                }
+            if "PublicManagerRewards" in query:
+                return {
+                    "user": {"slug": "blasco93", "nickname": "Blasco93"},
+                    "so5": {"allSo5Fixtures": {"nodes": [], "pageInfo": {"hasPreviousPage": False}}},
+                }
+            if "MovementCards" in query:
+                return {"tokens": {"anyCards": [card]}}
+            raise AssertionError("Consulta inesperada")
+
+        request.side_effect = response
+        result = collect_public_reward_history("blasco93", headers={"Authorization": "test"})
+
+        movement = result["movements"][0]
+        self.assertEqual(movement["direction"], "purchase")
+        self.assertEqual(movement["market"], "Subasta")
+        self.assertEqual(movement["gross_eur"], 4.98)
+        self.assertEqual(movement["currency"], "")
+        self.assertEqual(movement["cards"][0]["player"], "Canales")
+
     @patch("dashboard.management.commands.process_sales_queue.collect_public_reward_history")
     def test_public_reward_sync_saves_snapshot_in_background(self, collect):
         collect.return_value = {
@@ -1577,10 +1622,11 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, PublicRewardSyncJob.Status.SUCCEEDED)
         snapshot = PublicRewardSnapshot.objects.get(manager_slug="blasco93")
         self.assertEqual(snapshot.movements[0]["id"], "reward-1")
+        self.assertEqual(snapshot.source_version, 2)
 
     def test_reward_manager_selector_uses_cached_public_rewards(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=1,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=2,
             movements=[{
                 "id": "blasco-reward", "occurred_at": "2026-08-18T20:00:00Z",
                 "direction": "reward", "cash_direction": "reward", "category": "reward",
@@ -1597,12 +1643,35 @@ class MovementHistoryTests(TestCase):
         self.assertContains(response, "+510 Esencia")
         self.assertContains(response, '<option value="blasco93" selected>Blasco93</option>', html=True)
 
+    def test_manager_selector_applies_to_all_movements_and_shows_public_balance(self):
+        PublicRewardSnapshot.objects.create(
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=2,
+            movements=[{
+                "id": "public-purchase", "occurred_at": "2026-08-27T10:30:00Z",
+                "direction": "purchase", "cash_direction": "purchase", "category": "laliga_inseason",
+                "market": "Subasta", "cards": [{
+                    "asset_id": "asset-canales", "player": "Canales", "player_slug": "canales",
+                    "player_picture_url": "player.png", "team": "Real Betis",
+                    "team_picture_url": "team.png", "rarity": "rare", "serial_number": 12,
+                    "in_season": True, "is_laliga": True,
+                }],
+                "gross_eur": 4.98, "net_eur": 4.98, "fee_eur": 0, "eth": 0, "currency": "",
+            }],
+        )
+
+        response = self.client.get(reverse("movements"), {"category": "all", "manager": "blasco93"})
+
+        self.assertEqual(response.context["selected_manager"], "blasco93")
+        self.assertContains(response, "Movimientos de Blasco93")
+        self.assertContains(response, "Canales")
+        self.assertContains(response, "−4,98 €")
+
     def test_first_public_reward_visit_enqueues_background_sync(self):
         response = self.client.get(reverse("movements"), {"category": "reward", "manager": "blasco93"})
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(PublicRewardSyncJob.objects.filter(manager_slug="blasco93", status="queued").exists())
-        self.assertContains(response, "Cargando las recompensas de Blasco93")
+        self.assertContains(response, "Cargando los movimientos de Blasco93")
 
     def test_reward_filter_separates_money_essence_and_cards(self):
         base = {

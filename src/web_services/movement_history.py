@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 from sorare_utils import build_headers, graphql_request
 
@@ -41,6 +42,43 @@ COMPLETED_TRADES_QUERY = """
 query CompletedTrades($first: Int!, $after: String) {
   currentUser {
     slug
+    trades(first: $first, after: $after, sortByEndDate: DESC, sport: [FOOTBALL]) {
+      nodes {
+        __typename
+        ... on TokenAuction {
+          id transactionDate dealStatus
+          anyCards { assetId }
+          bestBid {
+            id fiatPayment
+            amounts { eurCents wei referenceCurrency }
+          }
+        }
+        ... on TokenOffer {
+          id transactionDate dealStatus type settlementCurrencies cardPaymentProvider
+          marketFeeAmounts { eurCents wei referenceCurrency }
+          sender { __typename ... on User { slug } }
+          receiver { __typename ... on User { slug } }
+          userAcceptor { slug } userBuyer { slug } userSeller { slug }
+          senderSide { amounts { eurCents wei referenceCurrency } anyCards { assetId } }
+          receiverSide { amounts { eurCents wei referenceCurrency } anyCards { assetId } }
+        }
+        ... on TokenPrimaryOffer {
+          id transactionDate dealStatus cardPaymentProvider
+          price { eurCents wei referenceCurrency }
+          anyCards { assetId }
+          userBuyer { slug } userSeller { slug }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+
+PUBLIC_COMPLETED_TRADES_QUERY = """
+query PublicCompletedTrades($managerSlug: String!, $first: Int!, $after: String) {
+  user(slug: $managerSlug) {
+    slug nickname
     trades(first: $first, after: $after, sortByEndDate: DESC, sport: [FOOTBALL]) {
       nodes {
         __typename
@@ -995,14 +1033,54 @@ def enrich_pending_card_floors(
 def collect_public_reward_history(
     manager_slug: str,
     *,
-    start_date: date = date(2026, 8, 13),
+    start_date: date = date(2026, 8, 12),
     progress: Callable[[int, str], None] | None = None,
     headers: dict | None = None,
 ) -> dict:
-    """Reconstruye los premios públicos de un manager desde una fecha concreta."""
+    """Reconstruye operaciones completadas y premios públicos de un manager."""
     headers = headers or build_headers()
+    trades: list[dict] = []
     reward_entries: list[dict] = []
     manager_nickname = manager_slug
+    public_user: dict = {}
+    cutoff = datetime.combine(start_date, time.min, tzinfo=ZoneInfo("Europe/Madrid")).astimezone(timezone.utc)
+
+    cursor = None
+    page = 0
+    while True:
+        page += 1
+        data = graphql_request(PUBLIC_COMPLETED_TRADES_QUERY, {
+            "managerSlug": manager_slug,
+            # La conexión pública tiene un límite de complejidad bajo cuando
+            # no hay API key; diez operaciones mantienen la consulta válida.
+            "first": 10,
+            "after": cursor,
+        }, headers=headers)
+        public_user = data.get("user") or {}
+        manager_nickname = str(public_user.get("nickname") or manager_nickname)
+        connection = public_user.get("trades") or {}
+        page_dates: list[datetime] = []
+        for trade in connection.get("nodes") or []:
+            if not trade.get("transactionDate") or str(trade.get("dealStatus") or "").upper() != "SETTLED":
+                continue
+            occurred_at = _movement_timestamp({"occurred_at": trade.get("transactionDate")})
+            page_dates.append(occurred_at)
+            if occurred_at >= cutoff:
+                trades.append(trade)
+        if progress:
+            progress(len(trades), f"{len(trades)} transacciones públicas · página {page}")
+        page_info = connection.get("pageInfo") or {}
+        reached_start = bool(page_dates and min(page_dates) < cutoff)
+        if reached_start or not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+
+    operations = [operation for trade in trades if (operation := _operation_from_trade(trade))]
+    # El histórico público aporta el equivalente en euros, pero no permite
+    # asegurar qué monedero ni qué créditos usó otro manager.
+    for operation in operations:
+        operation["paymentCurrency"] = ""
+
     cursor = None
     page = 0
 
@@ -1013,7 +1091,7 @@ def collect_public_reward_history(
             "last": 25,
             "before": cursor,
         }, headers=headers)
-        public_user = data.get("user") or {}
+        public_user = data.get("user") or public_user
         manager_nickname = str(public_user.get("nickname") or manager_nickname)
         connection = ((data.get("so5") or {}).get("allSo5Fixtures") or {})
         fixture_dates: list[date] = []
@@ -1056,7 +1134,7 @@ def collect_public_reward_history(
     reward_operations = [entry.get("tokenOperation") or {} for entry in reward_entries]
     asset_ids = sorted({
         str(card.get("assetId"))
-        for operation in reward_operations
+        for operation in operations + reward_operations
         for card in _raw_cards_from_operation(operation)
         if card.get("assetId")
     })
@@ -1070,8 +1148,19 @@ def collect_public_reward_history(
         if progress:
             progress(len(reward_entries), f"Cargando cartas {min(start + 100, len(asset_ids))}/{len(asset_ids)}")
 
-    movements = []
+    movements = [
+        movement
+        for operation in operations
+        if (movement := _movement_from_group([{
+            "id": operation.get("id"),
+            "date": operation.get("transactionDate") or (operation.get("auction") or {}).get("transactionDate"),
+            "entryType": "PAYMENT",
+            "amounts": operation.get("amounts") or operation.get("price") or {},
+            "tokenOperation": operation,
+        }], manager_slug, card_by_asset))
+    ]
     known_ids: set[str] = set()
+    known_ids.update(str(movement.get("id") or "") for movement in movements)
     for entry in reward_entries:
         reward = _movement_from_group([entry], manager_slug, card_by_asset)
         if not reward or reward["id"] in known_ids:
@@ -1082,8 +1171,9 @@ def collect_public_reward_history(
 
     minimum = datetime.min.replace(tzinfo=timezone.utc).isoformat()
     movements.sort(key=lambda movement: movement.get("occurred_at") or minimum, reverse=True)
+    enrich_pending_card_floors(movements, headers=headers, progress=progress)
     if progress:
-        progress(len(movements), f"{len(movements)} recompensas públicas guardadas")
+        progress(len(movements), f"{len(movements)} movimientos públicos guardados")
     return {
         "manager_slug": str(public_user.get("slug") or manager_slug),
         "manager_nickname": manager_nickname,

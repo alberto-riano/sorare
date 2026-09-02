@@ -13,7 +13,7 @@
       <p>Dinero, esencia y cartas obtenidos en las jornadas de Sorare.</p>
       {% elif selected_category == 'trading' %}
       <p class="kicker">Operaciones cerradas</p>
-      <h1><i class="fas fa-arrow-right-arrow-left"></i> Compraventas</h1>
+      <h1><i class="fas fa-arrow-right-arrow-left"></i> Compraventas{% if public_manager %} de {{ manager_nickname }}{% endif %}</h1>
       <p>Cartas con adquisición y salida relacionadas, mostrando el resultado completo de la operación.</p>
       {% elif selected_category == 'crafting' %}
       <p class="kicker">Cartas creadas con esencia</p>
@@ -21,8 +21,8 @@
       <p>Qué cartas abriste, cuáles continúan en tu galería y cómo salieron las que ya no conservas.</p>
       {% else %}
       <p class="kicker">Contabilidad de cartas</p>
-      <h1><i class="fas fa-chart-pie"></i> Mis movimientos</h1>
-      <p>Compras, ventas y recompensas agrupadas por operación. Los depósitos y retiradas no se incluyen.</p>
+      <h1><i class="fas fa-chart-pie"></i> {% if public_manager %}Movimientos de {{ manager_nickname }}{% else %}Mis movimientos{% endif %}</h1>
+      <p>{% if public_manager %}Compras, ventas e intercambios completados que Sorare publica para este manager.{% else %}Compras, ventas y recompensas agrupadas por operación. Los depósitos y retiradas no se incluyen.{% endif %}</p>
       {% endif %}
     </div>
     <div class="movement-sync">
@@ -34,27 +34,27 @@
   </section>
 
   <nav class="movement-tabs panel" aria-label="Sección del historial">
-    <a href="{% url 'movement_analytics' %}"><i class="fas fa-chart-line"></i> Análisis</a>
-    <a href="?category=laliga_inseason" class="{% if selected_category == 'laliga_inseason' %}is-active{% endif %}"><i class="fas fa-shield-halved"></i> LaLiga <b>{{ laliga_count }}</b></a>
-    <a href="?category=trading" class="{% if selected_category == 'trading' %}is-active{% endif %}"><i class="fas fa-arrow-right-arrow-left"></i> Compraventas <b>{{ trading_count }}</b></a>
-    <a href="?category=crafting" class="{% if selected_category == 'crafting' %}is-active{% endif %}"><i class="fas fa-wand-magic-sparkles"></i> Crafting <b>{{ crafting_count }}</b></a>
-    <a href="?category=reward" class="{% if selected_category == 'reward' %}is-active{% endif %}"><i class="fas fa-gift"></i> Recompensas <b>{{ reward_count }}</b></a>
-    <a href="?category=other" class="{% if selected_category == 'other' %}is-active{% endif %}"><i class="fas fa-layer-group"></i> Otros movimientos <b>{{ other_count }}</b></a>
-    <a href="?category=all" class="{% if selected_category == 'all' %}is-active{% endif %}"><i class="fas fa-list"></i> Todos <b>{{ all_count }}</b></a>
+    {% if not public_manager %}<a href="{% url 'movement_analytics' %}"><i class="fas fa-chart-line"></i> Análisis</a>{% endif %}
+    <a href="?category=laliga_inseason&manager={{ selected_manager }}" class="{% if selected_category == 'laliga_inseason' %}is-active{% endif %}"><i class="fas fa-shield-halved"></i> LaLiga <b>{{ laliga_count }}</b></a>
+    <a href="?category=trading&manager={{ selected_manager }}" class="{% if selected_category == 'trading' %}is-active{% endif %}"><i class="fas fa-arrow-right-arrow-left"></i> Compraventas <b>{{ trading_count }}</b></a>
+    {% if not public_manager %}<a href="?category=crafting&manager={{ selected_manager }}" class="{% if selected_category == 'crafting' %}is-active{% endif %}"><i class="fas fa-wand-magic-sparkles"></i> Crafting <b>{{ crafting_count }}</b></a>{% endif %}
+    <a href="?category=reward&manager={{ selected_manager }}" class="{% if selected_category == 'reward' %}is-active{% endif %}"><i class="fas fa-gift"></i> Recompensas <b>{{ reward_count }}</b></a>
+    <a href="?category=other&manager={{ selected_manager }}" class="{% if selected_category == 'other' %}is-active{% endif %}"><i class="fas fa-layer-group"></i> Otros movimientos <b>{{ other_count }}</b></a>
+    <a href="?category=all&manager={{ selected_manager }}" class="{% if selected_category == 'all' %}is-active{% endif %}"><i class="fas fa-list"></i> Todos <b>{{ all_count }}</b></a>
   </nav>
 
-  {% if selected_category == 'reward' %}
   <form method="get" class="panel reward-manager-switch">
-    <input type="hidden" name="category" value="reward">
+    <input type="hidden" name="category" value="{{ selected_category }}">
     <input type="hidden" name="reward_type" value="{{ selected_reward_type }}">
+    <input type="hidden" name="direction" value="{{ selected_direction }}">
+    <input type="hidden" name="seasonality" value="{{ selected_seasonality }}">
     <input type="hidden" name="rarity" value="{{ selected_rarity }}">
     <input type="hidden" name="date_from" value="{{ date_from }}">
     <input type="hidden" name="date_to" value="{{ date_to }}">
     <input type="hidden" name="per_page" value="{{ per_page }}">
-    <div><span>Comparar recompensas</span><strong>{{ manager_nickname }}</strong></div>
+    <div><span>Ver movimientos</span><strong>{{ manager_nickname }}</strong>{% if public_manager %}<small>Importes públicos en EUR; Sorare no publica créditos ni el monedero utilizado.</small>{% endif %}</div>
     <label><span>Manager</span><select name="manager" onchange="this.form.submit()"><option value="me" {% if selected_manager == 'me' %}selected{% endif %}>burguis (yo)</option><option value="blasco93" {% if selected_manager == 'blasco93' %}selected{% endif %}>Blasco93</option></select></label>
   </form>
-  {% endif %}
 
   {% if snapshot %}
   {% if selected_category == 'trading' %}
@@ -125,7 +125,7 @@
       <label><span>Desde</span><input type="date" name="date_from" value="{{ date_from }}"></label>
       <label><span>Hasta</span><input type="date" name="date_to" value="{{ date_to }}"></label>
       <label><span>Por página</span><select name="per_page"><option value="25" {% if per_page == 25 %}selected{% endif %}>25</option><option value="50" {% if per_page == 50 %}selected{% endif %}>50</option><option value="100" {% if per_page == 100 %}selected{% endif %}>100</option></select></label>
-      <a class="btn btn-secondary movement-clear" href="?category={{ selected_category }}{% if selected_category == 'reward' %}&manager={{ selected_manager }}{% endif %}">Limpiar</a>
+      <a class="btn btn-secondary movement-clear" href="?category={{ selected_category }}&manager={{ selected_manager }}">Limpiar</a>
     </form>
     <div class="table-wrap movement-table-wrap">
       <table class="data-table movement-table">
@@ -192,7 +192,7 @@
     </nav>{% endif %}
   </section>
   {% else %}
-  <section class="panel sales-empty-state"><i class="fas fa-receipt"></i><h2>{% if public_rewards %}Cargando las recompensas de {{ manager_nickname }}{% else %}Cargando tu historial{% endif %}</h2><p>Puedes salir de esta pantalla: el proceso continuará en segundo plano y la copia anterior nunca se sustituirá si la API da error.</p></section>
+  <section class="panel sales-empty-state"><i class="fas fa-receipt"></i><h2>{% if public_manager %}Cargando los movimientos de {{ manager_nickname }}{% else %}Cargando tu historial{% endif %}</h2><p>Puedes salir de esta pantalla: el proceso continuará en segundo plano y la copia anterior nunca se sustituirá si la API da error.</p></section>
   {% endif %}
 </div>
 

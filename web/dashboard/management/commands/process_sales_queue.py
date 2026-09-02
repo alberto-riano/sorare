@@ -322,7 +322,7 @@ def process_next_public_reward_sync():
             return None
         job.status = PublicRewardSyncJob.Status.RUNNING
         job.started_at = timezone.now()
-        job.progress_label = f"Buscando recompensas de {job.manager_slug}"
+        job.progress_label = f"Buscando movimientos de {job.manager_slug}"
         job.save(update_fields=("status", "started_at", "progress_label"))
 
     try:
@@ -340,16 +340,16 @@ def process_next_public_reward_sync():
                 "manager_nickname": result["manager_nickname"],
                 "movements": movements,
                 "refreshed_at": timezone.now(),
-                "source_version": 1,
+                "source_version": 2,
             },
         )
         job.movement_count = len(movements)
-        job.progress_label = "Recompensas públicas actualizadas"
+        job.progress_label = "Movimientos públicos actualizados"
         job.status = PublicRewardSyncJob.Status.SUCCEEDED
     except Exception as exc:
         job.status = PublicRewardSyncJob.Status.FAILED
         job.progress_label = "Actualización interrumpida"
-        job.error = f"No se pudieron actualizar las recompensas públicas: {exc}"[:2000]
+        job.error = f"No se pudieron actualizar los movimientos públicos: {exc}"[:2000]
     job.finished_at = timezone.now()
     job.save(update_fields=(
         "status", "movement_count", "processed_count", "progress_label", "error", "finished_at",

@@ -235,7 +235,7 @@ class MovementSyncJob(models.Model):
 
 
 class PublicRewardSnapshot(models.Model):
-    """Copia local de las recompensas públicas de otro manager."""
+    """Copia local de los movimientos y recompensas públicas de otro manager."""
 
     manager_slug = models.SlugField(max_length=180, unique=True)
     manager_nickname = models.CharField(max_length=180)
