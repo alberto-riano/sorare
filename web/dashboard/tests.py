@@ -31,6 +31,7 @@ from web_services.process_runner import BidRequest, ScriptResult, bid_error_mess
 from web_services.sales_inventory import collection_display_name
 from web_services.movement_history import (
     _account_currency, _crafting_movements_from_chests, _movement_from_group,
+    _public_crafting_movement,
     _operation_from_trade, build_crafting_history, build_trade_cycles,
     collect_movement_history, collect_public_reward_history, enrich_pending_card_floors,
 )
@@ -1544,6 +1545,8 @@ class MovementHistoryTests(TestCase):
                     "user": {"slug": "blasco93", "nickname": "Blasco93"},
                     "trades": {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}},
                 }
+            if "PublicCraftingCards" in query:
+                return {"user": {"cards": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
             if "PublicManagerRewards" in query:
                 return {
                     "user": {"slug": "blasco93", "nickname": "Blasco93"},
@@ -1589,6 +1592,8 @@ class MovementHistoryTests(TestCase):
                         "trades": {"nodes": [trade], "pageInfo": {"hasNextPage": False, "endCursor": None}},
                     },
                 }
+            if "PublicCraftingCards" in query:
+                return {"user": {"cards": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
             if "PublicManagerRewards" in query:
                 return {
                     "user": {"slug": "blasco93", "nickname": "Blasco93"},
@@ -1622,11 +1627,11 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, PublicRewardSyncJob.Status.SUCCEEDED)
         snapshot = PublicRewardSnapshot.objects.get(manager_slug="blasco93")
         self.assertEqual(snapshot.movements[0]["id"], "reward-1")
-        self.assertEqual(snapshot.source_version, 2)
+        self.assertEqual(snapshot.source_version, 3)
 
     def test_reward_manager_selector_uses_cached_public_rewards(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=2,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=3,
             movements=[{
                 "id": "blasco-reward", "occurred_at": "2026-08-18T20:00:00Z",
                 "direction": "reward", "cash_direction": "reward", "category": "reward",
@@ -1641,11 +1646,37 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(response.context["selected_manager"], "blasco93")
         self.assertContains(response, "Recompensas de Blasco93")
         self.assertContains(response, "+510 Esencia")
-        self.assertContains(response, '<option value="blasco93" selected>Blasco93</option>', html=True)
+        self.assertContains(response, "Cambiar a burguis")
+
+    def test_public_crafting_is_detected_from_shards_ownership(self):
+        card = self._api_card(player="Carta de Blasco")
+        card.update({
+            "ownershipHistory": [{
+                "from": "2026-08-25T21:19:10Z", "transferType": "SHARDS",
+                "user": {"slug": "blasco93"},
+            }],
+            "tokenOwner": {
+                "from": "2026-08-25T21:19:10Z", "transferType": "SHARDS",
+                "user": {"slug": "blasco93"},
+            },
+            "lowestPriceCard": {"liveSingleSaleOffer": {
+                "receiverSide": {"amounts": {"eurCents": 725, "referenceCurrency": "EUR"}},
+            }},
+        })
+
+        movement = _public_crafting_movement(
+            card, "blasco93", datetime(2026, 8, 11, 22, tzinfo=ZoneInfo("UTC")),
+        )
+
+        self.assertEqual(movement["category"], "crafting")
+        self.assertEqual(movement["cards"][0]["player"], "Carta de Blasco")
+        self.assertTrue(movement["craft_owned_by_me"])
+        self.assertEqual(movement["craft_floor_eur"], 7.25)
+        self.assertIsNone(movement["essence_spent"])
 
     def test_manager_selector_applies_to_all_movements_and_shows_public_balance(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=2,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=3,
             movements=[{
                 "id": "public-purchase", "occurred_at": "2026-08-27T10:30:00Z",
                 "direction": "purchase", "cash_direction": "purchase", "category": "laliga_inseason",
@@ -1665,6 +1696,50 @@ class MovementHistoryTests(TestCase):
         self.assertContains(response, "Movimientos de Blasco93")
         self.assertContains(response, "Canales")
         self.assertContains(response, "−4,98 €")
+
+    def test_public_manager_crafting_is_available_and_uses_third_person_copy(self):
+        PublicRewardSnapshot.objects.create(
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=3,
+            movements=[{
+                "id": "public-craft:one", "occurred_at": "2026-08-25T21:19:10Z",
+                "direction": "craft", "cash_direction": "other", "category": "crafting",
+                "market": "Crafting con esencia", "cards": [{
+                    "asset_id": "crafted-one", "player": "Carta abierta", "team": "Real Betis",
+                    "rarity": "rare", "in_season": True, "serial_number": 8,
+                }],
+                "received_cards": [], "sent_cards": [], "gross_eur": 0, "net_eur": 0,
+                "fee_eur": 0, "currency": "", "eth": 0, "craft_owned_by_me": True,
+                "craft_floor_eur": 8.5,
+            }],
+        )
+
+        response = self.client.get(reverse("movements"), {"category": "crafting", "manager": "blasco93"})
+
+        self.assertContains(response, "Crafting de Blasco93")
+        self.assertContains(response, "Carta abierta")
+        self.assertContains(response, "En su galería")
+
+    def test_all_movements_summary_includes_money_rewards_for_selected_period(self):
+        MovementSnapshot.objects.create(user=self.user, source_version=17, movements=[
+            {
+                "id": "purchase", "occurred_at": "2026-08-20T10:00:00Z",
+                "direction": "purchase", "cash_direction": "purchase", "category": "laliga_inseason",
+                "market": "Subasta", "cards": [], "gross_eur": 10, "net_eur": 10,
+                "fee_eur": 0, "currency": "EUR", "eth": 0,
+            },
+            {
+                "id": "money-reward", "occurred_at": "2026-08-21T20:00:00Z",
+                "direction": "reward", "cash_direction": "reward", "category": "reward",
+                "market": "GW5", "reward_type": "money", "cards": [], "gross_eur": 22.46,
+                "net_eur": 22.46, "fee_eur": 0, "currency": "EUR", "eth": 0,
+            },
+        ])
+
+        response = self.client.get(reverse("movements"), {"category": "all"})
+
+        self.assertEqual(response.context["totals"]["reward_money_in_window"], Decimal("22.46"))
+        self.assertContains(response, "Premios en dinero")
+        self.assertContains(response, "+22,46 €")
 
     def test_first_public_reward_visit_enqueues_background_sync(self):
         response = self.client.get(reverse("movements"), {"category": "reward", "manager": "blasco93"})

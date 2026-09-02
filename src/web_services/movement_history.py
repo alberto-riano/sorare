@@ -273,6 +273,36 @@ query PublicManagerRewards($managerSlug: String!, $last: Int!, $before: String) 
 }
 """
 
+PUBLIC_CRAFTING_CARDS_QUERY = f"""
+query PublicCraftingCards(
+  $managerSlug: String!
+  $first: Int!
+  $after: String
+  $ownedSinceAfter: ISO8601DateTime
+  $transferredOutAfter: ISO8601DateTime
+) {{
+  user(slug: $managerSlug) {{
+    cards(
+      first: $first
+      after: $after
+      ownedSinceAfter: $ownedSinceAfter
+      transferredOutAfter: $transferredOutAfter
+    ) {{
+      nodes {{
+        {CARD_FIELDS}
+        ownerSince
+        ownershipHistory {{ from transferType user {{ slug }} }}
+        tokenOwner {{ from transferType user {{ slug }} }}
+        lowestPriceCard {{
+          liveSingleSaleOffer {{ receiverSide {{ amounts {{ eurCents wei referenceCurrency }} }} }}
+        }}
+      }}
+      pageInfo {{ hasNextPage endCursor }}
+    }}
+  }}
+}}
+"""
+
 CRAFTED_CARDS_QUERY = f"""
 query CraftedCards {{
   currentUser {{
@@ -459,6 +489,49 @@ def _crafting_movements_from_chests(chests: list[dict], current_slug: str) -> li
             "craft_owned_by_me": bool(owner_slug and owner_slug.casefold() == own_slug),
         })
     return movements
+
+
+def _public_crafting_movement(raw_card: dict, manager_slug: str, cutoff: datetime) -> dict | None:
+    """Normaliza una carta cuyo historial público acredita una apertura con esencia."""
+    manager_key = str(manager_slug or "").casefold()
+    origins = [
+        ownership for ownership in raw_card.get("ownershipHistory") or []
+        if str(((ownership.get("user") or {}).get("slug") or "")).casefold() == manager_key
+        and str(ownership.get("transferType") or "").upper() == "SHARDS"
+        and _movement_timestamp({"occurred_at": ownership.get("from")}) >= cutoff
+    ]
+    if not origins:
+        return None
+    origin = min(origins, key=lambda item: _movement_timestamp({"occurred_at": item.get("from")}))
+    card = _card(raw_card)
+    owner_slug = str((((raw_card.get("tokenOwner") or {}).get("user") or {}).get("slug")) or "")
+    floor_offer = (
+        ((raw_card.get("lowestPriceCard") or {}).get("liveSingleSaleOffer") or {})
+        .get("receiverSide") or {}
+    )
+    return {
+        "id": f"public-craft:{card.get('asset_id')}",
+        "occurred_at": origin.get("from"),
+        "direction": "craft",
+        "cash_direction": "other",
+        "market": "Crafting con esencia",
+        "category": "crafting",
+        "cards": [card],
+        "sent_cards": [],
+        "received_cards": [card],
+        "gross_eur": 0,
+        "net_eur": 0,
+        "fee_eur": 0,
+        "currency": "",
+        "eth": 0,
+        "essence_spent": None,
+        "essence_breakdown": [],
+        "craft_floor_eur": _money(floor_offer.get("amounts") or {}).get("eur") or None,
+        "craft_rarity": card.get("rarity") or "",
+        "craft_owner_slug": owner_slug,
+        "craft_owned_by_me": bool(owner_slug and owner_slug.casefold() == manager_key),
+        "public_crafting": True,
+    }
 
 
 def _operation_from_trade(trade: dict) -> dict | None:
@@ -1051,9 +1124,7 @@ def collect_public_reward_history(
         page += 1
         data = graphql_request(PUBLIC_COMPLETED_TRADES_QUERY, {
             "managerSlug": manager_slug,
-            # La conexión pública tiene un límite de complejidad bajo cuando
-            # no hay API key; diez operaciones mantienen la consulta válida.
-            "first": 10,
+            "first": 50,
             "after": cursor,
         }, headers=headers)
         public_user = data.get("user") or {}
@@ -1080,6 +1151,37 @@ def collect_public_reward_history(
     # asegurar qué monedero ni qué créditos usó otro manager.
     for operation in operations:
         operation["paymentCurrency"] = ""
+
+    public_crafting_by_asset: dict[str, dict] = {}
+    cutoff_iso = cutoff.isoformat().replace("+00:00", "Z")
+    for mode, date_filter in (("conservadas", "ownedSinceAfter"), ("transferidas", "transferredOutAfter")):
+        cursor = None
+        craft_page = 0
+        while True:
+            craft_page += 1
+            variables = {
+                "managerSlug": manager_slug,
+                "first": 20,
+                "after": cursor,
+                "ownedSinceAfter": cutoff_iso if date_filter == "ownedSinceAfter" else None,
+                "transferredOutAfter": cutoff_iso if date_filter == "transferredOutAfter" else None,
+            }
+            data = graphql_request(PUBLIC_CRAFTING_CARDS_QUERY, variables, headers=headers)
+            public_user = data.get("user") or public_user
+            connection = public_user.get("cards") or {}
+            for raw_card in connection.get("nodes") or []:
+                movement = _public_crafting_movement(raw_card, manager_slug, cutoff)
+                if movement:
+                    public_crafting_by_asset[str((movement.get("cards") or [{}])[0].get("asset_id") or "")] = movement
+            if progress:
+                progress(
+                    len(trades),
+                    f"{len(public_crafting_by_asset)} cartas de crafting públicas · {mode} {craft_page}",
+                )
+            page_info = connection.get("pageInfo") or {}
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
 
     cursor = None
     page = 0
@@ -1168,6 +1270,7 @@ def collect_public_reward_history(
         reward["market"] = _reward_market(entry.get("tokenOperation") or {})
         movements.append(reward)
         known_ids.add(reward["id"])
+    movements.extend(public_crafting_by_asset.values())
 
     minimum = datetime.min.replace(tzinfo=timezone.utc).isoformat()
     movements.sort(key=lambda movement: movement.get("occurred_at") or minimum, reverse=True)

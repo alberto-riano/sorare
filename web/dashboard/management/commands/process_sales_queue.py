@@ -340,7 +340,7 @@ def process_next_public_reward_sync():
                 "manager_nickname": result["manager_nickname"],
                 "movements": movements,
                 "refreshed_at": timezone.now(),
-                "source_version": 2,
+                "source_version": 3,
             },
         )
         job.movement_count = len(movements)

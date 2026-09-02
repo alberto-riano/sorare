@@ -434,7 +434,7 @@ def movements(request):
 
     if public_rewards:
         stored_snapshot = PublicRewardSnapshot.objects.filter(manager_slug=selected_manager).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 2 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 3 else None
         active_sync = PublicRewardSyncJob.objects.filter(
             manager_slug=selected_manager,
             status__in=(PublicRewardSyncJob.Status.QUEUED, PublicRewardSyncJob.Status.RUNNING),
@@ -636,6 +636,18 @@ def movements(request):
             reward_rarity = str(reward.get("reward_rarity") or "")
             if reward_rarity in essence_totals:
                 essence_totals[reward_rarity] += int(reward.get("essence_quantity") or 0)
+    reward_money_in_window = sum(
+        Decimal(str(row.get("gross_eur") or 0))
+        for row in prepared_rows
+        if row.get("direction") == "reward"
+        and row.get("reward_type") == "money"
+        and in_selected_window(row)
+        and (
+            not rarity
+            or row.get("reward_rarity") == rarity
+            or any(card.get("rarity") == rarity for card in row.get("cards") or [])
+        )
+    )
     pending_trading_cards = {}
     for cycle in cycles:
         for card in cycle.get("pending_received_cards") or []:
@@ -676,6 +688,7 @@ def movements(request):
         "trade_cash_out": trade_cash_out,
         "rewards": len(rewards),
         "reward_money": sum(Decimal(str(row.get("gross_eur") or 0)) for row in rewards if row.get("reward_type") == "money"),
+        "reward_money_in_window": reward_money_in_window,
         "reward_cards": sum(len(row.get("cards") or []) for row in rewards if row.get("reward_type") == "card"),
         "essence_limited": essence_totals["limited"],
         "essence_rare": essence_totals["rare"],
@@ -710,6 +723,10 @@ def movements(request):
     query = request.GET.copy()
     query.pop("page", None)
     query.pop("grouped", None)
+    swap_query = request.GET.copy()
+    swap_query["manager"] = PUBLIC_REWARD_MANAGER_SLUG if selected_manager == "me" else "me"
+    swap_query["category"] = category
+    swap_query.pop("page", None)
 
     return render(request, "dashboard/movements.html", {
         "snapshot": snapshot,
@@ -737,6 +754,7 @@ def movements(request):
         "date_to": date_to,
         "per_page": per_page,
         "query_without_page": query.urlencode(),
+        "manager_swap_query": swap_query.urlencode(),
     })
 
 
