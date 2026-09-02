@@ -230,7 +230,10 @@ def fetch_bid_positions(headers, auctions, my_nickname):
     return positions
 
 
-def _rows_from_live_auctions(nodes, team_slugs, my_nickname, season_year=DEFAULT_SEASON_YEAR):
+def _rows_from_live_auctions(
+    nodes, team_slugs, my_nickname, season_year=DEFAULT_SEASON_YEAR, rarities=("rare",),
+):
+    accepted_rarities = set(rarities)
     rows = []
     for auction in nodes:
         if not auction.get('open'):
@@ -242,7 +245,7 @@ def _rows_from_live_auctions(nodes, team_slugs, my_nickname, season_year=DEFAULT
         my_max_cents = (my_last_bid.get('maximumAmounts') or {}).get('eurCents')
         for card in auction.get('anyCards') or []:
             team = card.get('anyTeam') or {}
-            if card.get('rarityTyped') != 'rare' or card.get('seasonYear') != season_year:
+            if card.get('rarityTyped') not in accepted_rarities or card.get('seasonYear') != season_year:
                 continue
             if team.get('slug') not in team_slugs:
                 continue
@@ -255,6 +258,7 @@ def _rows_from_live_auctions(nodes, team_slugs, my_nickname, season_year=DEFAULT
                 'team_slug': team['slug'],
                 'team_picture_url': team.get('pictureUrl'),
                 'serial': card['serialNumber'],
+                'rarity': card.get('rarityTyped'),
                 'season': card['seasonYear'],
                 'position': card.get('anyPositions', ['?'])[0],
                 'asset_id': card['assetId'],
@@ -373,6 +377,18 @@ def _refresh_auction_cache_full(progress=None):
             row['bid_position'] = positions.get(row['auction_id'])
     merged.sort(key=lambda row: row['end_date'])
 
+    # El barrido ya ha descargado todas las subastas de fútbol. Conservamos
+    # también las Super Rare de LaLiga para las alertas sin realizar ninguna
+    # petición adicional ni mezclarlas con la tabla principal de Rare.
+    alert_rows = _rows_from_live_auctions(
+        changed_nodes, set(teams), my_nickname, rarities=("rare", "super_rare"),
+    )
+    alert_unique = {
+        (row['auction_id'], row['asset_id']): row for row in alert_rows
+        if datetime.fromisoformat(row['end_date'].replace('Z', '+00:00')) > now
+    }
+    alert_rows = sorted(alert_unique.values(), key=lambda row: row['end_date'])
+
     payload = {
         'updated_at': now.isoformat(),
         'full_refreshed_at': now.isoformat(),
@@ -382,6 +398,7 @@ def _refresh_auction_cache_full(progress=None):
         'new_cards_count': new_cards_count,
         'last_new_cards_at': last_new_cards_at,
         'auctions': merged,
+        'alert_auctions': alert_rows,
     }
     _save_auction_cache(payload)
     print(f"Caché actualizada: {len(merged)} subastas Rare de LaLiga 2026-2027 ({new_cards_count} nuevas)")

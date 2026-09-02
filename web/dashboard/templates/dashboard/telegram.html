@@ -9,30 +9,57 @@
   <p>Configura umbrales, rareza y jugadores desde formulario. Al guardar, se actualizan los archivos de config usados por tus scripts actuales.</p>
 </section>
 
-<form method="post" class="panel form-panel reveal" style="animation-delay: 120ms;">
+<form method="post" class="alerts-form">
   {% csrf_token %}
-  <div class="subsection-heading">
-    <div>
-      <p class="kicker">Subastas Rare · LaLiga · In-Season</p>
-      <h2>Avisos de oportunidad al cierre</h2>
-      <p>Compara la siguiente puja mínima en vivo con el suelo fijo y las últimas subastas y ofertas públicas completadas. Las compras instantáneas no cuentan.</p>
+  <section class="panel form-panel alert-module alert-module-auctions reveal" style="animation-delay:120ms;">
+    <div class="subsection-heading">
+      <div>
+        <p class="kicker">Seguimiento automático de subastas</p>
+        <h2><i class="fas fa-gavel"></i> Oportunidades al cierre</h2>
+        <p>LaLiga In-Season. Compara la siguiente puja mínima en vivo con el suelo y las últimas subastas y ofertas públicas. No incluye compras instantáneas.</p>
+      </div>
+      <label class="toggle alert-master-toggle">{{ form.auction_alert_enabled }} <span>Activar avisos</span></label>
     </div>
-    <label class="toggle">{{ form.auction_alert_enabled }} <span>Activar avisos</span></label>
-  </div>
-  <div class="field-grid">
-    <label>
-      <span>Avisar cuando queden</span>
-      <span class="input-with-suffix">{{ form.auction_alert_minutes }} <b>minutos</b></span>
-    </label>
-    <label>
-      <span>Ahorro mínimo</span>
-      <span class="input-with-suffix">{{ form.auction_alert_min_saving_percent }} <b>%</b></span>
-    </label>
-  </div>
+    <div class="auction-alert-settings">
+      <label>
+        <span>Avisar cuando queden</span>
+        <span class="input-with-suffix">{{ form.auction_alert_minutes }} <b>minutos</b></span>
+      </label>
+      <label>
+        <span>Ahorro mínimo</span>
+        <span class="input-with-suffix">{{ form.auction_alert_min_saving_percent }} <b>%</b></span>
+      </label>
+      <fieldset class="rarity-alert-picker">
+        <legend>Rarezas vigiladas</legend>
+        {{ form.auction_alert_rarities }}
+      </fieldset>
+    </div>
+    <div class="alert-module-footer">
+      <p class="alert-last-run">
+        <i class="fas fa-clock-rotate-left"></i>
+        {% if alert_status.last_run_display %}
+          Última comprobación: <strong>{{ alert_status.last_run_display }}</strong>
+          · {{ alert_status.candidate_count|default:0 }} candidatas · {{ alert_status.alerts_sent|default:0 }} avisos
+        {% else %}
+          Todavía no se ha registrado ninguna comprobación.
+        {% endif %}
+      </p>
+      <div class="btn-row">
+        <button class="btn" type="submit" name="action" value="save_only">Guardar configuración</button>
+        <button class="btn btn-accent" type="submit" name="action" value="check_auctions">Guardar + comprobar ahora</button>
+      </div>
+    </div>
+  </section>
 
-  <hr class="section-divider">
-  <p class="kicker">Alertas de precio fijo</p>
-  <div class="field-grid">
+  <section class="panel form-panel alert-module alert-module-players reveal" style="animation-delay:180ms;">
+    <div class="subsection-heading">
+      <div>
+        <p class="kicker">Seguimiento por jugadores</p>
+        <h2><i class="fas fa-user-magnifying-glass"></i> Búsqueda de precios fijos</h2>
+        <p>Vigila jugadores concretos y recibe un aviso cuando aparezca una carta por debajo del importe indicado.</p>
+      </div>
+    </div>
+    <div class="field-grid">
     <label>
       <span>Notify mode</span>
       {{ form.notify_mode }}
@@ -53,16 +80,16 @@
       <span>In season year</span>
       {{ form.in_season_year }}
     </label>
-  </div>
+    </div>
 
-  <div class="toggle-grid">
+    <div class="toggle-grid">
     <label class="toggle">{{ form.send_all_offers_below_threshold }} <span>Send all offers below threshold</span></label>
     <label class="toggle">{{ form.send_run_start_message }} <span>Send run start message</span></label>
     <label class="toggle">{{ form.send_single_message }} <span>Send single merged message</span></label>
     <label class="toggle">{{ form.include_player_preview }} <span>Include player preview</span></label>
-  </div>
+    </div>
 
-  <div class="field-grid single-column">
+    <div class="field-grid single-column">
     <label>
       <span>Classic players (one per line)</span>
       {{ form.classic_players }}
@@ -71,18 +98,16 @@
       <span>In season players (one per line)</span>
       {{ form.in_season_players }}
     </label>
-  </div>
+    </div>
 
-  {% if form.non_field_errors %}
-    <div class="errors">{{ form.non_field_errors }}</div>
-  {% endif %}
+    {% if form.errors %}<div class="errors">{{ form.errors }}</div>{% endif %}
 
-  <div class="btn-row">
-    <button class="btn" type="submit" name="action" value="save_only">Guardar</button>
-    <button class="btn btn-accent" type="submit" name="action" value="check_auctions">Guardar + comprobar subastas</button>
-    <button class="btn btn-secondary" type="submit" name="action" value="dry_run">Guardar + Dry run</button>
-    <button class="btn btn-accent" type="submit" name="action" value="save_and_run">Guardar + Ejecutar real</button>
-  </div>
+    <div class="btn-row">
+      <button class="btn" type="submit" name="action" value="save_only">Guardar jugadores</button>
+      <button class="btn btn-secondary" type="submit" name="action" value="dry_run">Previsualizar</button>
+      <button class="btn btn-accent" type="submit" name="action" value="save_and_run">Guardar + ejecutar</button>
+    </div>
+  </section>
 </form>
 
 {% if script_result %}
@@ -109,7 +134,19 @@
   .input-with-suffix { display:flex; align-items:center; gap:.6rem; }
   .input-with-suffix input { min-width:0; }
   .input-with-suffix b { white-space:nowrap; color:var(--muted); }
-  .section-divider { border:0; border-top:1px solid var(--line); margin:2rem 0; }
+  .alerts-form { display:grid; gap:1.25rem; }
+  .alert-module { margin:0; }
+  .alert-module-auctions { border-top:4px solid #6d4aff; }
+  .alert-module-players { border-top:4px solid var(--accent); }
+  .alert-master-toggle { flex:0 0 auto; padding:.8rem 1rem; border:1px solid var(--line); border-radius:12px; background:#fff; }
+  .auction-alert-settings { display:grid; grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) minmax(300px,1.5fr); gap:1rem; align-items:end; }
+  .auction-alert-settings > label > span:first-child, .rarity-alert-picker legend { display:block; margin-bottom:.45rem; color:var(--muted); font-weight:700; }
+  .rarity-alert-picker { min-width:0; margin:0; padding:0; border:0; }
+  .rarity-alert-picker ul { display:flex; gap:.65rem; margin:0; padding:0; list-style:none; }
+  .rarity-alert-picker label { display:flex; align-items:center; gap:.45rem; min-height:46px; padding:.65rem .8rem; border:1px solid var(--line); border-radius:10px; background:#fff; font-weight:700; }
+  .alert-module-footer { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-top:1.25rem; padding-top:1rem; border-top:1px solid var(--line); }
+  .alert-last-run { margin:0; color:var(--muted); }
   @media (max-width:720px) { .subsection-heading { align-items:flex-start; flex-direction:column; gap:.8rem; } }
+  @media (max-width:900px) { .auction-alert-settings { grid-template-columns:1fr; } .alert-module-footer { align-items:flex-start; flex-direction:column; } }
 </style>
 {% endblock %}

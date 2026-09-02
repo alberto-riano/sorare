@@ -23,11 +23,11 @@ EOF
 
 sudo tee /etc/systemd/system/sorare-auction-value-alert.timer >/dev/null <<EOF
 [Unit]
-Description=Comprobar oportunidades de subasta cada minuto
+Description=Comprobar oportunidades de subasta cada dos minutos
 
 [Timer]
 OnBootSec=45s
-OnUnitActiveSec=1min
+OnUnitActiveSec=2min
 AccuracySec=5s
 Persistent=true
 Unit=sorare-auction-value-alert.service

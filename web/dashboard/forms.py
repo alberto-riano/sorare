@@ -24,6 +24,11 @@ class TelegramSettingsForm(forms.Form):
     auction_alert_min_saving_percent = forms.DecimalField(
         min_value=0, max_value=95, decimal_places=1, max_digits=4, initial=20,
     )
+    auction_alert_rarities = forms.MultipleChoiceField(
+        choices=(("rare", "Rare · rojas"), ("super_rare", "Super Rare · azules")),
+        widget=forms.CheckboxSelectMultiple,
+        initial=("rare", "super_rare"),
+    )
     notify_mode = forms.ChoiceField(choices=NOTIFY_MODE_CHOICES)
     notify_drop_eur = forms.DecimalField(min_value=0, decimal_places=2, max_digits=8)
     send_all_offers_below_threshold = forms.BooleanField(required=False)

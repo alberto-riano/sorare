@@ -1000,6 +1000,9 @@ def telegram_alerts(request):
         "auction_alert_enabled": initial_source["AUCTION_ALERT_ENABLED"].lower() == "true",
         "auction_alert_minutes": initial_source["AUCTION_ALERT_MINUTES"],
         "auction_alert_min_saving_percent": initial_source["AUCTION_ALERT_MIN_SAVING_PERCENT"],
+        "auction_alert_rarities": [
+            rarity.strip() for rarity in initial_source["AUCTION_ALERT_RARITIES"].split(",") if rarity.strip()
+        ],
         "notify_mode": initial_source["NOTIFY_MODE"],
         "notify_drop_eur": initial_source["NOTIFY_DROP_EUR"],
         "send_all_offers_below_threshold": initial_source["SEND_ALL_OFFERS_BELOW_THRESHOLD"].lower() == "true",
@@ -1024,6 +1027,7 @@ def telegram_alerts(request):
                     "AUCTION_ALERT_ENABLED": _to_bool_text(bool(data["auction_alert_enabled"])),
                     "AUCTION_ALERT_MINUTES": str(data["auction_alert_minutes"]),
                     "AUCTION_ALERT_MIN_SAVING_PERCENT": str(data["auction_alert_min_saving_percent"]),
+                    "AUCTION_ALERT_RARITIES": ",".join(data["auction_alert_rarities"]),
                     "NOTIFY_MODE": data["notify_mode"],
                     "NOTIFY_DROP_EUR": str(data["notify_drop_eur"]),
                     "SEND_ALL_OFFERS_BELOW_THRESHOLD": _to_bool_text(bool(data["send_all_offers_below_threshold"])),
@@ -1067,12 +1071,21 @@ def telegram_alerts(request):
     else:
         form = TelegramSettingsForm(initial=initial)
 
+    alert_status = {}
+    try:
+        alert_status = json.loads((REPO_ROOT / "output" / "auction_value_alert_state.json").read_text(encoding="utf-8"))
+        last_run = datetime.fromisoformat(str(alert_status.get("last_run_at") or "").replace("Z", "+00:00"))
+        alert_status["last_run_display"] = last_run.astimezone(ZoneInfo("Europe/Madrid")).strftime("%d/%m/%Y %H:%M:%S")
+    except (OSError, ValueError, TypeError):
+        alert_status = {}
+
     return render(
         request,
         "dashboard/telegram.html",
         {
             "form": form,
             "script_result": script_result,
+            "alert_status": alert_status,
         },
     )
 

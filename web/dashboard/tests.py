@@ -191,6 +191,21 @@ class LaLigaAuctionTests(TestCase):
         self.assertFalse(rows[0]["is_winning"])
         self.assertFalse(rows[0]["is_outbid"])
 
+    def test_alert_rows_can_include_super_rare_without_changing_default_market(self):
+        card = self._card("blue-card", "super_rare", 2026, "real-madrid-madrid")
+        auction = self._auction(card)
+
+        default_rows = listar_subastas._rows_from_live_auctions(
+            [auction], {"real-madrid-madrid"}, "burguis", season_year=2026,
+        )
+        alert_rows = listar_subastas._rows_from_live_auctions(
+            [auction], {"real-madrid-madrid"}, "burguis", season_year=2026,
+            rarities=("rare", "super_rare"),
+        )
+
+        self.assertEqual(default_rows, [])
+        self.assertEqual(alert_rows[0]["rarity"], "super_rare")
+
     def test_winning_market_row_keeps_my_maximum_bid(self):
         card = self._card("winning-card", "rare", 2026, "real-madrid-madrid")
         auction = self._auction(card)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Avisa por Telegram de subastas Rare LaLiga In-Season próximas a terminar."""
+"""Avisa por Telegram de subastas LaLiga In-Season próximas a terminar."""
 
 from __future__ import annotations
 
@@ -19,13 +19,15 @@ sys.path.insert(0, str(ROOT / "src"))
 from listar_subastas import load_auction_cache  # noqa: E402
 from sorare_utils import build_headers, graphql_request, read_config, to_eur_cents  # noqa: E402
 from web_services.config_files import DEFAULT_TELEGRAM_SETTINGS, parse_key_value_file  # noqa: E402
-from web_services.opportunity_market import _floor_query, robust_sales_reference  # noqa: E402
+from web_services.opportunity_market import robust_sales_reference  # noqa: E402
 
 
 SETTINGS_PATH = ROOT / "config" / "telegram_alert_settings.txt"
 STATE_PATH = ROOT / "output" / "auction_value_alert_state.json"
 VALUE_TTL = timedelta(minutes=15)
 SEASON_YEAR = 2026
+ALLOWED_RARITIES = {"rare", "super_rare"}
+RARITY_LABELS = {"rare": "Rare · roja", "super_rare": "Super Rare · azul"}
 
 
 def parse_date(value):
@@ -90,11 +92,13 @@ def _live_details(headers, auction_ids):
     return details, rate, nickname
 
 
-def _history_query(player_slug):
-    return """
+def _history_query(player_slug, rarity):
+    if rarity not in ALLOWED_RARITIES:
+        raise ValueError("Rareza de alerta no válida")
+    query = """
       query AuctionAlertHistory($slug: String!) {
         tokens {
-          prices: tokenPrices(playerSlug: $slug, rarity: rare, season: 2026,
+          prices: tokenPrices(playerSlug: $slug, rarity: __RARITY__, season: 2026,
             seasonEligibility: IN_SEASON, first: 20) {
             amounts { eurCents usdCents gbpCents wei }
             date
@@ -103,19 +107,43 @@ def _history_query(player_slug):
           }
         }
       }
-    """, {"slug": player_slug}
+    """.replace("__RARITY__", rarity)
+    return query, {"slug": player_slug}
 
 
-def _valuation(player_slug, headers, rates, now):
-    query, variables = _floor_query({"player_slug": player_slug})
-    market = graphql_request(query, variables, headers=headers).get("player") or {}
-    nodes = (market.get("rare") or {}).get("nodes") or []
+def _floor_query(player_slug, rarity):
+    if rarity not in ALLOWED_RARITIES:
+        raise ValueError("Rareza de alerta no válida")
+    query = f"""
+      query AuctionAlertFloor($slug: String!) {{
+        player: anyPlayer(slug: $slug) {{
+          target: anyCards(first: 1, rarities: [{rarity}], seasonStartYears: [{SEASON_YEAR}], inSeasonEligible: true) {{
+            nodes {{ lowestPriceCard {{ liveSingleSaleOffer {{ receiverSide {{ amounts {{ eurCents usdCents gbpCents wei }} }} }} }} }}
+          }}
+          limited: anyCards(first: 1, rarities: [limited], seasonStartYears: [{SEASON_YEAR}], inSeasonEligible: true) {{
+            nodes {{ lowestPriceCard {{ liveSingleSaleOffer {{ receiverSide {{ amounts {{ eurCents usdCents gbpCents wei }} }} }} }} }}
+          }}
+        }}
+      }}
+    """
+    return query, {"slug": player_slug}
+
+
+def _extract_floor(market, key, rates):
+    nodes = (market.get(key) or {}).get("nodes") or []
     card = (nodes[0] if nodes else {}).get("lowestPriceCard") or {}
     offer = card.get("liveSingleSaleOffer") or {}
-    floor_cents = to_eur_cents((offer.get("receiverSide") or {}).get("amounts") or {}, rates)
-    floor = round(floor_cents / 100, 2) if floor_cents else None
+    cents = to_eur_cents((offer.get("receiverSide") or {}).get("amounts") or {}, rates)
+    return round(cents / 100, 2) if cents else None
 
-    history_query, history_variables = _history_query(player_slug)
+
+def _valuation(player_slug, rarity, headers, rates, now):
+    query, variables = _floor_query(player_slug, rarity)
+    market = graphql_request(query, variables, headers=headers).get("player") or {}
+    floor = _extract_floor(market, "target", rates)
+    limited_floor = _extract_floor(market, "limited", rates)
+
+    history_query, history_variables = _history_query(player_slug, rarity)
     prices = (graphql_request(history_query, history_variables, headers=headers).get("tokens") or {}).get("prices") or []
     cutoff = now - timedelta(days=30)
     comparables = []
@@ -139,6 +167,7 @@ def _valuation(player_slug, headers, rates, now):
     return {
         "value": round(min(values), 2) if values else None,
         "floor": floor,
+        "limited_floor": limited_floor,
         "sales_reference": sales_reference,
         "sales_count": len(summary.get("sales") or []),
         "confidence": summary.get("confidence") or "low",
@@ -159,18 +188,28 @@ def _save_state(state):
     temporary.replace(STATE_PATH)
 
 
-def _send_telegram(token, chat_id, text):
+def _telegram_post(token, method, payload):
+    response = requests.post(f"https://api.telegram.org/bot{token}/{method}", json=payload, timeout=20)
+    response.raise_for_status()
+    body = response.json()
+    if not body.get("ok"):
+        raise RuntimeError(body.get("description") or "Telegram rechazó el mensaje")
+
+
+def _send_telegram(token, chat_id, text, photo_url=None):
     if not token or not chat_id:
         raise RuntimeError("Faltan TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID")
-    response = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": False},
-        timeout=20,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not payload.get("ok"):
-        raise RuntimeError(payload.get("description") or "Telegram rechazó el mensaje")
+    if photo_url:
+        try:
+            _telegram_post(token, "sendPhoto", {
+                "chat_id": chat_id, "photo": photo_url, "caption": text, "parse_mode": "HTML",
+            })
+            return
+        except (requests.RequestException, RuntimeError):
+            pass
+    _telegram_post(token, "sendMessage", {
+        "chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": False,
+    })
 
 
 def _message(row, detail, valuation, next_eur, saving, remaining_minutes):
@@ -186,11 +225,18 @@ def _message(row, detail, valuation, next_eur, saving, remaining_minutes):
     if valuation.get("sales_reference") is not None:
         sources.append(f"ventas {valuation['sales_reference']:.2f} €")
     evidence = " · ".join(sources)
+    rarity_label = RARITY_LABELS.get(row.get("rarity"), row.get("rarity") or "Rare")
+    limited_line = (
+        f"\nSuelo Limited equivalente: <b>{valuation['limited_floor']:.2f} €</b>"
+        if valuation.get("limited_floor") is not None else "\nSuelo Limited equivalente: no disponible"
+    )
     return (
         "🚨 <b>Oportunidad de subasta</b>\n"
         f"<b>{html.escape(str(row.get('player') or 'Jugador'))}</b> · {html.escape(str(row.get('team') or 'LaLiga'))}\n"
+        f"{html.escape(str(rarity_label))}\n"
         f"Siguiente puja: <b>{next_eur:.2f} €</b>\n"
-        f"Valor estimado: <b>{valuation['value']:.2f} €</b> ({html.escape(evidence)})\n"
+        f"Valor estimado: <b>{valuation['value']:.2f} €</b> ({html.escape(evidence)})"
+        f"{limited_line}\n"
         f"Ahorro: <b>{saving:.1f}%</b> · quedan aprox. {max(1, remaining_minutes)} min\n"
         f"<a href=\"{html.escape(url, quote=True)}\">Abrir y pujar en Sorare</a>"
     )
@@ -204,15 +250,27 @@ def run(*, dry_run=False, now=None):
         return 0
     lead_minutes = int(settings.get("AUCTION_ALERT_MINUTES") or 3)
     min_saving = float(settings.get("AUCTION_ALERT_MIN_SAVING_PERCENT") or 20)
-    rule = f"{lead_minutes}:{min_saving:.2f}"
+    selected_rarities = {
+        value.strip() for value in settings.get("AUCTION_ALERT_RARITIES", "rare,super_rare").split(",")
+        if value.strip() in ALLOWED_RARITIES
+    } or {"rare"}
+    rule = f"{lead_minutes}:{min_saving:.2f}:{','.join(sorted(selected_rarities))}"
     state = _load_state()
     if state.get("rule") != rule:
         state = {"rule": rule, "checked": {}, "values": {}}
     checked = state.setdefault("checked", {})
     values_cache = state.setdefault("values", {})
     cache = load_auction_cache() or {}
-    candidates = candidate_auctions(cache.get("auctions"), now, lead_minutes, checked)
+    universe = cache.get("alert_auctions") or cache.get("auctions") or []
+    universe = [row for row in universe if (row.get("rarity") or "rare") in selected_rarities]
+    candidates = candidate_auctions(universe, now, lead_minutes, checked)
     if not candidates:
+        state.update({
+            "last_run_at": now.isoformat(), "last_result": "ok",
+            "candidate_count": 0, "alerts_sent": 0,
+        })
+        if not dry_run:
+            _save_state(state)
         print("No hay subastas nuevas dentro de la ventana de aviso.")
         return 0
 
@@ -238,12 +296,14 @@ def run(*, dry_run=False, now=None):
         if next_eur is None or next_eur <= 0:
             continue
         slug = row.get("player_slug")
-        cached = values_cache.get(slug) or {}
+        rarity = row.get("rarity") or "rare"
+        value_key = f"{slug}:{rarity}"
+        cached = values_cache.get(value_key) or {}
         cached_at = parse_date(cached.get("calculated_at"))
         if not cached_at or now - cached_at > VALUE_TTL:
-            cached = _valuation(slug, headers, rates, now)
+            cached = _valuation(slug, rarity, headers, rates, now)
             cached["calculated_at"] = now.isoformat()
-            values_cache[slug] = cached
+            values_cache[value_key] = cached
         value = cached.get("value")
         if not value:
             checked[auction_id] = now.isoformat()
@@ -255,12 +315,19 @@ def run(*, dry_run=False, now=None):
             if dry_run:
                 print(message)
             else:
-                _send_telegram(config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_CHAT_ID"), message)
+                _send_telegram(
+                    config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_CHAT_ID"), message,
+                    row.get("player_picture_url"),
+                )
             sent += 1
         checked[auction_id] = now.isoformat()
 
     cutoff = now - timedelta(days=2)
     state["checked"] = {key: value for key, value in checked.items() if (parse_date(value) or now) >= cutoff}
+    state.update({
+        "last_run_at": now.isoformat(), "last_result": "ok",
+        "candidate_count": len(candidates), "alerts_sent": sent,
+    })
     if not dry_run:
         _save_state(state)
     print(f"Revisadas {len(candidates)} subastas; {sent} avisos {'simulados' if dry_run else 'enviados'}.")
@@ -274,6 +341,15 @@ def main():
     try:
         return run(dry_run=args.dry_run)
     except Exception as exc:
+        try:
+            state = _load_state()
+            state.update({
+                "last_run_at": datetime.now(timezone.utc).isoformat(),
+                "last_result": "error", "last_error": str(exc)[:500],
+            })
+            _save_state(state)
+        except Exception:
+            pass
         print(f"Error en alertas de subasta: {exc}", file=sys.stderr)
         return 1
 
