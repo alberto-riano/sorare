@@ -24,7 +24,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from web_services.config_files import SorarePaths, load_telegram_alert_payload, save_telegram_alert_payload
-from web_services.process_runner import BidRequest, run_bid_scheduler, run_telegram_alert
+from web_services.process_runner import BidRequest, run_auction_value_alert, run_bid_scheduler, run_telegram_alert
 from web_services.movement_history import build_crafting_history, build_trade_cycles
 from web_services.sales_inventory import collection_display_name
 from .forms import BatchBidForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
@@ -997,6 +997,9 @@ def movements_sync_status(request):
 def telegram_alerts(request):
     initial_source = load_telegram_alert_payload(PATHS)
     initial = {
+        "auction_alert_enabled": initial_source["AUCTION_ALERT_ENABLED"].lower() == "true",
+        "auction_alert_minutes": initial_source["AUCTION_ALERT_MINUTES"],
+        "auction_alert_min_saving_percent": initial_source["AUCTION_ALERT_MIN_SAVING_PERCENT"],
         "notify_mode": initial_source["NOTIFY_MODE"],
         "notify_drop_eur": initial_source["NOTIFY_DROP_EUR"],
         "send_all_offers_below_threshold": initial_source["SEND_ALL_OFFERS_BELOW_THRESHOLD"].lower() == "true",
@@ -1018,6 +1021,9 @@ def telegram_alerts(request):
             save_telegram_alert_payload(
                 PATHS,
                 {
+                    "AUCTION_ALERT_ENABLED": _to_bool_text(bool(data["auction_alert_enabled"])),
+                    "AUCTION_ALERT_MINUTES": str(data["auction_alert_minutes"]),
+                    "AUCTION_ALERT_MIN_SAVING_PERCENT": str(data["auction_alert_min_saving_percent"]),
                     "NOTIFY_MODE": data["notify_mode"],
                     "NOTIFY_DROP_EUR": str(data["notify_drop_eur"]),
                     "SEND_ALL_OFFERS_BELOW_THRESHOLD": _to_bool_text(bool(data["send_all_offers_below_threshold"])),
@@ -1033,7 +1039,13 @@ def telegram_alerts(request):
             )
 
             action = request.POST.get("action")
-            if action == "save_and_run":
+            if action == "check_auctions":
+                script_result = run_auction_value_alert(PATHS)
+                if script_result.exit_code == 0:
+                    messages.success(request, "Configuración guardada y subastas comprobadas.")
+                else:
+                    messages.error(request, "Configuración guardada, pero falló la comprobación de subastas.")
+            elif action == "save_and_run":
                 script_result = run_telegram_alert(PATHS)
                 if script_result.exit_code == 0:
                     messages.success(request, "Configuracion guardada y alerta ejecutada.")

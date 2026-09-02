@@ -97,6 +97,13 @@ def run_telegram_alert(paths: SorarePaths, *, dry_run: bool = False) -> ScriptRe
     return _run_command(cmd, paths.repo_root)
 
 
+def run_auction_value_alert(paths: SorarePaths, *, dry_run: bool = False) -> ScriptResult:
+    cmd = [sys.executable, str(paths.src_dir / "auction_value_alert.py")]
+    if dry_run:
+        cmd.append("--dry-run")
+    return _run_command(cmd, paths.repo_root)
+
+
 def run_bid_scheduler(paths: SorarePaths, request: BidRequest) -> ScriptResult:
     cmd = [
         sys.executable,

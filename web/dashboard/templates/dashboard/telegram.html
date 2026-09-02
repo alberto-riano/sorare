@@ -11,6 +11,27 @@
 
 <form method="post" class="panel form-panel reveal" style="animation-delay: 120ms;">
   {% csrf_token %}
+  <div class="subsection-heading">
+    <div>
+      <p class="kicker">Subastas Rare · LaLiga · In-Season</p>
+      <h2>Avisos de oportunidad al cierre</h2>
+      <p>Compara la siguiente puja mínima en vivo con el suelo fijo y las últimas subastas y ofertas públicas completadas. Las compras instantáneas no cuentan.</p>
+    </div>
+    <label class="toggle">{{ form.auction_alert_enabled }} <span>Activar avisos</span></label>
+  </div>
+  <div class="field-grid">
+    <label>
+      <span>Avisar cuando queden</span>
+      <span class="input-with-suffix">{{ form.auction_alert_minutes }} <b>minutos</b></span>
+    </label>
+    <label>
+      <span>Ahorro mínimo</span>
+      <span class="input-with-suffix">{{ form.auction_alert_min_saving_percent }} <b>%</b></span>
+    </label>
+  </div>
+
+  <hr class="section-divider">
+  <p class="kicker">Alertas de precio fijo</p>
   <div class="field-grid">
     <label>
       <span>Notify mode</span>
@@ -58,6 +79,7 @@
 
   <div class="btn-row">
     <button class="btn" type="submit" name="action" value="save_only">Guardar</button>
+    <button class="btn btn-accent" type="submit" name="action" value="check_auctions">Guardar + comprobar subastas</button>
     <button class="btn btn-secondary" type="submit" name="action" value="dry_run">Guardar + Dry run</button>
     <button class="btn btn-accent" type="submit" name="action" value="save_and_run">Guardar + Ejecutar real</button>
   </div>
@@ -80,4 +102,14 @@
   </div>
 </section>
 {% endif %}
+<style>
+  .subsection-heading { display:flex; align-items:center; justify-content:space-between; gap:2rem; margin-bottom:1.25rem; }
+  .subsection-heading h2 { margin:.2rem 0 .35rem; }
+  .subsection-heading p:last-child { margin:0; color:var(--muted); max-width:58rem; }
+  .input-with-suffix { display:flex; align-items:center; gap:.6rem; }
+  .input-with-suffix input { min-width:0; }
+  .input-with-suffix b { white-space:nowrap; color:var(--muted); }
+  .section-divider { border:0; border-top:1px solid var(--line); margin:2rem 0; }
+  @media (max-width:720px) { .subsection-heading { align-items:flex-start; flex-direction:column; gap:.8rem; } }
+</style>
 {% endblock %}
