@@ -792,11 +792,7 @@ def _player_card_key(card: dict) -> tuple:
     )
 
 
-def build_trade_cycles(
-    movements: list[dict],
-    *,
-    include_opening_sales: bool = False,
-) -> list[dict]:
+def build_trade_cycles(movements: list[dict]) -> list[dict]:
     """Empareja compras y ventas, priorizando la carta exacta y la cercanía temporal."""
     acquisitions: list[dict] = []
     disposals: list[dict] = []
@@ -876,36 +872,6 @@ def build_trade_cycles(
             ]
             match_index = closest_candidate(equivalent_candidates, disposal["timestamp"])
         if match_index is None:
-            if include_opening_sales:
-                movement = disposal["movement"]
-                sale_net = disposal.get("net_eur")
-                received_in_trade = movement.get("received_cards") or []
-                cycles.append({
-                    "id": f"opening-sale:{movement.get('id')}:{sold_asset}",
-                    "occurred_at": disposal["timestamp"].isoformat(),
-                    "purchase_at": None,
-                    "sale_at": movement.get("occurred_at"),
-                    "purchase": {},
-                    "sale": movement,
-                    "purchase_card": sold_card,
-                    "sale_card": sold_card,
-                    "exact_card": True,
-                    "opening_position": True,
-                    "purchase_after_sale": False,
-                    "purchase_cost_eur": Decimal("0"),
-                    "sale_net_eur": sale_net,
-                    "balance_eur": sale_net,
-                    "category": "laliga_inseason" if sold_card.get("is_laliga") else "other",
-                    "movement_ids": [str(movement.get("id") or "")],
-                    "trade_received_cards": list(received_in_trade),
-                    "derived_sales": [],
-                    "derived_sale_net_eur": Decimal("0"),
-                    "realized_proceeds_eur": sale_net,
-                    "pending_received_cards": list(received_in_trade),
-                    "has_unknown_proceeds": sale_net is None,
-                    "is_complete": not received_in_trade and sale_net is not None,
-                    "notes": ["La adquisición es anterior al periodo seleccionado y su coste no se contabiliza"],
-                })
             continue
 
         unused_acquisitions.remove(match_index)

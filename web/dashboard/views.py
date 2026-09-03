@@ -551,10 +551,7 @@ def movements(request):
 
     cycles = []
     if not direction and category not in {"reward", "crafting"}:
-        for cycle in build_trade_cycles(
-            cycle_source_rows,
-            include_opening_sales=category == "trading",
-        ):
+        for cycle in build_trade_cycles(cycle_source_rows):
             cycle_cards = [cycle.get("purchase_card") or {}, cycle.get("sale_card") or {}]
             cycle_at = _movement_datetime(cycle.get("occurred_at"))
             if category not in {"all", "trading"} and cycle.get("category") != category:
@@ -740,7 +737,7 @@ def movements(request):
         "laliga_count": sum(row.get("category") == "laliga_inseason" for row in all_movements),
         "reward_count": sum(row.get("category") == "reward" for row in all_movements),
         "other_count": sum(row.get("category") == "other" for row in all_movements),
-        "trading_count": len(build_trade_cycles(all_movements, include_opening_sales=True)),
+        "trading_count": len(build_trade_cycles(all_movements)),
         "crafting_count": sum(row.get("category") == "crafting" for row in all_movements),
         "totals": totals,
         "available_rarities": sorted(rarities),

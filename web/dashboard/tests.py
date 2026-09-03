@@ -1671,11 +1671,7 @@ class MovementHistoryTests(TestCase):
 
         self.assertTrue(_is_completed_public_trade(sale))
         self.assertEqual([row["direction"] for row in result["movements"]], ["sale"])
-        cycles = build_trade_cycles(result["movements"], include_opening_sales=True)
-        self.assertEqual(len(cycles), 1)
-        self.assertEqual(cycles[0]["sale"]["id"], "sale-riquelme")
-        self.assertTrue(cycles[0]["opening_position"])
-        self.assertEqual(cycles[0]["balance_eur"], Decimal("14.72"))
+        self.assertEqual(build_trade_cycles(result["movements"]), [])
 
     @patch("dashboard.management.commands.process_sales_queue.collect_public_reward_history")
     def test_public_reward_sync_saves_snapshot_in_background(self, collect):
@@ -1760,6 +1756,40 @@ class MovementHistoryTests(TestCase):
         self.assertContains(response, "Movimientos de Blasco93")
         self.assertContains(response, "Canales")
         self.assertContains(response, "−4,98 €")
+
+    def test_trading_excludes_sales_whose_acquisition_is_outside_the_period(self):
+        PublicRewardSnapshot.objects.create(
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
+            movements=[{
+                "id": "public-opening-sale", "occurred_at": "2026-08-28T18:20:00Z",
+                "direction": "sale", "cash_direction": "sale", "category": "other",
+                "market": "Oferta directa", "cards": [{
+                    "asset_id": "asset-kvara", "player": "Khvicha Kvaratskhelia",
+                    "player_slug": "khvicha-kvaratskhelia", "team": "Paris Saint-Germain",
+                    "rarity": "rare", "serial_number": 21, "in_season": True,
+                    "is_laliga": False,
+                }],
+                "sent_cards": [{
+                    "asset_id": "asset-kvara", "player": "Khvicha Kvaratskhelia",
+                    "player_slug": "khvicha-kvaratskhelia", "team": "Paris Saint-Germain",
+                    "rarity": "rare", "serial_number": 21, "in_season": True,
+                    "is_laliga": False,
+                }],
+                "received_cards": [], "gross_eur": 300, "net_eur": 285.08,
+                "fee_eur": 14.92, "eth": 0, "currency": "",
+            }],
+        )
+
+        all_response = self.client.get(
+            reverse("movements"), {"category": "all", "manager": "blasco93"},
+        )
+        trading_response = self.client.get(
+            reverse("movements"), {"category": "trading", "manager": "blasco93"},
+        )
+
+        self.assertContains(all_response, "Khvicha Kvaratskhelia")
+        self.assertEqual(trading_response.context["total_rows"], 0)
+        self.assertNotContains(trading_response, "Inventario inicial")
 
     def test_public_manager_crafting_is_available_and_uses_third_person_copy(self):
         PublicRewardSnapshot.objects.create(
