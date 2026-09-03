@@ -32,7 +32,7 @@ from web_services.sales_inventory import collection_display_name
 from web_services.movement_history import (
     _account_currency, _crafting_movements_from_chests, _movement_from_group,
     _public_crafting_movement,
-    _operation_from_trade, build_crafting_history, build_trade_cycles,
+    _is_completed_public_trade, _operation_from_trade, build_crafting_history, build_trade_cycles,
     collect_movement_history, collect_public_reward_history, enrich_pending_card_floors,
 )
 from web_services.opportunity_market import (
@@ -1613,6 +1613,70 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(movement["currency"], "")
         self.assertEqual(movement["cards"][0]["player"], "Canales")
 
+    @patch("web_services.movement_history.graphql_request")
+    def test_public_collector_keeps_anonymized_offer_sales_and_builds_cycle(self, request):
+        card = self._api_card(player="Rodrigo Riquelme")
+        purchase = {
+            "__typename": "TokenAuction", "id": "auction-riquelme",
+            "transactionDate": "2026-08-11T08:22:44Z", "dealStatus": "SETTLED",
+            "anyCards": [{"assetId": card["assetId"]}],
+            "bestBid": {
+                "id": "bid-riquelme", "fiatPayment": True,
+                "amounts": {"eurCents": 904, "wei": "0", "referenceCurrency": "EUR"},
+            },
+        }
+        sale = {
+            "__typename": "TokenOffer", "id": "sale-riquelme",
+            "transactionDate": "2026-08-21T08:00:00Z", "dealStatus": "UNKNOWN",
+            "type": "SINGLE_SALE_OFFER", "settlementCurrencies": ["EUR"],
+            "marketFeeAmounts": {"eurCents": 78, "wei": "0", "referenceCurrency": "EUR"},
+            "sender": {"__typename": "User", "slug": "blasco93"},
+            "receiver": {"__typename": "User", "slug": "buyer"},
+            "userAcceptor": {"slug": "buyer"},
+            "userBuyer": {"slug": "buyer"}, "userSeller": {"slug": "blasco93"},
+            "senderSide": {
+                "amounts": {"eurCents": 0, "wei": "0", "referenceCurrency": "EUR"},
+                "anyCards": [{"assetId": card["assetId"]}],
+            },
+            "receiverSide": {
+                "amounts": {"eurCents": 1550, "wei": "0", "referenceCurrency": "EUR"},
+                "anyCards": [],
+            },
+        }
+
+        def response(query, _variables, headers=None):
+            if "PublicCompletedTrades" in query:
+                return {
+                    "user": {
+                        "slug": "blasco93", "nickname": "Blasco93",
+                        "trades": {
+                            "nodes": [sale, purchase],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        },
+                    },
+                }
+            if "PublicCraftingCards" in query:
+                return {"user": {"cards": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "PublicManagerRewards" in query:
+                return {
+                    "user": {"slug": "blasco93", "nickname": "Blasco93"},
+                    "so5": {"allSo5Fixtures": {"nodes": [], "pageInfo": {"hasPreviousPage": False}}},
+                }
+            if "MovementCards" in query:
+                return {"tokens": {"anyCards": [card]}}
+            raise AssertionError("Consulta inesperada")
+
+        request.side_effect = response
+        result = collect_public_reward_history("blasco93", headers={"Authorization": "test"})
+
+        self.assertTrue(_is_completed_public_trade(sale))
+        self.assertEqual([row["direction"] for row in result["movements"]], ["sale"])
+        cycles = build_trade_cycles(result["movements"], include_opening_sales=True)
+        self.assertEqual(len(cycles), 1)
+        self.assertEqual(cycles[0]["sale"]["id"], "sale-riquelme")
+        self.assertTrue(cycles[0]["opening_position"])
+        self.assertEqual(cycles[0]["balance_eur"], Decimal("14.72"))
+
     @patch("dashboard.management.commands.process_sales_queue.collect_public_reward_history")
     def test_public_reward_sync_saves_snapshot_in_background(self, collect):
         collect.return_value = {
@@ -1627,11 +1691,11 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, PublicRewardSyncJob.Status.SUCCEEDED)
         snapshot = PublicRewardSnapshot.objects.get(manager_slug="blasco93")
         self.assertEqual(snapshot.movements[0]["id"], "reward-1")
-        self.assertEqual(snapshot.source_version, 3)
+        self.assertEqual(snapshot.source_version, 4)
 
     def test_reward_manager_selector_uses_cached_public_rewards(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=3,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
             movements=[{
                 "id": "blasco-reward", "occurred_at": "2026-08-18T20:00:00Z",
                 "direction": "reward", "cash_direction": "reward", "category": "reward",
@@ -1676,7 +1740,7 @@ class MovementHistoryTests(TestCase):
 
     def test_manager_selector_applies_to_all_movements_and_shows_public_balance(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=3,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
             movements=[{
                 "id": "public-purchase", "occurred_at": "2026-08-27T10:30:00Z",
                 "direction": "purchase", "cash_direction": "purchase", "category": "laliga_inseason",
@@ -1699,7 +1763,7 @@ class MovementHistoryTests(TestCase):
 
     def test_public_manager_crafting_is_available_and_uses_third_person_copy(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=3,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
             movements=[{
                 "id": "public-craft:one", "occurred_at": "2026-08-25T21:19:10Z",
                 "direction": "craft", "cash_direction": "other", "category": "crafting",

@@ -1648,6 +1648,7 @@ body.modal-open { overflow: hidden; }
 .movement-tabs a b { color: var(--muted); font-family: "IBM Plex Mono",monospace; }
 .movement-tabs a.is-active { color: #fff; border-color: var(--accent); background: var(--accent); }
 .movement-tabs a.is-active b { color: #fff; }
+.cycle-match.is-opening { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
 .movement-craft-row { background: linear-gradient(90deg, rgba(245,158,11,.045), rgba(20,184,166,.035)); }
 .movement-craft-detail { min-width: 480px; }
 .craft-journey { display: grid; grid-template-columns: minmax(170px,.85fr) auto minmax(230px,1fr) minmax(125px,.65fr); align-items: center; gap: .65rem; }
