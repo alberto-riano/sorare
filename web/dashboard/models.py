@@ -1,3 +1,5 @@
+from datetime import date
+
 from django.conf import settings
 from django.db import models
 import uuid
@@ -205,6 +207,7 @@ class MovementSnapshot(models.Model):
         related_name="sorare_movement_snapshot",
     )
     movements = models.JSONField(default=list)
+    history_start_date = models.DateField(default=date(2026, 8, 12))
     refreshed_at = models.DateTimeField(null=True, blank=True)
     source_version = models.PositiveSmallIntegerField(default=17)
 
@@ -224,6 +227,7 @@ class MovementSyncJob(models.Model):
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED, db_index=True)
     movement_count = models.PositiveIntegerField(default=0)
     processed_count = models.PositiveIntegerField(default=0)
+    requested_start_date = models.DateField(default=date(2026, 8, 12))
     progress_label = models.CharField(max_length=180, blank=True)
     error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -240,6 +244,7 @@ class PublicRewardSnapshot(models.Model):
     manager_slug = models.SlugField(max_length=180, unique=True)
     manager_nickname = models.CharField(max_length=180)
     movements = models.JSONField(default=list)
+    history_start_date = models.DateField(default=date(2026, 8, 12))
     refreshed_at = models.DateTimeField(null=True, blank=True)
     source_version = models.PositiveSmallIntegerField(default=1)
 
@@ -260,6 +265,7 @@ class PublicRewardSyncJob(models.Model):
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED, db_index=True)
     movement_count = models.PositiveIntegerField(default=0)
     processed_count = models.PositiveIntegerField(default=0)
+    requested_start_date = models.DateField(default=date(2026, 8, 12))
     progress_label = models.CharField(max_length=180, blank=True)
     error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)

@@ -1,6 +1,6 @@
 import json
 import tempfile
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -1313,6 +1313,47 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(set(cycles[0]["movement_ids"]), {"yangel-buy", "yangel-trade", "hugo-sale"})
         self.assertFalse(cycles[0]["is_complete"])
 
+    def test_trade_cycle_treats_cash_and_sent_cards_as_acquisition_cost(self):
+        nico = {
+            "asset_id": "nico-rare", "player": "Nico Williams", "player_slug": "nico-williams",
+            "team": "Athletic Club", "rarity": "rare", "season_year": 2026,
+            "in_season": True, "is_laliga": True, "serial_number": 18,
+        }
+        blind = {
+            "asset_id": "blind-classic", "player": "Daley Blind", "player_slug": "daley-blind",
+            "rarity": "rare", "season_year": 2024, "in_season": False,
+            "is_laliga": False, "serial_number": 40,
+        }
+        tsygankov = {
+            "asset_id": "tsygankov-classic", "player": "Viktor Tsygankov",
+            "player_slug": "viktor-tsygankov", "rarity": "rare", "season_year": 2024,
+            "in_season": False, "is_laliga": False, "serial_number": 55,
+        }
+        acquisition = {
+            "id": "nico-trade", "occurred_at": "2026-08-20T10:00:00Z",
+            "direction": "trade", "cash_direction": "purchase",
+            "market": "Intercambio + dinero", "category": "laliga_inseason",
+            "cards": [nico, blind, tsygankov], "received_cards": [nico],
+            "sent_cards": [blind, tsygankov], "gross_eur": 53.10, "net_eur": 53.10,
+        }
+        sale = {
+            "id": "nico-sale", "occurred_at": "2026-08-25T10:00:00Z",
+            "direction": "sale", "cash_direction": "sale", "market": "Oferta pública",
+            "category": "laliga_inseason", "cards": [nico], "received_cards": [],
+            "sent_cards": [nico], "gross_eur": 78, "net_eur": 74.10, "fee_eur": 3.90,
+        }
+
+        cycles = build_trade_cycles([acquisition, sale])
+
+        self.assertEqual(len(cycles), 1)
+        self.assertEqual(cycles[0]["purchase_card"]["player"], "Nico Williams")
+        self.assertEqual(cycles[0]["purchase_cost_eur"], Decimal("53.1"))
+        self.assertEqual(cycles[0]["balance_eur"], Decimal("21.00"))
+        self.assertEqual(
+            [card["player"] for card in cycles[0]["trade_sent_cards"]],
+            ["Daley Blind", "Viktor Tsygankov"],
+        )
+
     @patch("web_services.movement_history.graphql_request")
     def test_pending_trade_cards_are_enriched_with_the_current_floor(self, request):
         bought = {
@@ -1673,6 +1714,14 @@ class MovementHistoryTests(TestCase):
         self.assertEqual([row["direction"] for row in result["movements"]], ["sale"])
         self.assertEqual(build_trade_cycles(result["movements"]), [])
 
+        expanded = collect_public_reward_history(
+            "blasco93", start_date=date(2026, 8, 1), headers={"Authorization": "test"},
+        )
+        expanded_cycles = build_trade_cycles(expanded["movements"])
+        self.assertEqual(len(expanded_cycles), 1)
+        self.assertEqual(expanded_cycles[0]["sale"]["id"], "sale-riquelme")
+        self.assertEqual(expanded_cycles[0]["balance_eur"], Decimal("5.68"))
+
     @patch("dashboard.management.commands.process_sales_queue.collect_public_reward_history")
     def test_public_reward_sync_saves_snapshot_in_background(self, collect):
         collect.return_value = {
@@ -1688,6 +1737,53 @@ class MovementHistoryTests(TestCase):
         snapshot = PublicRewardSnapshot.objects.get(manager_slug="blasco93")
         self.assertEqual(snapshot.movements[0]["id"], "reward-1")
         self.assertEqual(snapshot.source_version, 4)
+
+    @patch("dashboard.management.commands.process_sales_queue.collect_public_reward_history")
+    def test_public_sync_respects_and_persists_requested_history_start(self, collect):
+        collect.return_value = {
+            "manager_slug": "blasco93", "manager_nickname": "Blasco93", "movements": [],
+        }
+        requested = date(2026, 8, 1)
+        job = PublicRewardSyncJob.objects.create(
+            user=self.user, manager_slug="blasco93", requested_start_date=requested,
+        )
+
+        process_next_public_reward_sync()
+
+        collect.assert_called_once()
+        self.assertEqual(collect.call_args.kwargs["start_date"], requested)
+        snapshot = PublicRewardSnapshot.objects.get(manager_slug="blasco93")
+        self.assertEqual(snapshot.history_start_date, requested)
+
+    def test_public_history_offers_recalculation_when_filter_precedes_coverage(self):
+        PublicRewardSnapshot.objects.create(
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
+            history_start_date=date(2026, 8, 12), movements=[],
+        )
+
+        response = self.client.get(reverse("movements"), {
+            "category": "trading", "manager": "blasco93", "date_from": "2026-08-01",
+        })
+
+        self.assertTrue(response.context["history_rebuild_needed"])
+        self.assertContains(response, "Falta reconstruir el tramo anterior")
+        self.assertContains(response, "Recalcular desde 01/08")
+        self.assertContains(response, "date_from=2026-08-01")
+
+    def test_recalculation_job_can_expand_public_history_coverage(self):
+        PublicRewardSnapshot.objects.create(
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
+            history_start_date=date(2026, 8, 12), movements=[],
+        )
+
+        response = self.client.post(
+            reverse("enqueue_movements_sync") + "?manager=blasco93",
+            {"start_date": "2026-08-01"},
+        )
+
+        self.assertEqual(response.status_code, 202)
+        job = PublicRewardSyncJob.objects.get(pk=response.json()["job_id"])
+        self.assertEqual(job.requested_start_date, date(2026, 8, 1))
 
     def test_reward_manager_selector_uses_cached_public_rewards(self):
         PublicRewardSnapshot.objects.create(

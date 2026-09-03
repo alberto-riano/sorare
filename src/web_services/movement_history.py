@@ -799,6 +799,7 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
     cycles: list[dict] = []
     for movement in movements:
         direction = movement.get("direction")
+        movement_cash_direction = movement.get("cash_direction") or direction
         sent_cards = movement.get("sent_cards") or (
             movement.get("cards") or [] if direction == "sale" else []
         )
@@ -818,21 +819,24 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
             purchase_price = movement.get("gross_eur")
             if purchase_price is None:
                 purchase_price = movement.get("net_eur") or 0
-            known_cost = (
-                Decimal(str(purchase_price))
-                if len(received_cards) == 1
-                and not sent_cards
-                and (movement.get("cash_direction") or movement.get("direction")) == "purchase"
-                else None
-            )
+            known_cost = Decimal(str(purchase_price)) if (
+                len(received_cards) == 1 and movement_cash_direction == "purchase"
+            ) else None
             acquisitions.append({
                 "card": received_card,
                 "movement": movement,
                 "cost_eur": known_cost,
+                "consideration_cards": list(sent_cards) if movement_cash_direction == "purchase" else [],
                 "timestamp": _movement_timestamp(movement),
             })
 
-        for sold_card in sent_cards:
+        # Si el intercambio se utiliza para adquirir una carta pagando efectivo
+        # y otras cartas, estas últimas son la contraprestación de esa compra.
+        # No deben abrir además ciclos de venta independientes.
+        disposal_cards = [] if (
+            direction == "trade" and movement_cash_direction == "purchase" and received_cards
+        ) else sent_cards
+        for sold_card in disposal_cards:
             sale_cash_direction = movement.get("cash_direction") or movement.get("direction")
             disposals.append({
                 "card": sold_card,
@@ -883,6 +887,7 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
         purchase_after_sale = purchase["timestamp"] > disposal["timestamp"]
         movement = disposal["movement"]
         purchase_cost = purchase.get("cost_eur")
+        consideration_cards = purchase.get("consideration_cards") or []
         sale_net = disposal.get("net_eur")
         balance = sale_net - purchase_cost if sale_net is not None and purchase_cost is not None else None
         notes = []
@@ -913,6 +918,7 @@ def build_trade_cycles(movements: list[dict]) -> list[dict]:
             "exact_card": exact_card,
             "purchase_after_sale": purchase_after_sale,
             "purchase_cost_eur": purchase_cost,
+            "trade_sent_cards": list(consideration_cards),
             "sale_net_eur": sale_net,
             "balance_eur": balance,
             "category": (
@@ -1302,6 +1308,7 @@ def collect_public_reward_history(
 
 def collect_movement_history(
     *,
+    start_date: date = date(2026, 8, 12),
     progress: Callable[[int, str], None] | None = None,
     headers: dict | None = None,
 ) -> list[dict]:
@@ -1309,6 +1316,8 @@ def collect_movement_history(
     headers = headers or build_headers()
     trades: list[dict] = []
     current_slug = ""
+    cutoff = datetime.combine(start_date, time.min, tzinfo=ZoneInfo("Europe/Madrid")).astimezone(timezone.utc)
+    cutoff_iso = cutoff.isoformat().replace("+00:00", "Z")
     cursor = None
     page = 0
     while True:
@@ -1317,11 +1326,19 @@ def collect_movement_history(
         current_user = data.get("currentUser") or {}
         current_slug = current_slug or str(current_user.get("slug") or "")
         connection = current_user.get("trades") or {}
-        trades.extend(trade for trade in connection.get("nodes") or [] if trade.get("transactionDate"))
+        page_dates = [
+            _movement_timestamp({"occurred_at": trade.get("transactionDate")})
+            for trade in connection.get("nodes") or [] if trade.get("transactionDate")
+        ]
+        trades.extend(
+            trade for trade in connection.get("nodes") or []
+            if trade.get("transactionDate")
+            and _movement_timestamp({"occurred_at": trade.get("transactionDate")}) >= cutoff
+        )
         if progress:
             progress(len(trades), f"{len(trades)} transacciones completadas · página {page}")
         page_info = connection.get("pageInfo") or {}
-        if not page_info.get("hasNextPage"):
+        if (page_dates and min(page_dates) < cutoff) or not page_info.get("hasNextPage"):
             break
         cursor = page_info.get("endCursor")
 
@@ -1342,7 +1359,7 @@ def collect_movement_history(
                 "first": 100,
                 "after": cursor,
                 "currencies": [api_currency],
-                "startDate": PAYMENT_HISTORY_START,
+                "startDate": cutoff_iso,
             }, headers=headers)
             connection = ((data.get("currentUser") or {}).get("accountEntries") or {})
             for entry in connection.get("nodes") or []:
@@ -1464,6 +1481,10 @@ def collect_movement_history(
         movements.append(reward)
         known_ids.add(reward["id"])
     movements.extend(crafting_movements)
+    movements = [
+        movement for movement in movements
+        if _movement_timestamp(movement) >= cutoff
+    ]
     enrich_pending_card_floors(movements, headers=headers, progress=progress)
     if progress:
         progress(len(trades), f"{len(movements)} movimientos completados y recompensas")

@@ -265,7 +265,7 @@ def process_next_movement_sync():
             return None
         job.status = MovementSyncJob.Status.RUNNING
         job.started_at = timezone.now()
-        job.progress_label = "Conectando con el historial de Sorare"
+        job.progress_label = f"Conectando con el historial desde {job.requested_start_date:%d/%m/%Y}"
         job.save(update_fields=("status", "started_at", "progress_label"))
 
     try:
@@ -275,7 +275,10 @@ def process_next_movement_sync():
                 progress_label=label,
             )
 
-        movements = collect_movement_history(progress=save_progress)
+        movements = collect_movement_history(
+            start_date=job.requested_start_date,
+            progress=save_progress,
+        )
         auction_ids = {
             str(movement.get("auction_id") or "")
             for movement in movements
@@ -297,7 +300,12 @@ def process_next_movement_sync():
                 movement["currency"] = local["currency"]
         MovementSnapshot.objects.update_or_create(
             user=job.user,
-            defaults={"movements": movements, "refreshed_at": timezone.now(), "source_version": 17},
+            defaults={
+                "movements": movements,
+                "history_start_date": job.requested_start_date,
+                "refreshed_at": timezone.now(),
+                "source_version": 17,
+            },
         )
         job.movement_count = len(movements)
         job.progress_label = "Historial actualizado"
@@ -322,7 +330,10 @@ def process_next_public_reward_sync():
             return None
         job.status = PublicRewardSyncJob.Status.RUNNING
         job.started_at = timezone.now()
-        job.progress_label = f"Buscando movimientos de {job.manager_slug}"
+        job.progress_label = (
+            f"Buscando movimientos de {job.manager_slug} desde "
+            f"{job.requested_start_date:%d/%m/%Y}"
+        )
         job.save(update_fields=("status", "started_at", "progress_label"))
 
     try:
@@ -332,13 +343,18 @@ def process_next_public_reward_sync():
                 progress_label=label,
             )
 
-        result = collect_public_reward_history(job.manager_slug, progress=save_progress)
+        result = collect_public_reward_history(
+            job.manager_slug,
+            start_date=job.requested_start_date,
+            progress=save_progress,
+        )
         movements = result["movements"]
         PublicRewardSnapshot.objects.update_or_create(
             manager_slug=job.manager_slug,
             defaults={
                 "manager_nickname": result["manager_nickname"],
                 "movements": movements,
+                "history_start_date": job.requested_start_date,
                 "refreshed_at": timezone.now(),
                 "source_version": 4,
             },

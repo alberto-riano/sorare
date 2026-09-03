@@ -40,6 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PATHS = SorarePaths(repo_root=REPO_ROOT)
 SALES_SELECTED_RARITY_SESSION_KEY = "sales_selected_rarity"
 PUBLIC_REWARD_MANAGER_SLUG = "blasco93"
+DEFAULT_MOVEMENT_START_DATE = date(2026, 8, 12)
 
 # Añadir el directorio src al path para importar listar_subastas
 sys.path.insert(0, str(REPO_ROOT / 'src'))
@@ -423,6 +424,16 @@ def _movement_seasonality(row):
     return "mixed"
 
 
+def _requested_history_start(value, *, fallback=DEFAULT_MOVEMENT_START_DATE):
+    try:
+        parsed = date.fromisoformat(str(value or ""))
+    except ValueError:
+        return fallback
+    if parsed < date(2018, 1, 1) or parsed > date.today():
+        return fallback
+    return parsed
+
+
 def movements(request):
     category = request.GET.get("category", "all")
     if category not in {"laliga_inseason", "trading", "crafting", "reward", "other", "all"}:
@@ -431,6 +442,9 @@ def movements(request):
     if selected_manager not in {"me", PUBLIC_REWARD_MANAGER_SLUG}:
         selected_manager = "me"
     public_rewards = selected_manager == PUBLIC_REWARD_MANAGER_SLUG
+    requested_date_from = request.GET.get("date_from")
+    date_from = "2026-08-12" if requested_date_from is None else requested_date_from.strip()
+    requested_start_date = _requested_history_start(date_from)
 
     if public_rewards:
         stored_snapshot = PublicRewardSnapshot.objects.filter(manager_slug=selected_manager).first()
@@ -443,6 +457,7 @@ def movements(request):
             active_sync = PublicRewardSyncJob.objects.create(
                 user=request.user,
                 manager_slug=selected_manager,
+                requested_start_date=requested_start_date,
             )
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
@@ -453,7 +468,10 @@ def movements(request):
             status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
         ).order_by("-created_at").first()
         if not snapshot and not active_sync:
-            active_sync = MovementSyncJob.objects.create(user=request.user)
+            active_sync = MovementSyncJob.objects.create(
+                user=request.user,
+                requested_start_date=requested_start_date,
+            )
         manager_nickname = "burguis"
 
     all_movements = list(snapshot.movements if snapshot else [])
@@ -470,9 +488,11 @@ def movements(request):
     seasonality = request.GET.get("seasonality", "")
     if category == "reward" or seasonality not in {"inseason", "classic"}:
         seasonality = ""
-    requested_date_from = request.GET.get("date_from")
-    date_from = "2026-08-12" if requested_date_from is None else requested_date_from.strip()
     date_to = request.GET.get("date_to", "").strip()
+    history_start_date = snapshot.history_start_date if snapshot else requested_start_date
+    history_rebuild_needed = bool(
+        snapshot and date_from and requested_start_date < history_start_date
+    )
 
     prepared_rows = []
     rarities = set()
@@ -709,6 +729,12 @@ def movements(request):
         "trading_pending_card_rows": pending_trading_card_rows,
         "trading_pending_value": pending_trading_value,
         "trading_pending_unvalued": pending_trading_unvalued,
+        "trading_consideration_cards": sum(
+            len(cycle.get("trade_sent_cards") or []) for cycle in cycles
+        ),
+        "trading_consideration_cycles": sum(
+            bool(cycle.get("trade_sent_cards")) for cycle in cycles
+        ),
         "balance": (
             sum(Decimal(str(row.get("net_eur") or 0)) for row in sales)
             - sum(Decimal(str(row.get("gross_eur") or 0)) for row in purchases)
@@ -727,6 +753,21 @@ def movements(request):
     swap_query["manager"] = PUBLIC_REWARD_MANAGER_SLUG if selected_manager == "me" else "me"
     swap_query["category"] = category
     swap_query.pop("page", None)
+    tab_queries = {}
+    for target_category in ("all", "trading", "crafting", "reward"):
+        tab_query = request.GET.copy()
+        tab_query["category"] = target_category
+        tab_query["manager"] = selected_manager
+        tab_query.pop("page", None)
+        if target_category == "reward":
+            tab_query.pop("seasonality", None)
+            tab_query.pop("direction", None)
+        elif target_category in {"trading", "crafting"}:
+            tab_query.pop("direction", None)
+            tab_query.pop("reward_type", None)
+        else:
+            tab_query.pop("reward_type", None)
+        tab_queries[target_category] = tab_query.urlencode()
 
     return render(request, "dashboard/movements.html", {
         "snapshot": snapshot,
@@ -755,6 +796,13 @@ def movements(request):
         "per_page": per_page,
         "query_without_page": query.urlencode(),
         "manager_swap_query": swap_query.urlencode(),
+        "tab_query_all": tab_queries["all"],
+        "tab_query_trading": tab_queries["trading"],
+        "tab_query_crafting": tab_queries["crafting"],
+        "tab_query_reward": tab_queries["reward"],
+        "history_start_date": history_start_date,
+        "history_rebuild_needed": history_rebuild_needed,
+        "requested_start_date": requested_start_date,
     })
 
 
@@ -973,21 +1021,48 @@ def movement_analytics(request):
 @require_POST
 def enqueue_movements_sync(request):
     selected_manager = request.GET.get("manager", "me")
+    requested_value = request.POST.get("start_date") or request.GET.get("start_date")
     if selected_manager == PUBLIC_REWARD_MANAGER_SLUG:
+        snapshot = PublicRewardSnapshot.objects.filter(manager_slug=selected_manager).first()
+        fallback = snapshot.history_start_date if snapshot else DEFAULT_MOVEMENT_START_DATE
+        requested_start_date = _requested_history_start(requested_value, fallback=fallback)
+        requested_start_date = min(requested_start_date, fallback)
         active = PublicRewardSyncJob.objects.filter(
             manager_slug=selected_manager,
             status__in=(PublicRewardSyncJob.Status.QUEUED, PublicRewardSyncJob.Status.RUNNING),
-        ).first()
-        job = active or PublicRewardSyncJob.objects.create(
-            user=request.user,
-            manager_slug=selected_manager,
-        )
+        ).order_by("created_at").first()
+        if active and active.requested_start_date <= requested_start_date:
+            job = active
+        elif active and active.status == PublicRewardSyncJob.Status.QUEUED:
+            active.requested_start_date = requested_start_date
+            active.save(update_fields=("requested_start_date",))
+            job = active
+        else:
+            job = PublicRewardSyncJob.objects.create(
+                user=request.user,
+                manager_slug=selected_manager,
+                requested_start_date=requested_start_date,
+            )
         return JsonResponse({"job_id": job.id, "status": job.status}, status=202)
+    snapshot = MovementSnapshot.objects.filter(user=request.user).first()
+    fallback = snapshot.history_start_date if snapshot else DEFAULT_MOVEMENT_START_DATE
+    requested_start_date = _requested_history_start(requested_value, fallback=fallback)
+    requested_start_date = min(requested_start_date, fallback)
     active = MovementSyncJob.objects.filter(
         user=request.user,
         status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
-    ).first()
-    job = active or MovementSyncJob.objects.create(user=request.user)
+    ).order_by("created_at").first()
+    if active and active.requested_start_date <= requested_start_date:
+        job = active
+    elif active and active.status == MovementSyncJob.Status.QUEUED:
+        active.requested_start_date = requested_start_date
+        active.save(update_fields=("requested_start_date",))
+        job = active
+    else:
+        job = MovementSyncJob.objects.create(
+            user=request.user,
+            requested_start_date=requested_start_date,
+        )
     return JsonResponse({"job_id": job.id, "status": job.status}, status=202)
 
 

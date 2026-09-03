@@ -38,13 +38,21 @@
     </div>
     <nav class="movement-tabs" aria-label="Sección del historial">
     {% if not public_manager %}<a href="{% url 'movement_analytics' %}"><i class="fas fa-chart-line"></i> Análisis</a>{% endif %}
-    <a href="?category=trading&manager={{ selected_manager }}" class="{% if selected_category == 'trading' %}is-active{% endif %}"><i class="fas fa-arrow-right-arrow-left"></i> Compraventas <b>{{ trading_count }}</b></a>
-    <a href="?category=crafting&manager={{ selected_manager }}" class="{% if selected_category == 'crafting' %}is-active{% endif %}"><i class="fas fa-wand-magic-sparkles"></i> Crafting <b>{{ crafting_count }}</b></a>
-    <a href="?category=reward&manager={{ selected_manager }}" class="{% if selected_category == 'reward' %}is-active{% endif %}"><i class="fas fa-gift"></i> Recompensas <b>{{ reward_count }}</b></a>
-    <a href="?category=all&manager={{ selected_manager }}" class="{% if selected_category == 'all' %}is-active{% endif %}"><i class="fas fa-list"></i> Todos <b>{{ all_count }}</b></a>
+    <a href="?{{ tab_query_trading }}" class="{% if selected_category == 'trading' %}is-active{% endif %}"><i class="fas fa-arrow-right-arrow-left"></i> Compraventas <b>{{ trading_count }}</b></a>
+    <a href="?{{ tab_query_crafting }}" class="{% if selected_category == 'crafting' %}is-active{% endif %}"><i class="fas fa-wand-magic-sparkles"></i> Crafting <b>{{ crafting_count }}</b></a>
+    <a href="?{{ tab_query_reward }}" class="{% if selected_category == 'reward' %}is-active{% endif %}"><i class="fas fa-gift"></i> Recompensas <b>{{ reward_count }}</b></a>
+    <a href="?{{ tab_query_all }}" class="{% if selected_category == 'all' %}is-active{% endif %}"><i class="fas fa-list"></i> Todos <b>{{ all_count }}</b></a>
     </nav>
     {% if public_manager %}<small class="public-movement-note"><i class="fas fa-circle-info"></i> Importes públicos en EUR; Sorare no publica créditos ni el monedero utilizado.</small>{% endif %}
   </section>
+
+  {% if history_rebuild_needed %}
+  <section class="panel history-coverage-warning reveal">
+    <i class="fas fa-clock-rotate-left"></i>
+    <div><strong>Falta reconstruir el tramo anterior</strong><p>El historial guardado empieza el {{ history_start_date|date:'d/m/Y' }}. Para incluir movimientos desde el {{ requested_start_date|date:'d/m/Y' }} hay que consultar páginas anteriores de Sorare.</p></div>
+    <button class="btn btn-accent" id="expandMovementHistory" type="button"><i class="fas fa-arrows-rotate"></i> Recalcular desde {{ requested_start_date|date:'d/m' }}</button>
+  </section>
+  {% endif %}
 
   {% if snapshot %}
   {% if selected_category == 'trading' %}
@@ -57,7 +65,7 @@
         <b>+</b><strong>{{ totals.trading_pending_cards }} carta{{ totals.trading_pending_cards|pluralize:"s" }}</strong>
         <i class="fas fa-chevron-down trading-summary-chevron" aria-hidden="true"></i>
       </div>
-      <small>Haz clic para ver las cartas pendientes y su valor de mercado.</small>
+      <small>Haz clic para ver las cartas pendientes y su valor de mercado.{% if totals.trading_consideration_cards %} · {{ totals.trading_consideration_cards }} cartas usadas como pago en {{ totals.trading_consideration_cycles }} operaciones.{% endif %}</small>
     </summary>
     <div class="trading-pending-panel">
       <header>
@@ -79,7 +87,7 @@
   <section class="panel trading-global-summary is-static">
     <span><i class="fas fa-scale-balanced"></i> Balance global</span>
     <div><strong class="{% if totals.trading_balance < 0 %}is-out{% else %}is-in{% endif %}">{% if totals.trading_balance > 0 %}+{% endif %}{{ totals.trading_balance|floatformat:2 }} €</strong></div>
-    <small>Efectivo realizado.</small>
+    <small>Efectivo realizado.{% if totals.trading_consideration_cards %} {{ totals.trading_consideration_cards }} cartas usadas como parte del pago.{% endif %}</small>
   </section>
   {% endif %}
   {% else %}
@@ -148,10 +156,10 @@
             </td>
             <td colspan="3" class="movement-grouped-detail">
               <div class="movement-inline-cycle">
-                <section><span>Compra{% if movement.purchase_after_sale %} posterior{% endif %}</span><small>{{ movement.purchase_at_dt|date:'d/m/Y H:i' }} · {{ movement.purchase.market }}</small>{% if movement.purchase_cost_eur != None %}<strong class="is-out">−{{ movement.purchase_cost_eur|floatformat:2 }} €</strong>{% else %}<strong>Indeterminado</strong>{% endif %}</section>
+                <section><span>{% if movement.trade_sent_cards %}Adquisición mediante intercambio{% else %}Compra{% if movement.purchase_after_sale %} posterior{% endif %}{% endif %}</span><small>{{ movement.purchase_at_dt|date:'d/m/Y H:i' }} · {{ movement.purchase.market }}</small>{% if movement.purchase_cost_eur != None %}<strong class="is-out">−{{ movement.purchase_cost_eur|floatformat:2 }} €</strong>{% else %}<strong>Indeterminado</strong>{% endif %}{% if movement.trade_sent_cards %}<div class="cycle-consideration"><small>Además entregaste</small><div>{% for card in movement.trade_sent_cards %}<em><span class="card-rarity-dot rarity-{{ card.rarity }}"></span>{{ card.player }} <span class="season-mark {% if card.in_season %}is-inseason{% else %}is-classic{% endif %}">{% if card.in_season %}IS{% else %}CL{% endif %}</span></em>{% endfor %}</div></div>{% endif %}</section>
                 <i class="fas fa-arrow-right"></i>
                 <section><span>{% if movement.trade_received_cards %}Intercambio{% else %}Venta{% endif %}</span><small>{{ movement.sale_at_dt|date:'d/m/Y H:i' }} · {{ movement.sale.market }}</small>{% if movement.sale_net_eur != None %}<strong class="is-in">+{{ movement.sale_net_eur|floatformat:2 }} €</strong>{% else %}<strong>Indeterminado</strong>{% endif %}{% if movement.sale.fee_eur %}<small>−{{ movement.sale.fee_eur|floatformat:2 }} € comisión</small>{% endif %}</section>
-                <aside><span>Balance{% if not movement.is_complete %} actual{% endif %}</span>{% if movement.balance_eur != None %}<div class="movement-balance-value"><strong class="{% if movement.balance_eur < 0 %}is-out{% else %}is-in{% endif %}">{% if movement.balance_eur > 0 %}+{% endif %}{{ movement.balance_eur|floatformat:2 }} €</strong>{% if movement.pending_received_cards %}<b>+</b><div>{% for card in movement.pending_received_cards %}<em><span class="card-rarity-dot rarity-{{ card.rarity }}"></span>{{ card.player }} <span class="season-mark {% if card.in_season %}is-inseason{% else %}is-classic{% endif %}">{% if card.in_season %}IS{% else %}CL{% endif %}</span></em>{% endfor %}</div>{% endif %}</div>{% else %}<strong>—</strong>{% endif %}</aside>
+                <aside><span>{% if movement.trade_sent_cards %}Balance de efectivo{% else %}Balance{% if not movement.is_complete %} actual{% endif %}{% endif %}</span>{% if movement.balance_eur != None %}<div class="movement-balance-value"><strong class="{% if movement.balance_eur < 0 %}is-out{% else %}is-in{% endif %}">{% if movement.balance_eur > 0 %}+{% endif %}{{ movement.balance_eur|floatformat:2 }} €</strong>{% if movement.pending_received_cards %}<b>+</b><div>{% for card in movement.pending_received_cards %}<em><span class="card-rarity-dot rarity-{{ card.rarity }}"></span>{{ card.player }} <span class="season-mark {% if card.in_season %}is-inseason{% else %}is-classic{% endif %}">{% if card.in_season %}IS{% else %}CL{% endif %}</span></em>{% endfor %}</div>{% endif %}</div>{% if movement.trade_sent_cards %}<small>A cambio de {{ movement.trade_sent_cards|length }} carta{{ movement.trade_sent_cards|length|pluralize:"s" }}</small>{% endif %}{% else %}<strong>—</strong>{% endif %}</aside>
               </div>
               {% if movement.trade_received_cards %}<div class="movement-chain"><section><span>Cartas recibidas</span><div>{% for card in movement.trade_received_cards %}<em><span class="card-rarity-dot rarity-{{ card.rarity }}"></span>{{ card.player }} <span class="season-mark {% if card.in_season %}is-inseason{% else %}is-classic{% endif %}">{% if card.in_season %}IS{% else %}CL{% endif %}</span></em>{% endfor %}</div></section><section><span>Ventas posteriores</span><div>{% for derived in movement.derived_sales %}<em><span class="card-rarity-dot rarity-{{ derived.card.rarity }}"></span>{{ derived.card.player }} <span class="season-mark {% if derived.card.in_season %}is-inseason{% else %}is-classic{% endif %}">{% if derived.card.in_season %}IS{% else %}CL{% endif %}</span>{% if derived.net_eur != None %}<b>+{{ derived.net_eur|floatformat:2 }} €</b>{% else %}<b>importe sin repartir</b>{% endif %}</em>{% empty %}<small>Aún no hay ventas posteriores contabilizadas.</small>{% endfor %}</div></section><aside><span>Total realizado</span><strong class="is-in">+{{ movement.realized_proceeds_eur|floatformat:2 }} €</strong>{% if movement.is_complete %}<small>Operación completada</small>{% elif movement.pending_received_cards %}<small>{{ movement.pending_received_cards|length }} cartas pendientes</small>{% else %}<small>Hay importes sin repartir</small>{% endif %}</aside></div>{% endif %}
               {% if movement.notes %}<div class="movement-inline-notes">{% for note in movement.notes %}<small><i class="fas fa-circle-info"></i> {{ note }}</small>{% endfor %}</div>{% endif %}
@@ -190,6 +198,7 @@
 <script>
 (function () {
   var button = document.getElementById('syncMovements');
+  var expandButton = document.getElementById('expandMovementHistory');
   var text = document.getElementById('movementSyncText');
   var csrf = '{{ csrf_token }}';
   var polling = {{ active_sync|yesno:'true,false' }};
@@ -209,15 +218,21 @@
       }).catch(function () { window.setTimeout(poll, 3000); });
   }
   if (polling) poll();
-  button.addEventListener('click', function () {
+  function startSync(startDate) {
     button.disabled = true;
     button.querySelector('i').classList.add('fa-spin');
     button.querySelector('span').textContent = 'Actualizando…';
-    fetch('{% url "enqueue_movements_sync" %}?manager={{ selected_manager|urlencode }}', {method: 'POST', credentials: 'same-origin', headers: {'X-CSRFToken': csrf}})
+    if (expandButton) expandButton.disabled = true;
+    var body = startDate ? 'start_date=' + encodeURIComponent(startDate) : '';
+    fetch('{% url "enqueue_movements_sync" %}?manager={{ selected_manager|urlencode }}', {method: 'POST', credentials: 'same-origin', headers: {'X-CSRFToken': csrf, 'Content-Type': 'application/x-www-form-urlencoded'}, body: body})
       .then(function (response) { if (!response.ok) throw new Error(); return response.json(); })
       .then(function () { poll(); })
-      .catch(function () { button.disabled = false; text.textContent = 'No se pudo iniciar la actualización.'; });
+      .catch(function () { button.disabled = false; if (expandButton) expandButton.disabled = false; text.textContent = 'No se pudo iniciar la actualización.'; });
+  }
+  button.addEventListener('click', function () {
+    startSync('');
   });
+  if (expandButton) expandButton.addEventListener('click', function () { startSync('{{ requested_start_date|date:"Y-m-d" }}'); });
   var form = document.getElementById('movementFilters');
   if (form) {
     form.querySelectorAll('select,input[type="date"]').forEach(function (control) { control.addEventListener('change', function () { form.submit(); }); });
