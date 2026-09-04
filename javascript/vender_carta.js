@@ -38,16 +38,18 @@ function readConfig(filename = CONFIG_PATH) {
 
 // --- Parámetros de entrada ---
 const DIRECT_OFFER_MODE = process.argv[2] === "--direct-offer";
-const inputArgs = DIRECT_OFFER_MODE ? process.argv.slice(3) : process.argv.slice(2);
+const CANCEL_OFFER_MODE = process.argv[2] === "--cancel-offer";
+const inputArgs = (DIRECT_OFFER_MODE || CANCEL_OFFER_MODE) ? process.argv.slice(3) : process.argv.slice(2);
 const currencyIndex = inputArgs.indexOf("--currency");
 const PAYMENT_CURRENCY = currencyIndex >= 0 ? inputArgs[currencyIndex + 1] : "EUR";
 const [ASSET_ID, directManagerOrPrice, directPriceOrDays, directHoursOrMinimum] = inputArgs;
 const MANAGER_SLUG = DIRECT_OFFER_MODE ? directManagerOrPrice : "";
-const PRICE_CENTS = DIRECT_OFFER_MODE ? directPriceOrDays : directManagerOrPrice;
+const EXPECTED_OFFER_ID = CANCEL_OFFER_MODE ? directManagerOrPrice : "";
+const PRICE_CENTS = DIRECT_OFFER_MODE ? directPriceOrDays : (CANCEL_OFFER_MODE ? "" : directManagerOrPrice);
 const DAYS = DIRECT_OFFER_MODE ? "" : directPriceOrDays;
 const TRADE_MINIMUM_CENTS = DIRECT_OFFER_MODE ? "" : directHoursOrMinimum;
-if (!ASSET_ID || !PRICE_CENTS) {
-  console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias] [minimo] o --direct-offer <asset_id> <manager_slug> <centimos> [horas]");
+if (!ASSET_ID || (!CANCEL_OFFER_MODE && !PRICE_CENTS)) {
+  console.error("Uso: node vender_carta.js <asset_id> <precio_centimos> [dias] [minimo], --direct-offer ... o --cancel-offer <asset_id> <offer_id>");
   process.exit(1);
 }
 if (DIRECT_OFFER_MODE && !MANAGER_SLUG) {
@@ -544,6 +546,26 @@ async function tryCancelOffer(liveOffer) {
   }
 }
 
+async function cancelCardListing(assetId, expectedOfferId) {
+  const liveOffer = await getExistingLiveOffer(assetId);
+  if (!liveOffer) {
+    console.log("La carta ya no tiene una publicación activa.");
+    return;
+  }
+  if (expectedOfferId && liveOffer.id !== expectedOfferId) {
+    throw new Error("La publicación activa ha cambiado desde la revisión. Actualiza el listado antes de retirarla.");
+  }
+  const result = await tryCancelOffer(liveOffer);
+  if (!result.cancelled) {
+    throw new Error(`No se pudo retirar la publicación: ${result.errors.join(" · ")}`);
+  }
+  const removed = await waitUntilOfferIsGone(assetId, liveOffer.id);
+  if (!removed) {
+    throw new Error("Sorare aceptó la retirada, pero la publicación sigue apareciendo activa.");
+  }
+  console.log("Publicación retirada correctamente.");
+}
+
 async function waitUntilOfferIsGone(assetId, expectedOfferId) {
   for (let attempt = 0; attempt < RELIST_RETRY_COUNT; attempt += 1) {
     const liveOffer = await getExistingLiveOffer(assetId);
@@ -722,9 +744,11 @@ async function setMinimumAndSell() {
   }
 }
 
-const operation = DIRECT_OFFER_MODE
-  ? createDirectOffer(ASSET_ID, MANAGER_SLUG, PRICE_CENTS, DIRECT_OFFER_HOURS)
-  : setMinimumAndSell();
+const operation = CANCEL_OFFER_MODE
+  ? cancelCardListing(ASSET_ID, EXPECTED_OFFER_ID)
+  : (DIRECT_OFFER_MODE
+    ? createDirectOffer(ASSET_ID, MANAGER_SLUG, PRICE_CENTS, DIRECT_OFFER_HOURS)
+    : setMinimumAndSell());
 
 operation.catch((err) => {
   if (err instanceof Error) {

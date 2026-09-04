@@ -342,3 +342,46 @@ class SaleBatchItem(models.Model):
     class Meta:
         ordering = ("position",)
         constraints = [models.UniqueConstraint(fields=("job", "position"), name="unique_sale_job_position")]
+
+
+class DelistBatchJob(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "En cola"
+        RUNNING = "running", "Procesando"
+        SUCCEEDED = "succeeded", "Completada"
+        PARTIAL = "partial", "Parcial"
+        FAILED = "failed", "Fallida"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sorare_delist_jobs")
+    request_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED, db_index=True)
+    total_count = models.PositiveSmallIntegerField(default=0)
+    success_count = models.PositiveSmallIntegerField(default=0)
+    failure_count = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("created_at",)
+
+
+class DelistBatchItem(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "En cola"
+        RUNNING = "running", "Procesando"
+        SUCCEEDED = "succeeded", "Completada"
+        FAILED = "failed", "Fallida"
+
+    job = models.ForeignKey(DelistBatchJob, on_delete=models.CASCADE, related_name="items")
+    position = models.PositiveSmallIntegerField()
+    asset_id = models.CharField(max_length=200)
+    offer_id = models.CharField(max_length=200)
+    player_name = models.CharField(max_length=180)
+    rarity = models.CharField(max_length=16)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("position",)
+        constraints = [models.UniqueConstraint(fields=("job", "position"), name="unique_delist_job_position")]

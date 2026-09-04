@@ -152,6 +152,22 @@ def run_card_sale(
     return _run_command(cmd, paths.repo_root)
 
 
+def run_card_delist(
+    paths: SorarePaths,
+    *,
+    asset_id: str,
+    expected_offer_id: str,
+) -> ScriptResult:
+    cmd = [
+        "node",
+        str(paths.repo_root / "javascript" / "vender_carta.js"),
+        "--cancel-offer",
+        asset_id.strip(),
+        expected_offer_id.strip(),
+    ]
+    return _run_command(cmd, paths.repo_root)
+
+
 def run_direct_offer(
     paths: SorarePaths,
     *,

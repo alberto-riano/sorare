@@ -1,0 +1,60 @@
+{% extends 'dashboard/base.html' %}
+{% block title %}Retirar ventas | Sorare{% endblock %}
+{% block content %}
+<div class="delist-page">
+  <section class="panel delist-head reveal">
+    <div><p class="kicker">Operar · Mis publicaciones</p><h1><i class="fas fa-tag-circle-xmark"></i> Quitar cartas a la venta</h1><p>Elige rarezas y tipo de carta, revisa el listado y desmarca cualquier publicación que quieras conservar.</p></div>
+    <div class="delist-sync"><span>Inventario consultado</span><strong>{% if refreshed_at %}{{ refreshed_at|date:'d/m/Y H:i' }}{% else %}Sin datos{% endif %}</strong><small>Se valida cada anuncio de nuevo justo antes de retirarlo.</small></div>
+  </section>
+  <section class="panel delist-filter-panel reveal">
+    <form method="get" id="delistFilters">
+      <fieldset><legend>Rareza</legend><div class="delist-choice-row">
+        <label class="delist-choice rarity-limited"><input type="checkbox" name="rarities" value="limited" {% if 'limited' in selected_rarities %}checked{% endif %}><span><i class="fas fa-gem"></i> Amarillas</span></label>
+        <label class="delist-choice rarity-rare"><input type="checkbox" name="rarities" value="rare" {% if 'rare' in selected_rarities %}checked{% endif %}><span><i class="fas fa-gem"></i> Rojas</span></label>
+        <label class="delist-choice rarity-super"><input type="checkbox" name="rarities" value="super_rare" {% if 'super_rare' in selected_rarities %}checked{% endif %}><span><i class="fas fa-gem"></i> Azules</span></label>
+      </div></fieldset>
+      <fieldset><legend>Tipo de carta</legend><div class="delist-choice-row">
+        <label class="delist-choice type-season"><input type="checkbox" name="card_types" value="in_season" {% if 'in_season' in selected_types %}checked{% endif %}><span><i class="fas fa-bolt"></i> In-Season</span></label>
+        <label class="delist-choice type-classic"><input type="checkbox" name="card_types" value="classic" {% if 'classic' in selected_types %}checked{% endif %}><span><i class="far fa-clock"></i> Classic</span></label>
+      </div></fieldset>
+      <button class="btn btn-accent" type="submit"><i class="fas fa-magnifying-glass"></i> Ver publicaciones</button>
+    </form>
+    {% if missing_rarities %}<p class="delist-warning"><i class="fas fa-circle-info"></i> Falta cargar el inventario de alguna rareza elegida. Actualízala primero desde “Vender” para incluirla.</p>{% endif %}
+  </section>
+  <section class="panel delist-results reveal">
+    <div class="delist-results-head"><div><p class="kicker">Revisión</p><h2>{{ listings|length }} publicaciones activas</h2></div>{% if listings %}<label class="delist-toggle-all"><input type="checkbox" id="delistAll" checked><span>Seleccionar todas</span></label>{% endif %}</div>
+    {% if listings %}
+    <div class="delist-grid" id="delistGrid">
+      {% for card in listings %}<label class="delist-card" data-player="{{ card.player }}" data-asset-id="{{ card.asset_id }}" data-offer-id="{{ card.active_offer_id }}">
+        <input class="delist-select" type="checkbox" checked><span class="delist-check"><i class="fas fa-check"></i></span>
+        <span class="delist-player-picture">{% if card.player_picture_url %}<img src="{{ card.player_picture_url }}" alt="" loading="lazy">{% else %}<i class="fas fa-user"></i>{% endif %}</span>
+        <span class="delist-card-copy"><strong>{{ card.player }}</strong><small>{% if card.team_picture_url %}<img src="{{ card.team_picture_url }}" alt="">{% endif %} {{ card.team }}</small><em><b class="delist-rarity is-{{ card.rarity }}"></b>{% if card.rarity == 'limited' %}Limited{% elif card.rarity == 'rare' %}Rare{% else %}Super Rare{% endif %} · {% if card.in_season %}In-Season{% else %}Classic{% endif %} · #{{ card.serial_number|default:'-' }}</em></span>
+        <span class="delist-price">{% if card.active_offer_eur != None %}<strong>{{ card.active_offer_eur|floatformat:2 }} €</strong>{% else %}<strong>Activa</strong>{% endif %}</span>
+      </label>{% endfor %}
+    </div>
+    <div class="delist-actionbar"><span><strong id="delistCount">{{ listings|length }}</strong> publicaciones seleccionadas</span><button type="button" class="btn btn-danger" id="reviewDelists"><i class="fas fa-tag-circle-xmark"></i> Revisar retirada</button></div>
+    {% else %}<div class="delist-empty"><i class="fas fa-tags"></i><h3>No hay publicaciones con esta selección</h3><p>Prueba otra combinación o actualiza antes el inventario desde la pantalla de ventas.</p></div>{% endif %}
+  </section>
+</div>
+<div class="sales-modal" id="delistModal" hidden><div class="sales-modal-backdrop" data-close-delist></div><section class="sales-modal-card delist-modal-card" role="dialog" aria-modal="true" aria-labelledby="delistModalTitle">
+  <button class="sales-modal-close" type="button" data-close-delist aria-label="Cerrar">×</button><h2 id="delistModalTitle"><i class="fas fa-shield-halved"></i> Confirmar retirada</h2><p>Estas cartas dejarán de estar a la venta. El proceso continuará en segundo plano aunque cambies de página.</p><div id="delistReviewList" class="sales-review-list delist-review-list"></div><div class="btn-row sales-modal-actions"><button class="btn btn-secondary" type="button" data-close-delist>Volver</button><button class="btn btn-danger" type="button" id="confirmDelists"><i class="fas fa-tag-circle-xmark"></i> Retirar seleccionadas</button></div>
+</section></div><div class="sales-toasts" id="delistToasts" aria-live="polite"></div>
+<script>
+(function () {
+  var csrf = '{{ csrf_token }}', cards = Array.prototype.slice.call(document.querySelectorAll('.delist-card')), toggleAll = document.getElementById('delistAll'), modal = document.getElementById('delistModal'), confirmButton = document.getElementById('confirmDelists');
+  function selectedCards() { return cards.filter(function (card) { return card.querySelector('.delist-select').checked; }); }
+  function updateSelection() { var selected = selectedCards().length, count = document.getElementById('delistCount'), review = document.getElementById('reviewDelists'); if (count) count.textContent = selected; if (toggleAll) { toggleAll.checked = selected === cards.length; toggleAll.indeterminate = selected > 0 && selected < cards.length; } if (review) review.disabled = selected === 0; }
+  cards.forEach(function (card) { card.querySelector('.delist-select').addEventListener('change', updateSelection); });
+  if (toggleAll) toggleAll.addEventListener('change', function () { cards.forEach(function (card) { card.querySelector('.delist-select').checked = toggleAll.checked; }); updateSelection(); });
+  function closeModal() { if (!modal) return; modal.hidden = true; document.body.classList.remove('modal-open'); }
+  function openReview() { var selected = selectedCards(); if (!selected.length) return; var list = document.getElementById('delistReviewList'); list.innerHTML = ''; selected.forEach(function (card) { var row = document.createElement('div'); row.className = 'delist-review-item'; row.innerHTML = '<span>' + card.querySelector('.delist-player-picture').innerHTML + '</span><strong></strong><button type="button" aria-label="Quitar del resumen"><i class="fas fa-xmark"></i></button>'; row.querySelector('strong').textContent = card.dataset.player; row.querySelector('button').addEventListener('click', function () { card.querySelector('.delist-select').checked = false; row.remove(); updateSelection(); if (!selectedCards().length) closeModal(); }); list.appendChild(row); }); modal.hidden = false; document.body.classList.add('modal-open'); }
+  var reviewButton = document.getElementById('reviewDelists'); if (reviewButton) reviewButton.addEventListener('click', openReview); document.querySelectorAll('[data-close-delist]').forEach(function (button) { button.addEventListener('click', closeModal); });
+  function parseJson(response) { return response.text().then(function (text) { try { return JSON.parse(text); } catch (_) { throw new Error('El servidor no devolvió una respuesta válida.'); } }); }
+  function uuid() { return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) { var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }); }
+  function showToast(kind, title, detail) { var toast = document.createElement('article'); toast.className = 'sales-toast ' + (kind === 'error' ? 'is-error' : 'is-success'); toast.innerHTML = '<i class="fas ' + (kind === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check') + '"></i><div><strong></strong><p></p></div>'; toast.querySelector('strong').textContent = title; toast.querySelector('p').textContent = detail || ''; document.getElementById('delistToasts').appendChild(toast); setTimeout(function () { toast.remove(); }, 12000); return toast; }
+  function poll(jobId, toast) { fetch('{% url "delist_jobs_status" %}?ids=' + jobId, { credentials: 'same-origin' }).then(parseJson).then(function (body) { var job = body.jobs[0]; if (!job) return; if (job.status === 'queued' || job.status === 'running') { setTimeout(function () { poll(jobId, toast); }, 2500); return; } var failed = job.items.filter(function (item) { return item.error; }); toast.className = 'sales-toast ' + (failed.length ? 'is-error' : 'is-success'); toast.querySelector('i').className = 'fas ' + (failed.length ? 'fa-circle-exclamation' : 'fa-circle-check'); toast.querySelector('strong').textContent = failed.length ? job.success + ' retiradas · ' + job.failure + ' con error' : job.success + ' publicaciones retiradas'; toast.querySelector('p').textContent = failed.map(function (item) { return item.player + ': ' + item.error; }).join(' · '); if (!failed.length) setTimeout(function () { location.reload(); }, 1400); }).catch(function () { setTimeout(function () { poll(jobId, toast); }, 5000); }); }
+  if (confirmButton) confirmButton.addEventListener('click', function () { var selected = selectedCards(); if (!selected.length) return; confirmButton.disabled = true; confirmButton.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Iniciando…'; var data = new FormData(); data.append('csrfmiddlewaretoken', csrf); data.append('confirm', 'on'); data.append('request_key', uuid()); data.append('listings', JSON.stringify(selected.map(function (card) { return { asset_id: card.dataset.assetId, offer_id: card.dataset.offerId }; }))); fetch('{% url "enqueue_batch_delists" %}', { method: 'POST', body: data, credentials: 'same-origin' }).then(function (response) { return parseJson(response).then(function (body) { if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : 'Revisa las publicaciones seleccionadas.'); return body; }); }).then(function (body) { closeModal(); var toast = showToast('success', selected.length + ' retiradas en proceso', 'Puedes seguir usando la aplicación. Te avisaremos al terminar.'); poll(body.job_id, toast); }).catch(function (error) { showToast('error', 'No se pudo iniciar la retirada', error.message); }).finally(function () { confirmButton.disabled = false; confirmButton.innerHTML = '<i class="fas fa-tag-circle-xmark"></i> Retirar seleccionadas'; }); });
+  updateSelection();
+})();
+</script>
+{% endblock %}

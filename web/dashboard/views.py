@@ -27,9 +27,10 @@ from web_services.config_files import SorarePaths, load_telegram_alert_payload, 
 from web_services.process_runner import BidRequest, run_auction_value_alert, run_bid_scheduler, run_telegram_alert
 from web_services.movement_history import build_crafting_history, build_trade_cycles
 from web_services.sales_inventory import collection_display_name
-from .forms import BatchBidForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
+from .forms import BatchBidForm, BatchDelistForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
 from .models import (
     AuctionFilterPreset, AuctionRefreshJob, BidBatchItem, BidBatchJob, FavoritePlayer,
+    DelistBatchItem, DelistBatchJob,
     InstantPurchaseRefreshJob, InstantPurchaseSnapshot, MovementSnapshot, MovementSyncJob,
     PublicRewardSnapshot, PublicRewardSyncJob,
     OpportunityRefreshJob, OpportunitySnapshot, SaleBatchItem, SaleBatchJob,
@@ -1474,6 +1475,101 @@ def sales_jobs_status(request):
             "error": job.error,
         } for job in refreshes],
     })
+
+
+def delist_workbench(request):
+    allowed_rarities = {"limited", "rare", "super_rare"}
+    allowed_types = {"in_season", "classic"}
+    selected_rarities = [value for value in request.GET.getlist("rarities") if value in allowed_rarities]
+    selected_types = [value for value in request.GET.getlist("card_types") if value in allowed_types]
+    if not selected_rarities:
+        selected_rarities = ["rare"]
+    if not selected_types:
+        selected_types = ["in_season"]
+
+    inventories = {inventory.rarity: inventory for inventory in SalesInventory.objects.all()}
+    listings = []
+    for rarity in selected_rarities:
+        inventory = inventories.get(rarity)
+        if not inventory:
+            continue
+        for card in inventory.cards:
+            card_type = "in_season" if card.get("in_season") else "classic"
+            if card_type not in selected_types or not card.get("active_listing"):
+                continue
+            listings.append(card)
+    listings.sort(key=lambda card: (str(card.get("player") or "").casefold(), card.get("serial_number") or 0))
+
+    refreshed_at = min(
+        (inventories[rarity].refreshed_at for rarity in selected_rarities if rarity in inventories and inventories[rarity].refreshed_at),
+        default=None,
+    )
+    return render(request, "dashboard/delist.html", {
+        "listings": listings,
+        "selected_rarities": selected_rarities,
+        "selected_types": selected_types,
+        "missing_rarities": [rarity for rarity in selected_rarities if rarity not in inventories],
+        "refreshed_at": refreshed_at,
+    })
+
+
+@require_POST
+def enqueue_batch_delists(request):
+    form = BatchDelistForm(request.POST)
+    if not form.is_valid():
+        return JsonResponse({"error": form.errors.get_json_data()}, status=400)
+    try:
+        request_key = uuid.UUID(request.POST.get("request_key", ""))
+    except ValueError:
+        return JsonResponse({"error": "La solicitud de retirada no es válida."}, status=400)
+    existing = DelistBatchJob.objects.filter(user=request.user, request_key=request_key).first()
+    if existing:
+        return JsonResponse({"job_id": existing.id, "status": existing.status, "total": existing.total_count}, status=202)
+
+    cards_by_asset = {
+        card.get("asset_id"): card
+        for inventory in SalesInventory.objects.all()
+        for card in inventory.cards
+        if card.get("asset_id")
+    }
+    items = []
+    for position, listing in enumerate(form.cleaned_data["listings"], start=1):
+        card = cards_by_asset.get(listing["asset_id"])
+        if not card or not card.get("active_listing"):
+            return JsonResponse({"error": "Una de las cartas ya no figura a la venta. Recarga el listado."}, status=409)
+        if listing["offer_id"] and card.get("active_offer_id") != listing["offer_id"]:
+            return JsonResponse({"error": f"La publicación de {card.get('player') or 'una carta'} ha cambiado. Recarga el listado."}, status=409)
+        items.append((position, listing, card))
+
+    with transaction.atomic():
+        job = DelistBatchJob.objects.create(user=request.user, request_key=request_key, total_count=len(items))
+        DelistBatchItem.objects.bulk_create([
+            DelistBatchItem(
+                job=job,
+                position=position,
+                asset_id=listing["asset_id"],
+                offer_id=listing["offer_id"],
+                player_name=card.get("player") or "Jugador",
+                rarity=card.get("rarity") or "",
+            )
+            for position, listing, card in items
+        ])
+    return JsonResponse({"job_id": job.id, "status": job.status, "total": job.total_count}, status=202)
+
+
+@require_GET
+def delist_jobs_status(request):
+    raw_ids = [value for value in request.GET.get("ids", "").split(",") if value.isdigit()]
+    jobs = DelistBatchJob.objects.filter(user=request.user)
+    jobs = jobs.filter(id__in=raw_ids) if raw_ids else jobs.order_by("-created_at")[:10]
+    return JsonResponse({"jobs": [{
+        "id": job.id,
+        "status": job.status,
+        "total": job.total_count,
+        "success": job.success_count,
+        "failure": job.failure_count,
+        "items": [{"player": item.player_name, "status": item.status, "error": item.error} for item in job.items.all()],
+    } for job in jobs]})
 
 
 def auctions_list(request):

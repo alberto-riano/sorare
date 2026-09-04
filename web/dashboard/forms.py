@@ -149,3 +149,31 @@ class BatchSaleForm(forms.Form):
                 "duration_days": duration_days,
             })
         return sales
+
+
+class BatchDelistForm(forms.Form):
+    listings = forms.CharField(widget=forms.HiddenInput)
+    confirm = forms.BooleanField(required=True)
+
+    def clean_listings(self):
+        try:
+            raw_listings = json.loads(self.cleaned_data["listings"])
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise forms.ValidationError("El resumen de retiradas no es válido.") from exc
+        if not isinstance(raw_listings, list) or not 1 <= len(raw_listings) <= 500:
+            raise forms.ValidationError("Selecciona entre 1 y 500 cartas.")
+
+        listings = []
+        seen_assets = set()
+        for raw_listing in raw_listings:
+            if not isinstance(raw_listing, dict):
+                raise forms.ValidationError("Hay una publicación no válida.")
+            asset_id = str(raw_listing.get("asset_id") or "").strip()
+            offer_id = str(raw_listing.get("offer_id") or "").strip()
+            if not asset_id or len(asset_id) > 200 or len(offer_id) > 200:
+                raise forms.ValidationError("Hay una publicación sin identificador válido.")
+            if asset_id in seen_assets:
+                raise forms.ValidationError("La misma carta aparece más de una vez.")
+            seen_assets.add(asset_id)
+            listings.append({"asset_id": asset_id, "offer_id": offer_id})
+        return listings

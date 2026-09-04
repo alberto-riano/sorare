@@ -13,21 +13,21 @@ from django.urls import reverse
 
 import listar_subastas
 import sorare_utils
-from dashboard.forms import BatchBidForm, BatchSaleForm, InlineBidForm
+from dashboard.forms import BatchBidForm, BatchDelistForm, BatchSaleForm, InlineBidForm
 from dashboard.management.commands.process_bid_queue import process_next_job
 from dashboard.management.commands.process_sales_queue import (
     process_next_auction_refresh, process_next_movement_sync, process_next_public_reward_sync,
-    process_next_opportunity_refresh, process_next_refresh, process_next_sale,
+    process_next_opportunity_refresh, process_next_refresh, process_next_sale, process_next_delist,
 )
 from dashboard.models import (
-    AuctionFilterPreset, AuctionRefreshJob, BidBatchItem, BidBatchJob, FavoritePlayer,
+    AuctionFilterPreset, AuctionRefreshJob, BidBatchItem, BidBatchJob, DelistBatchItem, DelistBatchJob, FavoritePlayer,
     MovementSnapshot, MovementSyncJob, PublicRewardSnapshot, PublicRewardSyncJob,
     OpportunityRefreshJob, OpportunitySnapshot, SaleBatchItem, SaleBatchJob,
     SalesInventory, SalesRefreshJob,
 )
-from dashboard.views import auction_price_history, auctions_list
+from dashboard.views import PATHS, auction_price_history, auctions_list
 from sorare_utils import get_latest_prices
-from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler, run_card_sale
+from web_services.process_runner import BidRequest, ScriptResult, bid_error_message, run_bid_scheduler, run_card_delist, run_card_sale
 from web_services.sales_inventory import collection_display_name
 from web_services.movement_history import (
     _account_currency, _crafting_movements_from_chests, _movement_from_group,
@@ -831,6 +831,70 @@ class SalesWorkbenchTests(TestCase):
         self.assertContains(response, "globalSalesProgress")
         job.refresh_from_db()
         self.assertEqual(job.status, SalesRefreshJob.Status.RUNNING)
+
+    def test_delist_page_defaults_to_rare_in_season_and_only_shows_active_listings(self):
+        inventory = SalesInventory.objects.get(rarity="rare")
+        cards = inventory.cards
+        cards[0].update({"active_listing": True, "active_offer_id": "offer-1", "active_offer_eur": 8.5})
+        inventory.cards = cards
+        inventory.save(update_fields=("cards",))
+
+        response = self.client.get(reverse("delist_workbench"))
+
+        self.assertContains(response, "Jugador disponible")
+        self.assertNotContains(response, "Jugador en lineup")
+        self.assertContains(response, "Retirar seleccionadas")
+        self.assertContains(response, 'value="rare" checked')
+        self.assertContains(response, 'value="in_season" checked')
+
+    def test_delist_enqueue_revalidates_offer_and_is_idempotent(self):
+        inventory = SalesInventory.objects.get(rarity="rare")
+        cards = inventory.cards
+        cards[0].update({"active_listing": True, "active_offer_id": "offer-1"})
+        inventory.cards = cards
+        inventory.save(update_fields=("cards",))
+        payload = json.dumps([{"asset_id": "available", "offer_id": "offer-1"}])
+        data = {"listings": payload, "confirm": "on", "request_key": "b0c2fe5b-161b-49bd-8d94-1af0e776704b"}
+
+        response = self.client.post(reverse("enqueue_batch_delists"), data)
+        repeated = self.client.post(reverse("enqueue_batch_delists"), data)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(repeated.json()["job_id"], response.json()["job_id"])
+        self.assertEqual(DelistBatchItem.objects.get().offer_id, "offer-1")
+
+        wrong = self.client.post(reverse("enqueue_batch_delists"), {
+            "listings": json.dumps([{"asset_id": "available", "offer_id": "offer-new"}]),
+            "confirm": "on", "request_key": "8a005f91-6e8b-47a8-8aea-3f778fe70bc4",
+        })
+        self.assertEqual(wrong.status_code, 409)
+
+    @patch("dashboard.management.commands.process_sales_queue.run_card_delist")
+    def test_delist_worker_cancels_expected_offer_and_updates_cache(self, run_delist):
+        inventory = SalesInventory.objects.get(rarity="rare")
+        cards = inventory.cards
+        cards[0].update({"active_listing": True, "active_offer_id": "offer-1", "active_offer_eur": 8.5, "blocked": True, "blocked_reason": "Ya está a la venta"})
+        inventory.cards = cards
+        inventory.save(update_fields=("cards",))
+        job = DelistBatchJob.objects.create(user=self.user, total_count=1)
+        DelistBatchItem.objects.create(job=job, position=1, asset_id="available", offer_id="offer-1", player_name="Jugador disponible", rarity="rare")
+        run_delist.return_value = ScriptResult("mock", 0, "Publicación retirada", "")
+
+        process_next_delist()
+
+        run_delist.assert_called_once_with(PATHS, asset_id="available", expected_offer_id="offer-1")
+        job.refresh_from_db()
+        self.assertEqual(job.status, DelistBatchJob.Status.SUCCEEDED)
+        cached = SalesInventory.objects.get(rarity="rare").cards[0]
+        self.assertFalse(cached["active_listing"])
+        self.assertFalse(cached["blocked"])
+
+    @patch("web_services.process_runner._run_command")
+    def test_card_delist_uses_cancel_mode_and_expected_offer(self, run_command):
+        from web_services.config_files import SorarePaths
+        paths = SorarePaths(repo_root=Path(__file__).resolve().parents[2])
+        run_card_delist(paths, asset_id="asset-1", expected_offer_id="offer-1")
+        self.assertEqual(run_command.call_args.args[0][-3:], ["--cancel-offer", "asset-1", "offer-1"])
 
     @staticmethod
     def _card(asset_id, player, *, in_lineup=False):

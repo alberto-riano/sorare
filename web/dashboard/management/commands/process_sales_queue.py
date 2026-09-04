@@ -6,14 +6,14 @@ from django.db import transaction
 from django.utils import timezone
 
 from dashboard.models import (
-    AuctionRefreshJob, BidBatchItem, MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
+    AuctionRefreshJob, BidBatchItem, DelistBatchItem, DelistBatchJob, MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
     InstantPurchaseRefreshJob, InstantPurchaseSnapshot, OpportunityRefreshJob, OpportunitySnapshot,
     PublicRewardSnapshot, PublicRewardSyncJob,
     SalesInventory, SalesRefreshJob,
 )
 from dashboard.views import PATHS
 from web_services.movement_history import collect_movement_history, collect_public_reward_history
-from web_services.process_runner import run_card_sale, sale_error_message
+from web_services.process_runner import run_card_delist, run_card_sale, sale_error_message
 from web_services.sales_inventory import collect_sales_inventory
 
 
@@ -444,6 +444,72 @@ def process_next_sale():
     return job
 
 
+def _mark_cached_card_as_delisted(item):
+    inventory = SalesInventory.objects.filter(rarity=item.rarity).first()
+    if not inventory:
+        return
+    cards = inventory.cards
+    changed = False
+    for card in cards:
+        if card.get("asset_id") != item.asset_id:
+            continue
+        blocked_reasons = []
+        if card.get("in_lineup"):
+            blocked_reasons.append("En lineup")
+        if card.get("in_vault"):
+            blocked_reasons.append("En vault")
+        card.update({
+            "active_listing": False,
+            "active_offer_id": "",
+            "active_offer_end": "",
+            "active_offer_eur": None,
+            "blocked": bool(blocked_reasons),
+            "blocked_reason": " · ".join(blocked_reasons),
+        })
+        changed = True
+        break
+    if changed:
+        inventory.cards = cards
+        inventory.save(update_fields=("cards",))
+
+
+def process_next_delist():
+    with transaction.atomic():
+        job = DelistBatchJob.objects.select_for_update().filter(status=DelistBatchJob.Status.QUEUED).first()
+        if not job:
+            return None
+        job.status = DelistBatchJob.Status.RUNNING
+        job.started_at = timezone.now()
+        job.save(update_fields=("status", "started_at"))
+
+    successes = failures = 0
+    for item in job.items.all():
+        item.status = DelistBatchItem.Status.RUNNING
+        item.save(update_fields=("status",))
+        try:
+            result = run_card_delist(PATHS, asset_id=item.asset_id, expected_offer_id=item.offer_id)
+            if result.exit_code == 0:
+                item.status = DelistBatchItem.Status.SUCCEEDED
+                successes += 1
+                _mark_cached_card_as_delisted(item)
+            else:
+                item.status = DelistBatchItem.Status.FAILED
+                item.error = sale_error_message(result)[:2000]
+                failures += 1
+        except Exception as exc:
+            item.status = DelistBatchItem.Status.FAILED
+            item.error = f"Error inesperado al retirar la carta: {exc}"[:2000]
+            failures += 1
+        item.save(update_fields=("status", "error"))
+
+    job.success_count = successes
+    job.failure_count = failures
+    job.finished_at = timezone.now()
+    job.status = DelistBatchJob.Status.SUCCEEDED if failures == 0 else (DelistBatchJob.Status.FAILED if successes == 0 else DelistBatchJob.Status.PARTIAL)
+    job.save(update_fields=("status", "success_count", "failure_count", "finished_at"))
+    return job
+
+
 class Command(BaseCommand):
     help = "Actualiza mercado, inventario e historial y procesa ventas en segundo plano"
 
@@ -491,6 +557,15 @@ class Command(BaseCommand):
             job.failure_count = job.items.filter(status=SaleBatchItem.Status.FAILED).count()
             job.finished_at = timezone.now()
             job.save(update_fields=("status", "failure_count", "finished_at"))
+        for job in DelistBatchJob.objects.filter(status=DelistBatchJob.Status.RUNNING):
+            job.items.filter(status__in=(DelistBatchItem.Status.QUEUED, DelistBatchItem.Status.RUNNING)).update(
+                status=DelistBatchItem.Status.FAILED,
+                error="El proceso se interrumpió; comprueba la carta en Sorare antes de volver a intentarlo.",
+            )
+            job.status = DelistBatchJob.Status.FAILED
+            job.failure_count = job.items.filter(status=DelistBatchItem.Status.FAILED).count()
+            job.finished_at = timezone.now()
+            job.save(update_fields=("status", "failure_count", "finished_at"))
 
         while True:
             processed = (
@@ -501,6 +576,7 @@ class Command(BaseCommand):
                 or process_next_movement_sync()
                 or process_next_public_reward_sync()
                 or process_next_sale()
+                or process_next_delist()
             )
             if not options["watch"]:
                 break
