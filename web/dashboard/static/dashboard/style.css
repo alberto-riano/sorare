@@ -113,12 +113,22 @@ nav a:hover {
   background: rgba(255, 255, 255, 0.5);
 }
 
-.nav-settings { position: relative; align-self: center; }
-.nav-settings > summary { display: flex; align-items: center; gap: .45rem; padding: .55rem .9rem; border: 1px solid transparent; border-radius: 999px; cursor: pointer; font-size: .9rem; list-style: none; }
-.nav-settings > summary::-webkit-details-marker { display: none; }
-.nav-settings > summary:hover { border-color: var(--line); background: rgba(255,255,255,.5); }
-.nav-settings > div { position: absolute; z-index: 50; top: calc(100% + .4rem); right: 0; display: grid; min-width: 150px; padding: .35rem; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
-.nav-settings > div a { border-radius: 6px; }
+.nav-dropdown, .user-menu { position: relative; align-self: center; }
+.nav-dropdown > summary, .user-menu > summary { list-style: none; }
+.nav-dropdown > summary::-webkit-details-marker, .user-menu > summary::-webkit-details-marker { display: none; }
+.nav-dropdown > summary { display: flex; align-items: center; gap: .45rem; padding: .55rem .9rem; border: 1px solid transparent; border-radius: 999px; cursor: pointer; font-size: .9rem; transition: 160ms ease; }
+.nav-dropdown > summary:hover, .nav-dropdown[open] > summary { border-color: var(--line); background: rgba(255,255,255,.72); }
+.nav-dropdown-chevron, .user-menu-chevron { margin-left: .05rem; font-size: .58rem !important; transition: transform .16s ease; }
+.nav-dropdown[open] .nav-dropdown-chevron, .user-menu[open] .user-menu-chevron { transform: rotate(180deg); }
+.nav-dropdown-panel, .user-menu-panel { position: absolute; z-index: 50; top: calc(100% + .5rem); display: grid; min-width: 290px; padding: .45rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,253,248,.98); box-shadow: 0 18px 45px rgba(15,23,42,.18); backdrop-filter: blur(16px); }
+.nav-dropdown-panel { left: 50%; transform: translateX(-50%); }
+.nav-dropdown-panel a, .user-menu-panel a { display: grid; grid-template-columns: 34px minmax(0,1fr); gap: .6rem; align-items: center; padding: .58rem .65rem; border: 0; border-radius: 10px; color: var(--ink); text-decoration: none; }
+.nav-dropdown-panel a:hover, .user-menu-panel a:hover { transform: none; border: 0; background: #eef8f6; }
+.nav-dropdown-panel a > i, .user-menu-panel a > i { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: #e3f3f0; color: var(--accent); }
+.nav-dropdown-panel a > span, .user-menu-panel a > span { display: grid; gap: .05rem; }
+.nav-dropdown-panel a strong, .user-menu-panel a strong { font-size: .78rem; }
+.nav-dropdown-panel a small, .user-menu-panel a small { color: var(--muted); font-size: .61rem; font-weight: 500; }
+.nav-dropdown-label { padding: .35rem .65rem .25rem; color: var(--muted); font-size: .57rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 
 .user-badge {
   display: flex;
@@ -131,11 +141,21 @@ nav a:hover {
   font-size: 0.88rem;
   font-weight: 600;
   box-shadow: 0 2px 8px rgba(13, 148, 136, 0.25);
+  border: 0;
+  cursor: pointer;
 }
 
 .user-badge i {
   font-size: 1.1rem;
 }
+
+.user-menu-panel { right: 0; min-width: 255px; }
+.user-menu-panel header { display: grid; gap: .05rem; margin: 0 .35rem .3rem; padding: .45rem .3rem .6rem; border-bottom: 1px solid var(--line); }
+.user-menu-panel header span { color: var(--muted); font-size: .57rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.user-menu-panel header strong { font-size: .85rem; }
+.user-menu-panel form { margin: .35rem .35rem 0; padding-top: .35rem; border-top: 1px solid var(--line); }
+.user-menu-panel form button { display: flex; align-items: center; gap: .55rem; width: 100%; padding: .58rem .65rem; border: 0; border-radius: 9px; background: transparent; color: #b42318; font: 700 .75rem "Space Grotesk",sans-serif; cursor: pointer; }
+.user-menu-panel form button:hover { background: #fff1f2; }
 
 .page {
   width: min(1120px, 95vw);
@@ -224,8 +244,9 @@ nav a:hover {
   .site-header nav { gap: .2rem; }
   .site-header nav > a { justify-content: center; width: 40px; padding: .55rem; }
   .site-header nav > a > span,
-  .nav-settings > summary > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .nav-settings > summary { justify-content: center; width: 40px; padding: .55rem; }
+  .nav-dropdown > summary > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .nav-dropdown > summary { justify-content: center; width: 46px; padding: .55rem; }
+  .nav-dropdown > summary .nav-dropdown-chevron { margin-left: -.2rem; }
 }
 
 .panel {
@@ -1439,15 +1460,15 @@ pre {
   nav {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: repeat(9, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     width: 100%;
     gap: .15rem;
   }
 
-  .nav-settings { width: 100%; }
-  .nav-settings > summary { justify-content: center; min-height: 34px; padding: .4rem 0; border-radius: 8px; }
-  .nav-settings > summary span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .nav-settings > div { position: fixed; top: 112px; right: .7rem; min-width: 165px; }
+  .nav-dropdown { width: 100%; }
+  .nav-dropdown > summary { justify-content: center; min-height: 34px; padding: .4rem 0; border-radius: 8px; }
+  .nav-dropdown > summary span, .nav-dropdown > summary .nav-dropdown-chevron { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .nav-dropdown-panel { position: fixed; top: 100px; right: .7rem; left: .7rem; min-width: 0; transform: none; }
 
   nav a {
     justify-content: center;
@@ -1472,6 +1493,7 @@ pre {
   }
 
   .user-badge > span { display: none; }
+  .user-menu-panel { position: fixed; top: 55px; right: .7rem; left: .7rem; min-width: 0; }
 
   .direct-offer-head { grid-template-columns: 1fr; padding: .7rem; }
   .direct-offer-head h1 { font-size: 1.25rem; }

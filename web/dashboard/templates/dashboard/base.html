@@ -33,47 +33,40 @@
         <i class="fas fa-gem"></i>
         <span>Oportunidades</span>
       </a>
-      <a href="{% url 'instant_purchases' %}">
-        <i class="fas fa-cart-shopping"></i>
-        <span>Compras instantáneas</span>
-      </a>
-      <a href="{% url 'direct_offers' %}">
-        <i class="fas fa-paper-plane"></i>
-        <span>Lanzar oferta</span>
-      </a>
-      <a href="{% url 'sales_workbench' %}">
-        <i class="fas fa-tag"></i>
-        <span>Ventas</span>
-      </a>
-      <a href="{% url 'offers_received' %}">
-        <i class="fas fa-envelope-open-text"></i>
-        <span>Ofertas</span>
-      </a>
+      <details class="nav-dropdown nav-operate">
+        <summary><i class="fas fa-bolt"></i><span>Operar</span><i class="fas fa-chevron-down nav-dropdown-chevron"></i></summary>
+        <div class="nav-dropdown-panel">
+          <span class="nav-dropdown-label">Mercado</span>
+          <a href="{% url 'instant_purchases' %}"><i class="fas fa-cart-shopping"></i><span><strong>Compra instantánea</strong><small>Comprar cartas al precio anunciado</small></span></a>
+          <a href="{% url 'direct_offers' %}"><i class="fas fa-paper-plane"></i><span><strong>Lanzar oferta</strong><small>Enviar una oferta por una carta</small></span></a>
+          <a href="{% url 'sales_workbench' %}"><i class="fas fa-tag"></i><span><strong>Vender</strong><small>Poner tus cartas en el mercado</small></span></a>
+          <a href="{% url 'offers_received' %}"><i class="fas fa-envelope-open-text"></i><span><strong>Ofertas recibidas</strong><small>Revisar propuestas pendientes</small></span></a>
+        </div>
+      </details>
       <a href="{% url 'movements' %}">
         <i class="fas fa-chart-pie"></i>
         <span>Movimientos</span>
       </a>
-      <details class="nav-settings">
-        <summary title="Configuración" aria-label="Configuración"><i class="fas fa-gear"></i><span>Configuración</span></summary>
-        <div>
-          <a href="{% url 'bid_scheduler' %}"><i class="fas fa-gavel"></i><span>Pujas</span></a>
-          <a href="{% url 'refresh_token' %}"><i class="fas fa-key"></i><span>Token</span></a>
-        </div>
-      </details>
     </nav>
-    <div class="user-badge">
-      <i class="fas fa-user-circle"></i>
-      <span>{{ user.username|default:'burguis' }}</span>
-      {% if user.is_authenticated %}
-        <form method="post" action="{% url 'logout' %}" style="display:inline;margin-left:.6rem;">
+    <details class="user-menu">
+      <summary class="user-badge" aria-label="Menú de {{ user.username|default:'burguis' }}">
+        <i class="fas fa-user-circle"></i>
+        <span>{{ user.username|default:'burguis' }}</span>
+        <i class="fas fa-chevron-down user-menu-chevron"></i>
+      </summary>
+      <div class="user-menu-panel">
+        <header><span>Cuenta</span><strong>{{ user.username|default:'burguis' }}</strong></header>
+        <span class="nav-dropdown-label">Configuración</span>
+        <a href="{% url 'bid_scheduler' %}"><i class="fas fa-gavel"></i><span><strong>Pujas programadas</strong><small>Automatización y seguimiento</small></span></a>
+        <a href="{% url 'refresh_token' %}"><i class="fas fa-key"></i><span><strong>Token de Sorare</strong><small>Estado y renovación</small></span></a>
+        {% if user.is_authenticated %}
+        <form method="post" action="{% url 'logout' %}">
           {% csrf_token %}
-          <button type="submit" title="Cerrar sesión"
-                  style="background:none;border:none;color:inherit;cursor:pointer;font-size:1rem;">
-            <i class="fas fa-right-from-bracket"></i>
-          </button>
+          <button type="submit"><i class="fas fa-right-from-bracket"></i><span>Cerrar sesión</span></button>
         </form>
-      {% endif %}
-    </div>
+        {% endif %}
+      </div>
+    </details>
   </header>
 
   <main class="page">
@@ -99,6 +92,20 @@
 
   <script>
   (function () {
+    var dropdowns = Array.prototype.slice.call(document.querySelectorAll('.site-header details'));
+    dropdowns.forEach(function (dropdown) {
+      dropdown.addEventListener('toggle', function () {
+        if (!dropdown.open) return;
+        dropdowns.forEach(function (other) { if (other !== dropdown) other.open = false; });
+      });
+    });
+    document.addEventListener('click', function (event) {
+      dropdowns.forEach(function (dropdown) { if (dropdown.open && !dropdown.contains(event.target)) dropdown.open = false; });
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') dropdowns.forEach(function (dropdown) { dropdown.open = false; });
+    });
+
     var storageKey = 'sorare.sales.refreshJob';
     var box = document.getElementById('globalSalesProgress');
     var knownJobId = Number(localStorage.getItem(storageKey) || 0);

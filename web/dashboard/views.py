@@ -199,8 +199,8 @@ def opportunities(request):
     ))
     selected_team_set = set(selected_team_slugs)
     position_filter = request.GET.get("position", "").strip()
-    focus_rarity = request.GET.get("focus", "limited").strip().lower()
-    focus_rarity = focus_rarity if focus_rarity in {"limited", "rare"} else "limited"
+    focus_rarity = request.GET.get("focus", "rare").strip().lower()
+    focus_rarity = focus_rarity if focus_rarity in {"limited", "rare"} else "rare"
 
     rows = []
     for row in all_rows:
@@ -210,8 +210,8 @@ def opportunities(request):
             continue
         rows.append(row)
 
-    sort = request.GET.get("sort", "floor")
-    sort = sort if sort in {"floor", "discount", "player"} else "floor"
+    sort = request.GET.get("sort", "discount")
+    sort = sort if sort in {"floor", "discount", "player"} else "discount"
     if sort == "player":
         rows.sort(key=lambda row: str(row.get("player") or "").casefold())
     elif sort == "floor":
