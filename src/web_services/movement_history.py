@@ -563,15 +563,15 @@ def _operation_from_trade(trade: dict) -> dict | None:
 def _is_completed_public_trade(trade: dict) -> bool:
     """Valida una fila del historial público sin perder ofertas anonimizadas.
 
-    En ``user.trades`` Sorare conserva ``SETTLED`` para las subastas, pero
-    devuelve ``UNKNOWN`` en ofertas ya ejecutadas de otros managers. En estas
-    últimas, ``transactionDate`` es la señal pública de que la operación se
-    completó.
+    En ``user.trades`` Sorare puede devolver ``UNKNOWN`` tanto para ofertas
+    como para subastas antiguas ya ejecutadas. ``transactionDate`` confirma
+    que la fila pertenece al histórico completado y, para una subasta, además
+    exigimos el ``bestBid`` ganador que necesita el normalizador.
     """
     if not trade.get("transactionDate"):
         return False
     if trade.get("__typename") == "TokenAuction":
-        return str(trade.get("dealStatus") or "").upper() == "SETTLED"
+        return bool((trade.get("bestBid") or {}).get("id"))
     return trade.get("__typename") in {"TokenOffer", "TokenPrimaryOffer"}
 
 

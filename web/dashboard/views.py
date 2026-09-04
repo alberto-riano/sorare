@@ -1069,14 +1069,22 @@ def enqueue_movements_sync(request):
 @require_GET
 def movements_sync_status(request):
     selected_manager = request.GET.get("manager", "me")
+    requested_job_id = request.GET.get("job_id")
     if selected_manager == PUBLIC_REWARD_MANAGER_SLUG:
-        job = PublicRewardSyncJob.objects.filter(
-            manager_slug=selected_manager,
-        ).order_by("-created_at").first()
+        jobs = PublicRewardSyncJob.objects.filter(manager_slug=selected_manager)
+        if requested_job_id and str(requested_job_id).isdigit():
+            jobs = jobs.filter(pk=int(requested_job_id))
+        job = jobs.order_by("-created_at").first()
+        snapshot = PublicRewardSnapshot.objects.filter(manager_slug=selected_manager).first()
     else:
-        job = MovementSyncJob.objects.filter(user=request.user).order_by("-created_at").first()
+        jobs = MovementSyncJob.objects.filter(user=request.user)
+        if requested_job_id and str(requested_job_id).isdigit():
+            jobs = jobs.filter(pk=int(requested_job_id))
+        job = jobs.order_by("-created_at").first()
+        snapshot = MovementSnapshot.objects.filter(user=request.user).first()
     if not job:
         return JsonResponse({"job": None})
+    snapshot_start = snapshot.history_start_date if snapshot else None
     return JsonResponse({"job": {
         "id": job.id,
         "status": job.status,
@@ -1084,6 +1092,9 @@ def movements_sync_status(request):
         "processed_count": job.processed_count,
         "progress_label": job.progress_label,
         "error": job.error,
+        "requested_start_date": job.requested_start_date.isoformat(),
+        "snapshot_start_date": snapshot_start.isoformat() if snapshot_start else None,
+        "coverage_ready": bool(snapshot_start and snapshot_start <= job.requested_start_date),
         "finished_at": job.finished_at.isoformat() if job.finished_at else None,
     }})
 

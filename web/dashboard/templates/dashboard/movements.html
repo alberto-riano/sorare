@@ -49,7 +49,7 @@
   {% if history_rebuild_needed %}
   <section class="panel history-coverage-warning reveal">
     <i class="fas fa-clock-rotate-left"></i>
-    <div><strong>Falta reconstruir el tramo anterior</strong><p>El historial guardado empieza el {{ history_start_date|date:'d/m/Y' }}. Para incluir movimientos desde el {{ requested_start_date|date:'d/m/Y' }} hay que consultar páginas anteriores de Sorare.</p></div>
+    <div><strong>Falta reconstruir el tramo anterior</strong><p>El historial guardado empieza el {{ history_start_date|date:'d/m/Y' }}. Para incluir movimientos desde el {{ requested_start_date|date:'d/m/Y' }} hay que consultar páginas anteriores de Sorare.</p><small id="historyRebuildStatus"></small></div>
     <button class="btn btn-accent" id="expandMovementHistory" type="button"><i class="fas fa-arrows-rotate"></i> Recalcular desde {{ requested_start_date|date:'d/m' }}</button>
   </section>
   {% endif %}
@@ -199,25 +199,32 @@
 (function () {
   var button = document.getElementById('syncMovements');
   var expandButton = document.getElementById('expandMovementHistory');
+  var rebuildStatus = document.getElementById('historyRebuildStatus');
   var text = document.getElementById('movementSyncText');
   var csrf = '{{ csrf_token }}';
   var polling = {{ active_sync|yesno:'true,false' }};
-  function poll() {
-    fetch('{% url "movements_sync_status" %}?manager={{ selected_manager|urlencode }}', {credentials: 'same-origin'})
+  function poll(jobId, expectedStart) {
+    var statusUrl = '{% url "movements_sync_status" %}?manager={{ selected_manager|urlencode }}';
+    if (jobId) statusUrl += '&job_id=' + encodeURIComponent(jobId);
+    fetch(statusUrl, {credentials: 'same-origin'})
       .then(function (response) { return response.json(); })
       .then(function (payload) {
         var job = payload.job;
         if (!job) return;
         text.textContent = job.progress_label || 'Procesando…';
-        if (job.status === 'queued' || job.status === 'running') { window.setTimeout(poll, 2200); return; }
-        if (job.status === 'succeeded') { window.location.reload(); return; }
+        if (rebuildStatus && expectedStart) rebuildStatus.textContent = job.progress_label || 'Procesando…';
+        if (job.status === 'queued' || job.status === 'running') { window.setTimeout(function () { poll(jobId, expectedStart); }, 2200); return; }
+        if (job.status === 'succeeded' && (!expectedStart || job.coverage_ready)) { window.location.reload(); return; }
         button.disabled = false;
         button.querySelector('i').classList.remove('fa-spin');
         button.querySelector('span').textContent = 'Reintentar';
-        text.textContent = job.error || 'No se pudo actualizar';
-      }).catch(function () { window.setTimeout(poll, 3000); });
+        var failure = job.error || (expectedStart ? 'El proceso terminó, pero no amplió la cobertura solicitada.' : 'No se pudo actualizar');
+        text.textContent = failure;
+        if (rebuildStatus) rebuildStatus.textContent = failure;
+        if (expandButton) expandButton.disabled = false;
+      }).catch(function () { window.setTimeout(function () { poll(jobId, expectedStart); }, 3000); });
   }
-  if (polling) poll();
+  if (polling) poll(null, null);
   function startSync(startDate) {
     button.disabled = true;
     button.querySelector('i').classList.add('fa-spin');
@@ -226,7 +233,7 @@
     var body = startDate ? 'start_date=' + encodeURIComponent(startDate) : '';
     fetch('{% url "enqueue_movements_sync" %}?manager={{ selected_manager|urlencode }}', {method: 'POST', credentials: 'same-origin', headers: {'X-CSRFToken': csrf, 'Content-Type': 'application/x-www-form-urlencoded'}, body: body})
       .then(function (response) { if (!response.ok) throw new Error(); return response.json(); })
-      .then(function () { poll(); })
+      .then(function (payload) { poll(payload.job_id, startDate || null); })
       .catch(function () { button.disabled = false; if (expandButton) expandButton.disabled = false; text.textContent = 'No se pudo iniciar la actualización.'; });
   }
   button.addEventListener('click', function () {

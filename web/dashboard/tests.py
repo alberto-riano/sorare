@@ -1659,7 +1659,9 @@ class MovementHistoryTests(TestCase):
         card = self._api_card(player="Rodrigo Riquelme")
         purchase = {
             "__typename": "TokenAuction", "id": "auction-riquelme",
-            "transactionDate": "2026-08-11T08:22:44Z", "dealStatus": "SETTLED",
+            # El endpoint público real devuelve UNKNOWN para esta subasta
+            # antigua aunque figure entre las transacciones completadas.
+            "transactionDate": "2026-08-11T08:22:44Z", "dealStatus": "UNKNOWN",
             "anyCards": [{"assetId": card["assetId"]}],
             "bestBid": {
                 "id": "bid-riquelme", "fiatPayment": True,
@@ -1711,6 +1713,7 @@ class MovementHistoryTests(TestCase):
         result = collect_public_reward_history("blasco93", headers={"Authorization": "test"})
 
         self.assertTrue(_is_completed_public_trade(sale))
+        self.assertTrue(_is_completed_public_trade(purchase))
         self.assertEqual([row["direction"] for row in result["movements"]], ["sale"])
         self.assertEqual(build_trade_cycles(result["movements"]), [])
 
@@ -1784,6 +1787,45 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(response.status_code, 202)
         job = PublicRewardSyncJob.objects.get(pk=response.json()["job_id"])
         self.assertEqual(job.requested_start_date, date(2026, 8, 1))
+
+    def test_public_recalculation_status_tracks_exact_job_and_coverage(self):
+        PublicRewardSnapshot.objects.create(
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
+            history_start_date=date(2026, 8, 12), movements=[],
+        )
+        old_job = PublicRewardSyncJob.objects.create(
+            user=self.user, manager_slug="blasco93",
+            requested_start_date=date(2026, 8, 12),
+            status=PublicRewardSyncJob.Status.SUCCEEDED,
+        )
+        rebuild = PublicRewardSyncJob.objects.create(
+            user=self.user, manager_slug="blasco93",
+            requested_start_date=date(2026, 8, 1),
+            status=PublicRewardSyncJob.Status.RUNNING,
+        )
+
+        response = self.client.get(
+            reverse("movements_sync_status"),
+            {"manager": "blasco93", "job_id": rebuild.pk},
+        )
+
+        payload = response.json()["job"]
+        self.assertNotEqual(payload["id"], old_job.pk)
+        self.assertEqual(payload["id"], rebuild.pk)
+        self.assertEqual(payload["requested_start_date"], "2026-08-01")
+        self.assertEqual(payload["snapshot_start_date"], "2026-08-12")
+        self.assertFalse(payload["coverage_ready"])
+
+        snapshot = PublicRewardSnapshot.objects.get(manager_slug="blasco93")
+        snapshot.history_start_date = date(2026, 8, 1)
+        snapshot.save(update_fields=("history_start_date",))
+        rebuild.status = PublicRewardSyncJob.Status.SUCCEEDED
+        rebuild.save(update_fields=("status",))
+        payload = self.client.get(
+            reverse("movements_sync_status"),
+            {"manager": "blasco93", "job_id": rebuild.pk},
+        ).json()["job"]
+        self.assertTrue(payload["coverage_ready"])
 
     def test_reward_manager_selector_uses_cached_public_rewards(self):
         PublicRewardSnapshot.objects.create(
