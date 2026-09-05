@@ -29,6 +29,14 @@ class TelegramSettingsForm(forms.Form):
         widget=forms.CheckboxSelectMultiple,
         initial=("rare", "super_rare"),
     )
+    market_alert_enabled = forms.BooleanField(required=False)
+    market_alert_min_saving_percent = forms.DecimalField(
+        min_value=0, max_value=95, decimal_places=1, max_digits=4, initial=25,
+    )
+    market_alert_min_limited_value_eur = forms.DecimalField(
+        min_value=0, max_value=10000, decimal_places=2, max_digits=8, initial=1,
+    )
+    market_alert_min_comparables = forms.IntegerField(min_value=0, max_value=10, initial=0)
     notify_mode = forms.ChoiceField(choices=NOTIFY_MODE_CHOICES)
     notify_drop_eur = forms.DecimalField(min_value=0, decimal_places=2, max_digits=8)
     send_all_offers_below_threshold = forms.BooleanField(required=False)

@@ -84,12 +84,18 @@ creado una API key en los ajustes de desarrollador de Sorare, puedes añadirla
 como `APIKEY=...` a `config/config.txt`; es opcional, pero aumenta los límites
 de consulta del análisis de mercado.
 
+El detector de nuevas ventas consulta cada 30 minutos únicamente los anuncios
+creados o modificados desde la comprobación anterior. Su estado para evitar
+avisos duplicados se conserva en `output/market_listing_alert_state.json`.
+
 Comandos útiles:
 
 ```bash
 sudo systemctl status sorare-web
 sudo systemctl status sorare-sales-worker
+sudo systemctl status sorare-market-listing-alert.timer
 sudo journalctl -u sorare-web -n 100 --no-pager
 sudo journalctl -u sorare-sales-worker -n 100 --no-pager
+sudo journalctl -u sorare-market-listing-alert.service -n 100 --no-pager
 sudo nginx -t
 ```

@@ -6,7 +6,7 @@
 <section class="panel reveal">
   <p class="kicker">Centro de avisos</p>
   <h1>Alertas Telegram</h1>
-  <p>Controla por separado las oportunidades de subasta y el seguimiento de jugadores concretos.</p>
+  <p>Controla por separado las subastas, los nuevos anuncios del mercado y el seguimiento de jugadores concretos.</p>
 </section>
 
 <form method="post" class="alerts-form">
@@ -52,6 +52,27 @@
         <button class="btn" type="submit" name="action" value="save_only">Guardar configuración</button>
         <button class="btn btn-accent" type="submit" name="action" value="check_auctions">Guardar + comprobar ahora</button>
       </div>
+    </div>
+  </section>
+
+  <section class="panel form-panel alert-module alert-module-market reveal" style="animation-delay:150ms;">
+    <div class="subsection-heading">
+      <div>
+        <p class="kicker">Nuevas ventas cada 30 minutos</p>
+        <h2><i class="fas fa-tags"></i> Gangas recién publicadas</h2>
+        <p>Detecta nuevas Rare In-Season de LaLiga y compara su precio con otras ventas activas, pujas y ofertas públicas completadas, y el valor equivalente Limited.</p>
+      </div>
+      <label class="toggle alert-master-toggle">{{ form.market_alert_enabled }} <span>Activar avisos</span></label>
+    </div>
+    <div class="market-alert-settings">
+      <label><span>Ahorro mínimo</span><span class="input-with-suffix">{{ form.market_alert_min_saving_percent }} <b>%</b></span></label>
+      <label><span>Valor mínimo Limited</span><span class="input-with-suffix">{{ form.market_alert_min_limited_value_eur }} <b>€</b></span></label>
+      <label><span>Ventas/pujas mínimas</span><span class="input-with-suffix">{{ form.market_alert_min_comparables }} <b>comparables</b></span></label>
+      <div class="market-alert-fixed"><i class="fas fa-clock"></i><span><strong>Cada 30 min</strong><small>Solo consulta anuncios nuevos o modificados</small></span></div>
+    </div>
+    <div class="alert-module-footer">
+      <p class="alert-last-run"><i class="fas fa-clock-rotate-left"></i>{% if market_alert_status.last_run_display %} Última comprobación: <strong>{{ market_alert_status.last_run_display }}</strong> · {{ market_alert_status.new_candidates|default:0 }} nuevas · {{ market_alert_status.alerts_sent|default:0 }} avisos{% if market_alert_status.failure_count %} · {{ market_alert_status.failure_count }} pendientes de reintento{% endif %}{% else %} Todavía no se ha registrado ninguna comprobación.{% endif %}</p>
+      <div class="btn-row"><button class="btn" type="submit" name="action" value="save_only">Guardar configuración</button><button class="btn btn-accent" type="submit" name="action" value="check_market"><i class="fas fa-satellite-dish"></i> Guardar + comprobar ahora</button></div>
     </div>
   </section>
 
@@ -141,10 +162,14 @@
   .alerts-form { display:grid; gap:1.25rem; }
   .alert-module { margin:0; }
   .alert-module-auctions { border-top:4px solid #6d4aff; }
+  .alert-module-market { border-top:4px solid #e53935; }
   .alert-module-players { border-top:4px solid var(--accent); }
   .alert-master-toggle { flex:0 0 auto; padding:.8rem 1rem; border:1px solid var(--line); border-radius:12px; background:#fff; }
   .auction-alert-settings { display:grid; grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) minmax(300px,1.35fr); gap:1rem; align-items:end; }
-  .auction-alert-settings > label > span:first-child, .rarity-alert-picker legend { display:block; margin-bottom:.45rem; color:var(--muted); font-weight:700; }
+  .market-alert-settings { display:grid; grid-template-columns:repeat(3,minmax(150px,1fr)) minmax(210px,1.1fr); gap:1rem; align-items:end; }
+  .auction-alert-settings > label > span:first-child, .market-alert-settings > label > span:first-child, .rarity-alert-picker legend { display:block; margin-bottom:.45rem; color:var(--muted); font-weight:700; }
+  .market-alert-fixed { display:flex; align-items:center; gap:.65rem; min-height:46px; padding:.55rem .7rem; border:1px solid var(--line); border-radius:10px; background:#fff; }
+  .market-alert-fixed > i { color:#e53935; }.market-alert-fixed span { display:grid; }.market-alert-fixed small { color:var(--muted); font-size:.65rem; }
   .rarity-alert-picker { min-width:0; margin:0; padding:0; border:0; }
   .rarity-alert-options { display:flex; gap:.65rem; }
   .rarity-alert-option { display:flex; flex:1 1 0; align-items:center; gap:.55rem; min-width:0; min-height:46px; padding:.65rem .8rem; border:1px solid var(--line); border-radius:10px; background:#fff; font-weight:700; cursor:pointer; }
@@ -155,7 +180,8 @@
   .alert-module-footer { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-top:1.25rem; padding-top:1rem; border-top:1px solid var(--line); }
   .alert-last-run { margin:0; color:var(--muted); }
   @media (max-width:720px) { .subsection-heading { align-items:flex-start; flex-direction:column; gap:.8rem; } }
-  @media (max-width:900px) { .auction-alert-settings { grid-template-columns:1fr; } .alert-module-footer { align-items:flex-start; flex-direction:column; } }
+  @media (max-width:900px) { .auction-alert-settings, .market-alert-settings { grid-template-columns:1fr 1fr; } .alert-module-footer { align-items:flex-start; flex-direction:column; } }
+  @media (max-width:620px) { .market-alert-settings { grid-template-columns:1fr; } }
   @media (max-width:520px) { .rarity-alert-options { flex-direction:column; } }
 </style>
 {% endblock %}

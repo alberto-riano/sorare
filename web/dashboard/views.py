@@ -24,7 +24,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from web_services.config_files import SorarePaths, load_telegram_alert_payload, save_telegram_alert_payload
-from web_services.process_runner import BidRequest, run_auction_value_alert, run_bid_scheduler, run_telegram_alert
+from web_services.process_runner import BidRequest, run_auction_value_alert, run_bid_scheduler, run_market_listing_alert, run_telegram_alert
 from web_services.movement_history import build_crafting_history, build_trade_cycles
 from web_services.sales_inventory import collection_display_name
 from .forms import BatchBidForm, BatchDelistForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
@@ -1109,6 +1109,10 @@ def telegram_alerts(request):
         "auction_alert_rarities": [
             rarity.strip() for rarity in initial_source["AUCTION_ALERT_RARITIES"].split(",") if rarity.strip()
         ],
+        "market_alert_enabled": initial_source["MARKET_ALERT_ENABLED"].lower() == "true",
+        "market_alert_min_saving_percent": initial_source["MARKET_ALERT_MIN_SAVING_PERCENT"],
+        "market_alert_min_limited_value_eur": initial_source["MARKET_ALERT_MIN_LIMITED_VALUE_EUR"],
+        "market_alert_min_comparables": initial_source["MARKET_ALERT_MIN_COMPARABLES"],
         "notify_mode": initial_source["NOTIFY_MODE"],
         "notify_drop_eur": initial_source["NOTIFY_DROP_EUR"],
         "send_all_offers_below_threshold": initial_source["SEND_ALL_OFFERS_BELOW_THRESHOLD"].lower() == "true",
@@ -1134,6 +1138,10 @@ def telegram_alerts(request):
                     "AUCTION_ALERT_MINUTES": str(data["auction_alert_minutes"]),
                     "AUCTION_ALERT_MIN_SAVING_PERCENT": str(data["auction_alert_min_saving_percent"]),
                     "AUCTION_ALERT_RARITIES": ",".join(data["auction_alert_rarities"]),
+                    "MARKET_ALERT_ENABLED": _to_bool_text(bool(data["market_alert_enabled"])),
+                    "MARKET_ALERT_MIN_SAVING_PERCENT": str(data["market_alert_min_saving_percent"]),
+                    "MARKET_ALERT_MIN_LIMITED_VALUE_EUR": str(data["market_alert_min_limited_value_eur"]),
+                    "MARKET_ALERT_MIN_COMPARABLES": str(data["market_alert_min_comparables"]),
                     "NOTIFY_MODE": data["notify_mode"],
                     "NOTIFY_DROP_EUR": str(data["notify_drop_eur"]),
                     "SEND_ALL_OFFERS_BELOW_THRESHOLD": _to_bool_text(bool(data["send_all_offers_below_threshold"])),
@@ -1155,6 +1163,12 @@ def telegram_alerts(request):
                     messages.success(request, "Configuración guardada y subastas comprobadas.")
                 else:
                     messages.error(request, "Configuración guardada, pero falló la comprobación de subastas.")
+            elif action == "check_market":
+                script_result = run_market_listing_alert(PATHS)
+                if script_result.exit_code == 0:
+                    messages.success(request, "Configuración guardada y nuevas ventas comprobadas.")
+                else:
+                    messages.error(request, "Configuración guardada, pero falló la comprobación de nuevas ventas.")
             elif action == "save_and_run":
                 script_result = run_telegram_alert(PATHS)
                 if script_result.exit_code == 0:
@@ -1185,6 +1199,14 @@ def telegram_alerts(request):
     except (OSError, ValueError, TypeError):
         alert_status = {}
 
+    market_alert_status = {}
+    try:
+        market_alert_status = json.loads((REPO_ROOT / "output" / "market_listing_alert_state.json").read_text(encoding="utf-8"))
+        last_run = datetime.fromisoformat(str(market_alert_status.get("last_run_at") or "").replace("Z", "+00:00"))
+        market_alert_status["last_run_display"] = last_run.astimezone(ZoneInfo("Europe/Madrid")).strftime("%d/%m/%Y %H:%M:%S")
+    except (OSError, ValueError, TypeError):
+        market_alert_status = {}
+
     return render(
         request,
         "dashboard/telegram.html",
@@ -1192,6 +1214,7 @@ def telegram_alerts(request):
             "form": form,
             "script_result": script_result,
             "alert_status": alert_status,
+            "market_alert_status": market_alert_status,
         },
     )
 

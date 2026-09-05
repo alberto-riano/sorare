@@ -104,6 +104,13 @@ def run_auction_value_alert(paths: SorarePaths, *, dry_run: bool = False) -> Scr
     return _run_command(cmd, paths.repo_root)
 
 
+def run_market_listing_alert(paths: SorarePaths, *, dry_run: bool = False) -> ScriptResult:
+    cmd = [sys.executable, str(paths.src_dir / "market_listing_alert.py")]
+    if dry_run:
+        cmd.append("--dry-run")
+    return _run_command(cmd, paths.repo_root)
+
+
 def run_bid_scheduler(paths: SorarePaths, request: BidRequest) -> ScriptResult:
     cmd = [
         sys.executable,

@@ -99,6 +99,36 @@ def _market_value(floor, sales_reference):
     return min(float(floor), float(sales_reference))
 
 
+def estimate_fair_value(
+    *,
+    sales_reference=None,
+    parity_reference=None,
+    market_floor_reference=None,
+    sales_confidence="low",
+    ratio_source="fallback",
+):
+    """Combina comparables de forma prudente sin usar el precio candidato.
+
+    El histórico reciente pesa más que las referencias indirectas. El suelo se
+    considera también un límite de compra, pero debe ser el suelo alternativo:
+    incluir la propia ganga ocultaría precisamente el descuento a detectar.
+    """
+    references = []
+    if sales_reference:
+        references.append((float(sales_reference), 3 if sales_confidence != "low" else 1))
+    if parity_reference:
+        references.append((float(parity_reference), 2 if ratio_source == "learned" else 1))
+    if market_floor_reference:
+        references.append((float(market_floor_reference), 1))
+    if not references:
+        return None
+    total_weight = sum(weight for _, weight in references)
+    value = sum(reference * weight for reference, weight in references) / total_weight
+    if market_floor_reference:
+        value = min(value, float(market_floor_reference))
+    return round(value, 2)
+
+
 def learn_rare_ratio(players):
     ratios = []
     for player in players:
@@ -148,12 +178,12 @@ def build_opportunity_rows(players):
             parity = None
             if other_value:
                 parity = other_value / ratio if rarity == "limited" else other_value * ratio
-            references = []
-            if own_reference:
-                references.extend([float(own_reference)] * (2 if data["confidence"] != "low" else 1))
-            if parity:
-                references.extend([float(parity)] * (2 if ratio_source == "learned" else 1))
-            reference = statistics.median(references) if references else None
+            reference = estimate_fair_value(
+                sales_reference=own_reference,
+                parity_reference=parity,
+                sales_confidence=data["confidence"],
+                ratio_source=ratio_source,
+            )
             discount = max(0.0, (reference - floor) / reference * 100) if reference and reference > floor else 0.0
             signal_score = data["confidence_score"]
             if parity:

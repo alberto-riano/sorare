@@ -109,6 +109,8 @@ PROJECT_DIR="$PROJECT_DIR" VENV_DIR="$VENV_DIR" ENV_FILE="$ENV_FILE" SERVICE_USE
     bash "$PROJECT_DIR/deploy/install-opportunity-refresh.sh"
 PROJECT_DIR="$PROJECT_DIR" VENV_DIR="$VENV_DIR" ENV_FILE="$ENV_FILE" SERVICE_USER="$SERVICE_USER" \
     bash "$PROJECT_DIR/deploy/install-auction-value-alerts.sh"
+PROJECT_DIR="$PROJECT_DIR" VENV_DIR="$VENV_DIR" ENV_FILE="$ENV_FILE" SERVICE_USER="$SERVICE_USER" \
+    bash "$PROJECT_DIR/deploy/install-market-listing-alerts.sh"
 
 NGINX_SITE="/etc/nginx/sites-available/sorare"
 REDIRECT_LOCATION=""

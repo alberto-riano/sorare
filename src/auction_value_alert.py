@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from listar_subastas import load_auction_cache  # noqa: E402
 from sorare_utils import build_headers, graphql_request, read_config, to_eur_cents  # noqa: E402
 from web_services.config_files import DEFAULT_TELEGRAM_SETTINGS, parse_key_value_file  # noqa: E402
-from web_services.opportunity_market import robust_sales_reference  # noqa: E402
+from web_services.opportunity_market import FALLBACK_RARE_RATIO, estimate_fair_value, robust_sales_reference  # noqa: E402
 
 
 SETTINGS_PATH = ROOT / "config" / "telegram_alert_settings.txt"
@@ -165,11 +165,19 @@ def _valuation(player_slug, rarity, headers, rates, now):
             comparables.append({"eur": round(cents / 100, 2), "date": price.get("date")})
     summary = robust_sales_reference(comparables, now=now)
     sales_reference = summary.get("value")
-    values = [float(value) for value in (floor, sales_reference) if value is not None]
+    parity_reference = limited_floor * FALLBACK_RARE_RATIO if rarity == "rare" and limited_floor else None
+    fair_value = estimate_fair_value(
+        sales_reference=sales_reference,
+        parity_reference=parity_reference,
+        market_floor_reference=floor,
+        sales_confidence=summary.get("confidence"),
+        ratio_source="fallback",
+    )
     return {
-        "value": round(min(values), 2) if values else None,
+        "value": fair_value,
         "floor": floor,
         "limited_floor": limited_floor,
+        "parity_reference": round(parity_reference, 2) if parity_reference else None,
         "sales_reference": sales_reference,
         "sales_count": len(summary.get("sales") or []),
         "confidence": summary.get("confidence") or "low",
