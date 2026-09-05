@@ -71,6 +71,12 @@ class MarketListingAlertTests(SimpleTestCase):
         self.assertFalse(market_listing_alert._matching_listing(offer(rarity="limited"), roster))
         self.assertFalse(market_listing_alert._matching_listing(offer(), {"other-player": {}}))
 
+    def test_price_change_creates_a_new_listing_version(self):
+        self.assertNotEqual(
+            market_listing_alert._offer_version_key(offer(price=60300)),
+            market_listing_alert._offer_version_key(offer(price=55000)),
+        )
+
     def test_history_uses_auctions_and_public_offers_but_not_instant_sales(self):
         prices = [
             history(85000),
@@ -102,6 +108,22 @@ class MarketListingAlertTests(SimpleTestCase):
         self.assertGreater(saving, 25)
 
     @patch("market_listing_alert.time.sleep")
+    @patch("market_listing_alert.graphql_request", return_value={"tokens": {"rare": [], "limited": []}})
+    @patch("market_listing_alert.get_live_single_sale_offers")
+    def test_cached_opportunity_values_fill_sparse_live_data(self, live_offers, _graphql, _sleep):
+        live_offers.return_value = [offer("offer-new", "rare", 8000), offer("rare-peer", "rare", 12000)]
+        snapshot_row = {
+            "limited": {"market_value": 25, "sales_reference": 24, "sales": [{"eur": 24}]},
+            "rare": {"sales_reference": 100, "confidence": "medium", "sales": [{"eur": 100}]},
+        }
+        valuation = market_listing_alert._player_valuation(
+            offer(price=8000), {}, (1, 1, 2000), NOW, 4, "learned", snapshot_row,
+        )
+        self.assertEqual(valuation["limited_value"], 25)
+        self.assertEqual(valuation["rare_sales_reference"], 100)
+        self.assertIsNotNone(valuation["fair_value"])
+
+    @patch("market_listing_alert.time.sleep")
     @patch("market_listing_alert._send_telegram")
     @patch("market_listing_alert._player_valuation")
     @patch("market_listing_alert._fetch_recent_listings")
@@ -126,4 +148,4 @@ class MarketListingAlertTests(SimpleTestCase):
                 self.assertEqual(market_listing_alert.run(now=NOW), 0)
                 state = json.loads(state_path.read_text())
         send.assert_called_once()
-        self.assertIn("offer-new", state["seen"])
+        self.assertTrue(any(key.startswith("offer-new:") for key in state["seen"]))

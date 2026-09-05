@@ -140,6 +140,19 @@ def _offer_eur(offer, rates):
     return round(cents / 100, 2) if cents and cents > 0 else None
 
 
+def _offer_version_key(offer):
+    """Identifica una versión del anuncio, no solo la oferta.
+
+    Sorare puede conservar el mismo id al modificar un precio. Incluir la fecha
+    de actualización y los importes permite volver a valorar una rebaja sin
+    repetir avisos por el solapamiento entre ejecuciones.
+    """
+    amounts = (offer.get("receiverSide") or {}).get("amounts") or {}
+    amount_signature = ":".join(str(amounts.get(key) or "") for key in ("eurCents", "usdCents", "gbpCents", "wei"))
+    version = offer.get("updatedAt") or offer.get("startDate") or ""
+    return f"{offer.get('id')}:{version}:{amount_signature}"
+
+
 def _matching_listing(offer, player_slugs):
     card = _card_from_offer(offer)
     player_slug = (card.get("anyPlayer") or {}).get("slug")
@@ -172,7 +185,7 @@ def _comparable_sales(prices, rates, now):
     return result
 
 
-def _player_valuation(candidate, headers, rates, now, ratio, ratio_source):
+def _player_valuation(candidate, headers, rates, now, ratio, ratio_source, snapshot_row=None):
     card = _card_from_offer(candidate)
     player_slug = (card.get("anyPlayer") or {}).get("slug")
     current_offers = get_live_single_sale_offers(player_slug, headers=headers)
@@ -194,23 +207,37 @@ def _player_valuation(candidate, headers, rates, now, ratio, ratio_source):
     histories = (graphql_request(HISTORY_QUERY, {"slug": player_slug}, headers=headers).get("tokens") or {})
     limited_summary = robust_sales_reference(_comparable_sales(histories.get("limited"), rates, now), now=now)
     rare_summary = robust_sales_reference(_comparable_sales(histories.get("rare"), rates, now), now=now)
-    limited_values = [value for value in (limited_floor, limited_summary.get("value")) if value]
+    snapshot_row = snapshot_row or {}
+    cached_limited = snapshot_row.get("limited") or {}
+    cached_rare = snapshot_row.get("rare") or {}
+    cached_limited_value = cached_limited.get("market_value") or cached_limited.get("sales_reference")
+    cached_rare_reference = cached_rare.get("sales_reference")
+    limited_reference = limited_summary.get("value") or cached_limited_value
+    rare_reference = rare_summary.get("value") or cached_rare_reference
+    rare_confidence = rare_summary.get("confidence")
+    if not rare_summary.get("value") and cached_rare_reference:
+        rare_confidence = cached_rare.get("confidence") or "low"
+    limited_values = [value for value in (limited_floor, limited_reference) if value]
     limited_value = min(limited_values) if limited_values else None
     parity = limited_value * ratio if limited_value else None
     fair_value = estimate_fair_value(
-        sales_reference=rare_summary.get("value"),
+        sales_reference=rare_reference,
         parity_reference=parity,
         market_floor_reference=rare_peer_floor,
-        sales_confidence=rare_summary.get("confidence"),
+        sales_confidence=rare_confidence,
         ratio_source=ratio_source,
     )
+    cached_rare_sales = cached_rare.get("sales") or []
+    comparable_count = len(rare_summary.get("sales") or [])
+    if not rare_summary.get("value"):
+        comparable_count = len(cached_rare_sales)
     return {
         "fair_value": fair_value,
         "limited_value": round(limited_value, 2) if limited_value else None,
         "limited_floor": limited_floor,
         "rare_peer_floor": rare_peer_floor,
-        "rare_sales_reference": rare_summary.get("value"),
-        "rare_sales_count": len(rare_summary.get("sales") or []),
+        "rare_sales_reference": rare_reference,
+        "rare_sales_count": comparable_count,
         "parity_reference": round(parity, 2) if parity else None,
         "ratio": ratio,
     }
@@ -267,6 +294,8 @@ def run(*, dry_run=False, now=None):
     min_limited = float(settings.get("MARKET_ALERT_MIN_LIMITED_VALUE_EUR") or 1)
     min_comparables = int(settings.get("MARKET_ALERT_MIN_COMPARABLES") or 0)
     state = _load_state()
+    settings_signature = f"{min_saving}:{min_limited}:{min_comparables}"
+    settings_changed = state.get("settings_signature") not in (None, settings_signature)
     last_run = _parse_date(state.get("last_run_at"))
     updated_after = (last_run - timedelta(minutes=OVERLAP_MINUTES)) if last_run else (now - timedelta(minutes=POLL_INTERVAL_MINUTES + OVERLAP_MINUTES))
     updated_after = max(updated_after, now - timedelta(days=8))
@@ -277,40 +306,51 @@ def run(*, dry_run=False, now=None):
     rates = fetch_exchange_rates()
     offers = _fetch_recent_listings(headers, updated_after)
     candidates = [offer for offer in offers if _matching_listing(offer, opportunity_rows)]
-    seen = state.setdefault("seen", {})
+    seen = {} if settings_changed else state.setdefault("seen", {})
     pending = state.setdefault("pending", {})
     candidates_by_id = {
-        offer.get("id"): offer for offer in [*pending.values(), *candidates]
-        if offer.get("id") and offer.get("id") not in seen and _matching_listing(offer, opportunity_rows)
+        _offer_version_key(offer): offer for offer in [*pending.values(), *candidates]
+        if offer.get("id") and _offer_version_key(offer) not in seen and _matching_listing(offer, opportunity_rows)
     }
     new_candidates = list(candidates_by_id.values())
-    sent = evaluated = failures = 0
+    sent = evaluated = valued = failures = filtered = below_threshold = 0
     errors = []
+    evaluations = []
     for candidate in new_candidates:
-        offer_id = candidate["id"]
+        version_key = _offer_version_key(candidate)
+        player = (_card_from_offer(candidate).get("anyPlayer") or {}).get("displayName") or "Jugador"
         try:
             price = _offer_eur(candidate, rates)
             if not price:
-                seen[offer_id] = now.isoformat()
-                pending.pop(offer_id, None)
+                seen[version_key] = now.isoformat()
+                pending.pop(version_key, None)
+                filtered += 1
+                evaluations.append({"player": player, "decision": "Precio no convertible a EUR"})
                 continue
             card = _card_from_offer(candidate)
             slug = (card.get("anyPlayer") or {}).get("slug")
-            cached_limited = ((opportunity_rows.get(slug) or {}).get("limited") or {}).get("market_value")
-            if cached_limited is not None and float(cached_limited) < min_limited:
-                seen[offer_id] = now.isoformat()
-                pending.pop(offer_id, None)
-                continue
-            valuation = _player_valuation(candidate, headers, rates, now, ratio, ratio_source)
+            snapshot_row = opportunity_rows.get(slug) or {}
+            valuation = _player_valuation(candidate, headers, rates, now, ratio, ratio_source, snapshot_row)
             evaluated += 1
             fair_value = valuation.get("fair_value")
-            eligible = (
-                valuation.get("limited_value") is not None
-                and valuation["limited_value"] >= min_limited
-                and valuation.get("rare_sales_count", 0) >= min_comparables
-                and fair_value and fair_value > price
-            )
-            saving = ((fair_value - price) / fair_value * 100) if eligible else 0
+            if fair_value:
+                valued += 1
+            saving = ((fair_value - price) / fair_value * 100) if fair_value and fair_value > price else 0
+            decision = "Aviso enviado"
+            eligible = True
+            if valuation.get("limited_value") is None:
+                decision, eligible = "Sin valoración Limited", False
+            elif valuation["limited_value"] < min_limited:
+                decision, eligible = f"Limited por debajo de {min_limited:.2f} €", False
+            elif valuation.get("rare_sales_count", 0) < min_comparables:
+                decision, eligible = f"Solo {valuation.get('rare_sales_count', 0)} comparables", False
+            elif not fair_value:
+                decision, eligible = "Sin datos para calcular valor justo", False
+            elif fair_value <= price:
+                decision, eligible = "Sin ahorro frente al valor justo", False
+            elif saving < min_saving:
+                decision, eligible = f"Ahorro inferior al {min_saving:g}%", False
+                below_threshold += 1
             if eligible and saving >= min_saving:
                 message = _message(candidate, price, valuation, saving)
                 if dry_run:
@@ -318,25 +358,36 @@ def run(*, dry_run=False, now=None):
                 else:
                     _send_telegram(config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_CHAT_ID"), message, (card.get("anyPlayer") or {}).get("squaredPictureUrl"))
                 sent += 1
-            seen[offer_id] = now.isoformat()
-            pending.pop(offer_id, None)
+            else:
+                filtered += 1
+            evaluations.append({
+                "player": player, "price": price, "fair_value": fair_value,
+                "saving_percent": round(saving, 1), "limited_value": valuation.get("limited_value"),
+                "comparables": valuation.get("rare_sales_count", 0), "decision": decision,
+            })
+            seen[version_key] = now.isoformat()
+            pending.pop(version_key, None)
         except Exception as exc:
             failures += 1
-            pending[offer_id] = candidate
+            pending[version_key] = candidate
             errors.append(str(exc)[:180])
+            evaluations.append({"player": player, "decision": "Error al valorar", "error": str(exc)[:180]})
         time.sleep(REQUEST_INTERVAL_SECONDS)
 
     cutoff = now - timedelta(days=9)
     state["seen"] = {key: value for key, value in seen.items() if (_parse_date(value) or now) >= cutoff}
     state["pending"] = pending
     state.update({
+        "settings_signature": settings_signature,
         "last_run_at": now.isoformat(), "last_result": "partial" if failures else "ok", "offers_scanned": len(offers),
-        "new_candidates": len(new_candidates), "evaluated_count": evaluated, "alerts_sent": sent,
-        "failure_count": failures, "last_errors": errors[-3:],
+        "new_candidates": len(new_candidates), "evaluated_count": evaluated, "valued_count": valued,
+        "filtered_count": filtered, "below_threshold_count": below_threshold, "alerts_sent": sent,
+        "max_saving_percent": max((row.get("saving_percent") or 0 for row in evaluations), default=0),
+        "last_evaluations": evaluations[-8:], "failure_count": failures, "last_errors": errors[-3:],
     })
     if not dry_run:
         _save_state(state)
-    print(f"{len(offers)} ofertas recientes; {len(new_candidates)} Rare nuevas; {evaluated} valoradas; {sent} avisos {'simulados' if dry_run else 'enviados'}; {failures} pendientes.")
+    print(f"{len(offers)} ofertas recientes; {len(new_candidates)} Rare nuevas/modificadas; {valued} valoradas; {sent} avisos {'simulados' if dry_run else 'enviados'}; {failures} pendientes.")
     return 0
 
 

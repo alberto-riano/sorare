@@ -71,7 +71,10 @@
       <div class="market-alert-fixed"><i class="fas fa-clock"></i><span><strong>Cada 30 min</strong><small>Solo consulta anuncios nuevos o modificados</small></span></div>
     </div>
     <div class="alert-module-footer">
-      <p class="alert-last-run"><i class="fas fa-clock-rotate-left"></i>{% if market_alert_status.last_run_display %} Última comprobación: <strong>{{ market_alert_status.last_run_display }}</strong> · {{ market_alert_status.new_candidates|default:0 }} nuevas · {{ market_alert_status.alerts_sent|default:0 }} avisos{% if market_alert_status.failure_count %} · {{ market_alert_status.failure_count }} pendientes de reintento{% endif %}{% else %} Todavía no se ha registrado ninguna comprobación.{% endif %}</p>
+      <div class="market-alert-result">
+        <p class="alert-last-run"><i class="fas fa-clock-rotate-left"></i>{% if market_alert_status.last_run_display %} Última comprobación: <strong>{{ market_alert_status.last_run_display }}</strong> · {{ market_alert_status.new_candidates|default:0 }} nuevas/modificadas · {{ market_alert_status.valued_count|default:0 }} valoradas · {{ market_alert_status.alerts_sent|default:0 }} avisos{% if market_alert_status.max_saving_percent %} · mejor ahorro {{ market_alert_status.max_saving_percent }}%{% endif %}{% if market_alert_status.failure_count %} · {{ market_alert_status.failure_count }} pendientes de reintento{% endif %}{% else %} Todavía no se ha registrado ninguna comprobación.{% endif %}</p>
+        {% if market_alert_status.last_evaluations %}<details class="market-alert-details"><summary>Ver qué se revisó y por qué no avisó</summary><ul>{% for item in market_alert_status.last_evaluations %}<li><strong>{{ item.player }}</strong>{% if item.price %} · {{ item.price|floatformat:2 }} €{% endif %}{% if item.fair_value %} frente a {{ item.fair_value|floatformat:2 }} € ({{ item.saving_percent|floatformat:1 }}%){% endif %}: {{ item.decision }}</li>{% endfor %}</ul></details>{% endif %}
+      </div>
       <div class="btn-row"><button class="btn" type="submit" name="action" value="save_only">Guardar configuración</button><button class="btn btn-accent" type="submit" name="action" value="check_market"><i class="fas fa-satellite-dish"></i> Guardar + comprobar ahora</button></div>
     </div>
   </section>
@@ -170,6 +173,7 @@
   .auction-alert-settings > label > span:first-child, .market-alert-settings > label > span:first-child, .rarity-alert-picker legend { display:block; margin-bottom:.45rem; color:var(--muted); font-weight:700; }
   .market-alert-fixed { display:flex; align-items:center; gap:.65rem; min-height:46px; padding:.55rem .7rem; border:1px solid var(--line); border-radius:10px; background:#fff; }
   .market-alert-fixed > i { color:#e53935; }.market-alert-fixed span { display:grid; }.market-alert-fixed small { color:var(--muted); font-size:.65rem; }
+  .market-alert-result { min-width:0; }.market-alert-details { margin-top:.55rem; color:var(--muted); font-size:.8rem; }.market-alert-details summary { cursor:pointer; font-weight:800; color:var(--ink); }.market-alert-details ul { margin:.5rem 0 0; padding-left:1.25rem; }
   .rarity-alert-picker { min-width:0; margin:0; padding:0; border:0; }
   .rarity-alert-options { display:flex; gap:.65rem; }
   .rarity-alert-option { display:flex; flex:1 1 0; align-items:center; gap:.55rem; min-width:0; min-height:46px; padding:.65rem .8rem; border:1px solid var(--line); border-radius:10px; background:#fff; font-weight:700; cursor:pointer; }
