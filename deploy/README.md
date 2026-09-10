@@ -88,14 +88,21 @@ El detector de nuevas ventas consulta cada 30 minutos únicamente los anuncios
 creados o modificados desde la comprobación anterior. Su estado para evitar
 avisos duplicados se conserva en `output/market_listing_alert_state.json`.
 
+Los movimientos de `burguis` y `blasco93` se actualizan automáticamente todos
+los días a las 08:00 (`Europe/Madrid`). La actualización normal relee solamente
+los dos últimos días y fusiona por id; un barrido completo queda reservado para
+cuando se amplía manualmente la fecha inicial del historial.
+
 Comandos útiles:
 
 ```bash
 sudo systemctl status sorare-web
 sudo systemctl status sorare-sales-worker
 sudo systemctl status sorare-market-listing-alert.timer
+sudo systemctl status sorare-daily-movement-sync.timer
 sudo journalctl -u sorare-web -n 100 --no-pager
 sudo journalctl -u sorare-sales-worker -n 100 --no-pager
 sudo journalctl -u sorare-market-listing-alert.service -n 100 --no-pager
+sudo journalctl -u sorare-daily-movement-sync.service -n 100 --no-pager
 sudo nginx -t
 ```

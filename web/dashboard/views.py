@@ -459,6 +459,7 @@ def movements(request):
                 user=request.user,
                 manager_slug=selected_manager,
                 requested_start_date=requested_start_date,
+                progress_label="En cola para reconstruir el historial",
             )
         manager_nickname = snapshot.manager_nickname if snapshot else "Blasco93"
     else:
@@ -472,6 +473,7 @@ def movements(request):
             active_sync = MovementSyncJob.objects.create(
                 user=request.user,
                 requested_start_date=requested_start_date,
+                progress_label="En cola para reconstruir el historial",
             )
         manager_nickname = "burguis"
 
@@ -1043,6 +1045,7 @@ def enqueue_movements_sync(request):
                 user=request.user,
                 manager_slug=selected_manager,
                 requested_start_date=requested_start_date,
+                progress_label="En cola para actualizar movimientos",
             )
         return JsonResponse({"job_id": job.id, "status": job.status}, status=202)
     snapshot = MovementSnapshot.objects.filter(user=request.user).first()
@@ -1063,6 +1066,7 @@ def enqueue_movements_sync(request):
         job = MovementSyncJob.objects.create(
             user=request.user,
             requested_start_date=requested_start_date,
+            progress_label="En cola para actualizar movimientos",
         )
     return JsonResponse({"job_id": job.id, "status": job.status}, status=202)
 

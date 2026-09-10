@@ -90,6 +90,8 @@ PROJECT_DIR="$PROJECT_DIR" VENV_DIR="$VENV_DIR" ENV_FILE="$ENV_FILE" \
     bash "$PROJECT_DIR/deploy/install-auction-value-alerts.sh"
 PROJECT_DIR="$PROJECT_DIR" VENV_DIR="$VENV_DIR" ENV_FILE="$ENV_FILE" \
     bash "$PROJECT_DIR/deploy/install-market-listing-alerts.sh"
+PROJECT_DIR="$PROJECT_DIR" VENV_DIR="$VENV_DIR" ENV_FILE="$ENV_FILE" \
+    bash "$PROJECT_DIR/deploy/install-daily-movement-sync.sh"
 
 info "Reiniciando $SERVICE_NAME"
 sudo systemctl restart "$SERVICE_NAME"

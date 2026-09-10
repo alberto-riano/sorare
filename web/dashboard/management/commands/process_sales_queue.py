@@ -1,5 +1,6 @@
 import time
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -15,6 +16,37 @@ from dashboard.views import PATHS
 from web_services.movement_history import collect_movement_history, collect_public_reward_history
 from web_services.process_runner import run_card_delist, run_card_sale, sale_error_message
 from web_services.sales_inventory import collect_sales_inventory
+
+
+MOVEMENT_INCREMENTAL_OVERLAP_DAYS = 2
+
+
+def _movement_incremental_start(snapshot, requested_start_date):
+    if not snapshot or requested_start_date < snapshot.history_start_date:
+        return requested_start_date, False
+    refreshed_at = snapshot.refreshed_at or timezone.now()
+    local_date = refreshed_at.astimezone(ZoneInfo("Europe/Madrid")).date()
+    return max(snapshot.history_start_date, local_date - timedelta(days=MOVEMENT_INCREMENTAL_OVERLAP_DAYS)), True
+
+
+def _movement_identity(movement):
+    movement_id = str(movement.get("id") or "").strip()
+    if movement_id:
+        return f"id:{movement_id}"
+    cards = movement.get("cards") or movement.get("sent_cards") or movement.get("received_cards") or []
+    assets = ",".join(sorted(str(card.get("asset_id") or "") for card in cards))
+    return "fallback:{occurred}:{direction}:{assets}".format(
+        occurred=movement.get("occurred_at") or "",
+        direction=movement.get("direction") or "",
+        assets=assets,
+    )
+
+
+def _merge_movement_history(existing, fresh):
+    merged = {_movement_identity(movement): movement for movement in existing or []}
+    for movement in fresh or []:
+        merged[_movement_identity(movement)] = movement
+    return sorted(merged.values(), key=lambda movement: str(movement.get("occurred_at") or ""), reverse=True)
 
 
 def process_next_opportunity_refresh():
@@ -265,7 +297,13 @@ def process_next_movement_sync():
             return None
         job.status = MovementSyncJob.Status.RUNNING
         job.started_at = timezone.now()
-        job.progress_label = f"Conectando con el historial desde {job.requested_start_date:%d/%m/%Y}"
+        stored_snapshot = MovementSnapshot.objects.filter(user=job.user).first()
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 17 else None
+        collection_start, incremental = _movement_incremental_start(snapshot, job.requested_start_date)
+        job.progress_label = (
+            f"Buscando novedades desde {collection_start:%d/%m/%Y}"
+            if incremental else f"Reconstruyendo el historial desde {collection_start:%d/%m/%Y}"
+        )
         job.save(update_fields=("status", "started_at", "progress_label"))
 
     try:
@@ -276,9 +314,11 @@ def process_next_movement_sync():
             )
 
         movements = collect_movement_history(
-            start_date=job.requested_start_date,
+            start_date=collection_start,
             progress=save_progress,
         )
+        if incremental:
+            movements = _merge_movement_history(snapshot.movements, movements)
         auction_ids = {
             str(movement.get("auction_id") or "")
             for movement in movements
@@ -302,13 +342,13 @@ def process_next_movement_sync():
             user=job.user,
             defaults={
                 "movements": movements,
-                "history_start_date": job.requested_start_date,
+                "history_start_date": snapshot.history_start_date if incremental else job.requested_start_date,
                 "refreshed_at": timezone.now(),
                 "source_version": 17,
             },
         )
         job.movement_count = len(movements)
-        job.progress_label = "Historial actualizado"
+        job.progress_label = "Nuevos movimientos incorporados" if incremental else "Historial reconstruido"
         job.status = MovementSyncJob.Status.SUCCEEDED
     except Exception as exc:
         job.status = MovementSyncJob.Status.FAILED
@@ -330,9 +370,12 @@ def process_next_public_reward_sync():
             return None
         job.status = PublicRewardSyncJob.Status.RUNNING
         job.started_at = timezone.now()
+        stored_snapshot = PublicRewardSnapshot.objects.filter(manager_slug=job.manager_slug).first()
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 4 else None
+        collection_start, incremental = _movement_incremental_start(snapshot, job.requested_start_date)
         job.progress_label = (
-            f"Buscando movimientos de {job.manager_slug} desde "
-            f"{job.requested_start_date:%d/%m/%Y}"
+            f"Buscando novedades de {job.manager_slug} desde {collection_start:%d/%m/%Y}"
+            if incremental else f"Reconstruyendo {job.manager_slug} desde {collection_start:%d/%m/%Y}"
         )
         job.save(update_fields=("status", "started_at", "progress_label"))
 
@@ -345,22 +388,24 @@ def process_next_public_reward_sync():
 
         result = collect_public_reward_history(
             job.manager_slug,
-            start_date=job.requested_start_date,
+            start_date=collection_start,
             progress=save_progress,
         )
         movements = result["movements"]
+        if incremental:
+            movements = _merge_movement_history(snapshot.movements, movements)
         PublicRewardSnapshot.objects.update_or_create(
             manager_slug=job.manager_slug,
             defaults={
                 "manager_nickname": result["manager_nickname"],
                 "movements": movements,
-                "history_start_date": job.requested_start_date,
+                "history_start_date": snapshot.history_start_date if incremental else job.requested_start_date,
                 "refreshed_at": timezone.now(),
                 "source_version": 4,
             },
         )
         job.movement_count = len(movements)
-        job.progress_label = "Movimientos públicos actualizados"
+        job.progress_label = "Novedades públicas incorporadas" if incremental else "Historial público reconstruido"
         job.status = PublicRewardSyncJob.Status.SUCCEEDED
     except Exception as exc:
         job.status = PublicRewardSyncJob.Status.FAILED

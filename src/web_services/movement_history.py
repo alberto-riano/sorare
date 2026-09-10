@@ -152,9 +152,9 @@ query MovementPaymentAccounts(
 """
 
 REWARD_ENTRIES_QUERY = """
-query RewardEntries($first: Int!, $after: String) {
+query RewardEntries($first: Int!, $after: String, $startDate: ISO8601DateTime) {
   currentUser {
-    accountEntries(first: $first, after: $after, entryType: [REWARD]) {
+    accountEntries(first: $first, after: $after, entryType: [REWARD], startDate: $startDate, sortType: DESC) {
       nodes {
         id date entryType provisional aasmState
         amounts { eurCents wei referenceCurrency }
@@ -191,18 +191,18 @@ query RewardEntries($first: Int!, $after: String) {
 """
 
 GAMEWEEK_REWARDS_QUERY = """
-query GameweekRewards($first: Int!, $after: String) {
+query GameweekRewards($last: Int!, $before: String) {
   so5 {
     allSo5Fixtures(
-      first: $first
-      after: $after
+      last: $last
+      before: $before
       eventType: CLASSIC
       sport: FOOTBALL
       future: false
     ) {
       nodes {
         ... on So5Fixture {
-          id
+          id endDate rewardsDeliveryDate
           mySo5Rewards {
             __typename id slug aasmState amount { eurCents wei referenceCurrency }
             rewardCards { anyCard { assetId } }
@@ -224,7 +224,7 @@ query GameweekRewards($first: Int!, $after: String) {
           }
         }
       }
-      pageInfo { hasNextPage endCursor }
+      pageInfo { hasPreviousPage startCursor }
     }
   }
 }
@@ -1389,11 +1389,20 @@ def collect_movement_history(
     fixture_page = 0
     while True:
         fixture_page += 1
-        data = graphql_request(GAMEWEEK_REWARDS_QUERY, {"first": 100, "after": cursor}, headers=headers)
+        data = graphql_request(GAMEWEEK_REWARDS_QUERY, {"last": 25, "before": cursor}, headers=headers)
         connection = ((data.get("so5") or {}).get("allSo5Fixtures") or {})
+        fixture_dates = []
         for fixture in connection.get("nodes") or []:
+            fixture_date = fixture.get("rewardsDeliveryDate") or fixture.get("endDate")
+            if fixture_date:
+                fixture_dates.append(_movement_timestamp({"occurred_at": fixture_date}))
             for reward in fixture.get("mySo5Rewards") or []:
                 reward_fixture = reward.get("so5Fixture") or {}
+                delivered_at = reward_fixture.get("rewardsDeliveryDate")
+                if delivered_at:
+                    fixture_dates.append(_movement_timestamp({"occurred_at": delivered_at}))
+                    if _movement_timestamp({"occurred_at": delivered_at}) < cutoff:
+                        continue
                 reward_entries.append({
                     "id": f"gameweek:{reward.get('id')}",
                     "date": reward_fixture.get("rewardsDeliveryDate"),
@@ -1406,15 +1415,18 @@ def collect_movement_history(
         if progress:
             progress(len(trades), f"{len(reward_entries)} premios de jornada · página {fixture_page}")
         page_info = connection.get("pageInfo") or {}
-        if not page_info.get("hasNextPage"):
+        reached_start = bool(fixture_dates and min(fixture_dates) < cutoff)
+        if reached_start or not page_info.get("hasPreviousPage"):
             break
-        cursor = page_info.get("endCursor")
+        cursor = page_info.get("startCursor")
 
     cursor = None
     reward_page = 0
     while True:
         reward_page += 1
-        data = graphql_request(REWARD_ENTRIES_QUERY, {"first": 100, "after": cursor}, headers=headers)
+        data = graphql_request(REWARD_ENTRIES_QUERY, {
+            "first": 100, "after": cursor, "startDate": cutoff_iso,
+        }, headers=headers)
         connection = ((data.get("currentUser") or {}).get("accountEntries") or {})
         reward_entries.extend(
             entry for entry in connection.get("nodes") or []
