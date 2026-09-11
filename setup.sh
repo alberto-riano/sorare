@@ -113,6 +113,8 @@ PROJECT_DIR="$PROJECT_DIR" VENV_DIR="$VENV_DIR" ENV_FILE="$ENV_FILE" SERVICE_USE
     bash "$PROJECT_DIR/deploy/install-market-listing-alerts.sh"
 PROJECT_DIR="$PROJECT_DIR" VENV_DIR="$VENV_DIR" ENV_FILE="$ENV_FILE" SERVICE_USER="$SERVICE_USER" \
     bash "$PROJECT_DIR/deploy/install-daily-movement-sync.sh"
+PROJECT_DIR="$PROJECT_DIR" VENV_DIR="$VENV_DIR" ENV_FILE="$ENV_FILE" SERVICE_USER="$SERVICE_USER" \
+    bash "$PROJECT_DIR/deploy/install-nightly-sales-refresh.sh"
 
 NGINX_SITE="/etc/nginx/sites-available/sorare"
 REDIRECT_LOCATION=""

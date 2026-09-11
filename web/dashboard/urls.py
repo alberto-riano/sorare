@@ -24,6 +24,7 @@ urlpatterns = [
     path("ventas/encolar/", views.enqueue_batch_sales, name="enqueue_batch_sales"),
     path("ventas/estado/", views.sales_jobs_status, name="sales_jobs_status"),
     path("retirar-ventas/", views.delist_workbench, name="delist_workbench"),
+    path("retirar-ventas/actualizar/", views.enqueue_delist_refresh, name="enqueue_delist_refresh"),
     path("retirar-ventas/encolar/", views.enqueue_batch_delists, name="enqueue_batch_delists"),
     path("retirar-ventas/estado/", views.delist_jobs_status, name="delist_jobs_status"),
     path("ventas/historial/", views.sales_price_history, name="sales_price_history"),

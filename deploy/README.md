@@ -93,6 +93,10 @@ los días a las 08:00 (`Europe/Madrid`). La actualización normal relee solament
 los dos últimos días y fusiona por id; un barrido completo queda reservado para
 cuando se amplía manualmente la fecha inicial del historial.
 
+El inventario usado por **Vender** y **Retirar ventas** se reconstruye para las
+tres rarezas cada madrugada a las 04:00 (`Europe/Madrid`). La pantalla de
+retirada permite lanzar esa misma actualización en cualquier momento.
+
 Comandos útiles:
 
 ```bash
@@ -100,9 +104,11 @@ sudo systemctl status sorare-web
 sudo systemctl status sorare-sales-worker
 sudo systemctl status sorare-market-listing-alert.timer
 sudo systemctl status sorare-daily-movement-sync.timer
+sudo systemctl status sorare-nightly-sales-refresh.timer
 sudo journalctl -u sorare-web -n 100 --no-pager
 sudo journalctl -u sorare-sales-worker -n 100 --no-pager
 sudo journalctl -u sorare-market-listing-alert.service -n 100 --no-pager
 sudo journalctl -u sorare-daily-movement-sync.service -n 100 --no-pager
+sudo journalctl -u sorare-nightly-sales-refresh.service -n 100 --no-pager
 sudo nginx -t
 ```

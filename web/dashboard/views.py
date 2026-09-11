@@ -1468,12 +1468,13 @@ def enqueue_batch_sales(request):
 @require_GET
 def sales_jobs_status(request):
     raw_ids = [value for value in request.GET.get("ids", "").split(",") if value.isdigit()]
+    raw_refresh_ids = [value for value in request.GET.get("refresh_ids", "").split(",") if value.isdigit()]
     jobs = SaleBatchJob.objects.filter(user=request.user)
     if raw_ids:
         jobs = jobs.filter(id__in=raw_ids)
     else:
         jobs = jobs.order_by("-created_at")[:10]
-    refreshes = SalesRefreshJob.objects.order_by("-created_at")[:5]
+    refreshes = SalesRefreshJob.objects.filter(id__in=raw_refresh_ids) if raw_refresh_ids else SalesRefreshJob.objects.order_by("-created_at")[:5]
     return JsonResponse({
         "jobs": [{
             "id": job.id,
@@ -1529,13 +1530,33 @@ def delist_workbench(request):
         (inventories[rarity].refreshed_at for rarity in selected_rarities if rarity in inventories and inventories[rarity].refreshed_at),
         default=None,
     )
+    active_refreshes = list(SalesRefreshJob.objects.filter(
+        rarity__in=allowed_rarities,
+        status__in=(SalesRefreshJob.Status.QUEUED, SalesRefreshJob.Status.RUNNING),
+    ).order_by("created_at"))
     return render(request, "dashboard/delist.html", {
         "listings": listings,
         "selected_rarities": selected_rarities,
         "selected_types": selected_types,
         "missing_rarities": [rarity for rarity in selected_rarities if rarity not in inventories],
         "refreshed_at": refreshed_at,
+        "active_refresh_ids": [job.pk for job in active_refreshes],
     })
+
+
+@require_POST
+def enqueue_delist_refresh(request):
+    """Actualiza las tres rarezas usadas por la pantalla de publicaciones."""
+    jobs = []
+    for rarity in ("limited", "rare", "super_rare"):
+        active = SalesRefreshJob.objects.filter(
+            rarity=rarity,
+            status__in=(SalesRefreshJob.Status.QUEUED, SalesRefreshJob.Status.RUNNING),
+        ).order_by("created_at").first()
+        jobs.append(active or SalesRefreshJob.objects.create(user=request.user, rarity=rarity))
+    return JsonResponse({
+        "jobs": [{"id": job.pk, "rarity": job.rarity, "status": job.status} for job in jobs],
+    }, status=202)
 
 
 @require_POST

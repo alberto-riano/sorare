@@ -1967,9 +1967,10 @@ body.modal-open { overflow: hidden; }
 .delist-head { display: flex; justify-content: space-between; align-items: center; gap: 2rem; }
 .delist-head h1 { margin: .15rem 0 .4rem; font-size: clamp(1.8rem,3vw,2.7rem); }
 .delist-head p { margin: 0; color: var(--muted); }
-.delist-sync { display: grid; min-width: 260px; gap: .12rem; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.5); }
+.delist-sync { display: grid; min-width: 300px; gap: .28rem; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.5); }
 .delist-sync span, .delist-sync small { color: var(--muted); font-size: .65rem; }
 .delist-sync strong { font: 700 .9rem "IBM Plex Mono",monospace; }
+.delist-sync .btn { justify-self: start; margin-top: .3rem; min-height: 36px; padding: .42rem .72rem; font-size: .65rem; }
 .delist-filter-panel form { display: grid; grid-template-columns: 1.2fr .8fr auto; align-items: end; gap: 1.1rem; }
 .delist-filter-panel fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .delist-filter-panel legend { margin-bottom: .45rem; color: var(--muted); font-weight: 700; font-size: .68rem; }

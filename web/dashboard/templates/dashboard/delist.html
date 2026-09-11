@@ -3,8 +3,8 @@
 {% block content %}
 <div class="delist-page">
   <section class="panel delist-head reveal">
-    <div><p class="kicker">Operar · Mis publicaciones</p><h1><i class="fas fa-tag-circle-xmark"></i> Quitar cartas a la venta</h1><p>Elige rarezas y tipo de carta, revisa el listado y desmarca cualquier publicación que quieras conservar.</p></div>
-    <div class="delist-sync"><span>Inventario consultado</span><strong>{% if refreshed_at %}{{ refreshed_at|date:'d/m/Y H:i' }}{% else %}Sin datos{% endif %}</strong><small>Se valida cada anuncio de nuevo justo antes de retirarlo.</small></div>
+    <div><p class="kicker">Operar · Mis publicaciones</p><h1><i class="fas fa-circle-minus"></i> Quitar cartas a la venta</h1><p>Elige rarezas y tipo de carta, revisa el listado y desmarca cualquier publicación que quieras conservar.</p></div>
+    <div class="delist-sync"><span>Inventario consultado</span><strong>{% if refreshed_at %}{{ refreshed_at|date:'d/m/Y H:i' }}{% else %}Sin datos{% endif %}</strong><small id="delistRefreshStatus">Se valida cada anuncio de nuevo justo antes de retirarlo.</small><button class="btn btn-secondary" type="button" id="refreshDelists"><i class="fas fa-arrows-rotate"></i> Actualizar publicaciones</button></div>
   </section>
   <section class="panel delist-filter-panel reveal">
     <form method="get" id="delistFilters">
@@ -32,12 +32,12 @@
         <span class="delist-price">{% if card.active_offer_eur != None %}<strong>{{ card.active_offer_eur|floatformat:2 }} €</strong>{% else %}<strong>Activa</strong>{% endif %}</span>
       </label>{% endfor %}
     </div>
-    <div class="delist-actionbar"><span><strong id="delistCount">{{ listings|length }}</strong> publicaciones seleccionadas</span><button type="button" class="btn btn-danger" id="reviewDelists"><i class="fas fa-tag-circle-xmark"></i> Revisar retirada</button></div>
+    <div class="delist-actionbar"><span><strong id="delistCount">{{ listings|length }}</strong> publicaciones seleccionadas</span><button type="button" class="btn btn-danger" id="reviewDelists"><i class="fas fa-circle-minus"></i> Revisar retirada</button></div>
     {% else %}<div class="delist-empty"><i class="fas fa-tags"></i><h3>No hay publicaciones con esta selección</h3><p>Prueba otra combinación o actualiza antes el inventario desde la pantalla de ventas.</p></div>{% endif %}
   </section>
 </div>
 <div class="sales-modal" id="delistModal" hidden><div class="sales-modal-backdrop" data-close-delist></div><section class="sales-modal-card delist-modal-card" role="dialog" aria-modal="true" aria-labelledby="delistModalTitle">
-  <button class="sales-modal-close" type="button" data-close-delist aria-label="Cerrar">×</button><h2 id="delistModalTitle"><i class="fas fa-shield-halved"></i> Confirmar retirada</h2><p>Estas cartas dejarán de estar a la venta. El proceso continuará en segundo plano aunque cambies de página.</p><div id="delistReviewList" class="sales-review-list delist-review-list"></div><div class="btn-row sales-modal-actions"><button class="btn btn-secondary" type="button" data-close-delist>Volver</button><button class="btn btn-danger" type="button" id="confirmDelists"><i class="fas fa-tag-circle-xmark"></i> Retirar seleccionadas</button></div>
+  <button class="sales-modal-close" type="button" data-close-delist aria-label="Cerrar">×</button><h2 id="delistModalTitle"><i class="fas fa-shield-halved"></i> Confirmar retirada</h2><p>Estas cartas dejarán de estar a la venta. El proceso continuará en segundo plano aunque cambies de página.</p><div id="delistReviewList" class="sales-review-list delist-review-list"></div><div class="btn-row sales-modal-actions"><button class="btn btn-secondary" type="button" data-close-delist>Volver</button><button class="btn btn-danger" type="button" id="confirmDelists"><i class="fas fa-circle-minus"></i> Retirar seleccionadas</button></div>
 </section></div><div class="sales-toasts" id="delistToasts" aria-live="polite"></div>
 <script>
 (function () {
@@ -52,8 +52,29 @@
   function parseJson(response) { return response.text().then(function (text) { try { return JSON.parse(text); } catch (_) { throw new Error('El servidor no devolvió una respuesta válida.'); } }); }
   function uuid() { return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) { var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }); }
   function showToast(kind, title, detail) { var toast = document.createElement('article'); toast.className = 'sales-toast ' + (kind === 'error' ? 'is-error' : 'is-success'); toast.innerHTML = '<i class="fas ' + (kind === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check') + '"></i><div><strong></strong><p></p></div>'; toast.querySelector('strong').textContent = title; toast.querySelector('p').textContent = detail || ''; document.getElementById('delistToasts').appendChild(toast); setTimeout(function () { toast.remove(); }, 12000); return toast; }
+  var refreshButton = document.getElementById('refreshDelists'), refreshStatus = document.getElementById('delistRefreshStatus');
+  function pollRefreshes(ids) {
+    fetch('{% url "sales_jobs_status" %}?refresh_ids=' + ids.join(','), { credentials: 'same-origin' }).then(parseJson).then(function (body) {
+      var jobs = (body.refreshes || []).filter(function (job) { return ids.indexOf(job.id) !== -1; });
+      var active = jobs.filter(function (job) { return job.status === 'queued' || job.status === 'running'; });
+      var failed = jobs.filter(function (job) { return job.status === 'failed'; });
+      if (active.length) { var current = active[0], done = jobs.filter(function (job) { return job.status === 'succeeded'; }).length; refreshStatus.textContent = done + ' de ' + ids.length + ' rarezas · ' + (current.progress_label || 'En cola'); setTimeout(function () { pollRefreshes(ids); }, 2500); return; }
+      if (failed.length) { refreshButton.disabled = false; refreshButton.innerHTML = '<i class="fas fa-arrows-rotate"></i> Reintentar actualización'; refreshStatus.textContent = failed[0].error || 'No se pudieron actualizar las publicaciones.'; return; }
+      if (jobs.length === ids.length) { refreshStatus.textContent = 'Publicaciones actualizadas. Recargando…'; location.reload(); return; }
+      setTimeout(function () { pollRefreshes(ids); }, 2500);
+    }).catch(function () { setTimeout(function () { pollRefreshes(ids); }, 5000); });
+  }
+  function startRefresh() {
+    refreshButton.disabled = true; refreshButton.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Actualizando…'; refreshStatus.textContent = 'Preparando Limited, Rare y Super Rare…';
+    fetch('{% url "enqueue_delist_refresh" %}', { method: 'POST', headers: { 'X-CSRFToken': csrf }, credentials: 'same-origin' }).then(parseJson).then(function (body) {
+      var ids = (body.jobs || []).map(function (job) { return job.id; }); if (!ids.length) throw new Error('No se pudo iniciar la actualización.'); pollRefreshes(ids);
+    }).catch(function (error) { refreshButton.disabled = false; refreshButton.innerHTML = '<i class="fas fa-arrows-rotate"></i> Reintentar actualización'; refreshStatus.textContent = error.message; });
+  }
+  if (refreshButton) refreshButton.addEventListener('click', startRefresh);
+  var activeRefreshIds = [{% for id in active_refresh_ids %}{{ id }}{% if not forloop.last %},{% endif %}{% endfor %}];
+  if (activeRefreshIds.length) { refreshButton.disabled = true; refreshButton.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Actualizando…'; pollRefreshes(activeRefreshIds); }
   function poll(jobId, toast) { fetch('{% url "delist_jobs_status" %}?ids=' + jobId, { credentials: 'same-origin' }).then(parseJson).then(function (body) { var job = body.jobs[0]; if (!job) return; if (job.status === 'queued' || job.status === 'running') { setTimeout(function () { poll(jobId, toast); }, 2500); return; } var failed = job.items.filter(function (item) { return item.error; }); toast.className = 'sales-toast ' + (failed.length ? 'is-error' : 'is-success'); toast.querySelector('i').className = 'fas ' + (failed.length ? 'fa-circle-exclamation' : 'fa-circle-check'); toast.querySelector('strong').textContent = failed.length ? job.success + ' retiradas · ' + job.failure + ' con error' : job.success + ' publicaciones retiradas'; toast.querySelector('p').textContent = failed.map(function (item) { return item.player + ': ' + item.error; }).join(' · '); if (!failed.length) setTimeout(function () { location.reload(); }, 1400); }).catch(function () { setTimeout(function () { poll(jobId, toast); }, 5000); }); }
-  if (confirmButton) confirmButton.addEventListener('click', function () { var selected = selectedCards(); if (!selected.length) return; confirmButton.disabled = true; confirmButton.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Iniciando…'; var data = new FormData(); data.append('csrfmiddlewaretoken', csrf); data.append('confirm', 'on'); data.append('request_key', uuid()); data.append('listings', JSON.stringify(selected.map(function (card) { return { asset_id: card.dataset.assetId, offer_id: card.dataset.offerId }; }))); fetch('{% url "enqueue_batch_delists" %}', { method: 'POST', body: data, credentials: 'same-origin' }).then(function (response) { return parseJson(response).then(function (body) { if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : 'Revisa las publicaciones seleccionadas.'); return body; }); }).then(function (body) { closeModal(); var toast = showToast('success', selected.length + ' retiradas en proceso', 'Puedes seguir usando la aplicación. Te avisaremos al terminar.'); poll(body.job_id, toast); }).catch(function (error) { showToast('error', 'No se pudo iniciar la retirada', error.message); }).finally(function () { confirmButton.disabled = false; confirmButton.innerHTML = '<i class="fas fa-tag-circle-xmark"></i> Retirar seleccionadas'; }); });
+  if (confirmButton) confirmButton.addEventListener('click', function () { var selected = selectedCards(); if (!selected.length) return; confirmButton.disabled = true; confirmButton.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Iniciando…'; var data = new FormData(); data.append('csrfmiddlewaretoken', csrf); data.append('confirm', 'on'); data.append('request_key', uuid()); data.append('listings', JSON.stringify(selected.map(function (card) { return { asset_id: card.dataset.assetId, offer_id: card.dataset.offerId }; }))); fetch('{% url "enqueue_batch_delists" %}', { method: 'POST', body: data, credentials: 'same-origin' }).then(function (response) { return parseJson(response).then(function (body) { if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : 'Revisa las publicaciones seleccionadas.'); return body; }); }).then(function (body) { closeModal(); var toast = showToast('success', selected.length + ' retiradas en proceso', 'Puedes seguir usando la aplicación. Te avisaremos al terminar.'); poll(body.job_id, toast); }).catch(function (error) { showToast('error', 'No se pudo iniciar la retirada', error.message); }).finally(function () { confirmButton.disabled = false; confirmButton.innerHTML = '<i class="fas fa-circle-minus"></i> Retirar seleccionadas'; }); });
   updateSelection();
 })();
 </script>
