@@ -6,7 +6,7 @@
 <section class="panel reveal">
   <p class="kicker">Sesión Sorare</p>
   <h1><i class="fas fa-key"></i> Renovar Token (JWT)</h1>
-  <p>Inicia sesión en Sorare con tu email y contraseña guardados y valida el código MFA de tu autenticador para conseguir un token nuevo, sin tocar archivos.</p>
+  <p>Introduce el código de tu autenticador. Usaremos las credenciales guardadas para renovar y almacenar el JWT sin mostrar ni modificar el resto de claves.</p>
 </section>
 
 <section class="panel reveal" style="animation-delay: 100ms;">
@@ -26,24 +26,10 @@
   {% endif %}
 </section>
 
-{% if not awaiting_otp %}
 <form method="post" class="panel form-panel reveal" style="animation-delay: 160ms;">
   {% csrf_token %}
-  <input type="hidden" name="action" value="start">
-  <h2>Paso 1 · Iniciar sesión</h2>
-  <p style="color:var(--muted);">Usa el <code>EMAIL</code> y <code>PASSWORD</code> del archivo de configuración. Tras pulsar, Sorare pedirá el código MFA.</p>
-  <div class="btn-row">
-    <button class="btn btn-accent" type="submit">
-      <i class="fas fa-right-to-bracket"></i> Iniciar sesión
-    </button>
-  </div>
-</form>
-{% else %}
-<form method="post" class="panel form-panel reveal" style="animation-delay: 160ms;">
-  {% csrf_token %}
-  <input type="hidden" name="action" value="verify">
-  <h2>Paso 2 · Código MFA</h2>
-  <p style="color:var(--muted);">Introduce el código de 6 dígitos de tu app autenticador (Google Authenticator / Authy).</p>
+  <h2><i class="fas fa-shield-halved"></i> Código MFA</h2>
+  <p style="color:var(--muted);">El código sólo se utiliza para esta renovación y no queda guardado.</p>
   <div class="field-grid">
     <label class="span-2">
       <span>Código MFA (6 dígitos)</span>
@@ -52,14 +38,10 @@
              style="letter-spacing:.4em;font-size:1.3rem;text-align:center;">
     </label>
   </div>
-  <div class="btn-row" style="gap:.6rem;">
+  <div class="btn-row">
     <button class="btn btn-accent" type="submit">
-      <i class="fas fa-check"></i> Validar y renovar
-    </button>
-    <button class="btn" type="submit" name="action" value="cancel" formnovalidate>
-      Cancelar
+      <i class="fas fa-arrows-rotate"></i> Renovar y guardar token
     </button>
   </div>
 </form>
-{% endif %}
 {% endblock %}

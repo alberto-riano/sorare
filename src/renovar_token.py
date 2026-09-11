@@ -57,12 +57,18 @@ def update_token_in_config(new_token):
     with open(config_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Reemplazar el valor de JWT_TOKEN
-    updated_content = re.sub(
-        r'JWT_TOKEN=.*',
-        f'JWT_TOKEN={new_token}',
-        content
-    )
+    # Reemplazar el valor sin mostrarlo nunca en logs. Si una instalación antigua
+    # todavía no tenía la clave, la añadimos al final del fichero.
+    if re.search(r'^JWT_TOKEN=.*$', content, flags=re.MULTILINE):
+        updated_content = re.sub(
+            r'^JWT_TOKEN=.*$',
+            f'JWT_TOKEN={new_token}',
+            content,
+            flags=re.MULTILINE,
+        )
+    else:
+        separator = '' if not content or content.endswith('\n') else '\n'
+        updated_content = f'{content}{separator}JWT_TOKEN={new_token}\n'
 
     with open(config_path, 'w', encoding='utf-8') as f:
         f.write(updated_content)
@@ -73,23 +79,16 @@ graphql_url = 'https://api.sorare.com/graphql'
 
 
 def get_salt(email):
-    print(f"Obteniendo salt para {email}...")
     resp = requests.get(f'https://api.sorare.com/api/v1/users/{email}', timeout=30)
     resp.raise_for_status()
-    salt = resp.json()['salt'].encode()
-    print("Salt recibido:", salt)
-    return salt
+    return resp.json()['salt'].encode()
 
 
 def hash_password(password, salt):
-    print("Hasheando contraseña...")
-    hashed = bcrypt.hashpw(password.encode(), salt).decode()
-    print("Contraseña hasheada:", hashed)
-    return hashed
+    return bcrypt.hashpw(password.encode(), salt).decode()
 
 
 def sign_in(input_data):
-    print("Haciendo llamada signIn con input:", input_data)
     query = '''
     mutation SignInMutation($input: signInInput!) {
       signIn(input: $input) {

@@ -48,8 +48,6 @@ sys.path.insert(0, str(REPO_ROOT / 'src'))
 
 from web_services import token_service  # noqa: E402  (requiere src en sys.path)
 
-OTP_CHALLENGE_SESSION_KEY = "sorare_otp_challenge"
-
 
 def healthz(_request):
     """Sonda interna para systemd/deploy; no consulta ni expone la cuenta."""
@@ -2146,50 +2144,18 @@ def offers_market_prices(request):
 
 
 def refresh_token(request):
-    """Renueva el JWT de Sorare desde la web (login + MFA en dos pasos)."""
-    awaiting_otp = bool(request.session.get(OTP_CHALLENGE_SESSION_KEY))
-
+    """Renueva el JWT usando las credenciales privadas y un único código MFA."""
     if request.method == "POST":
-        action = request.POST.get("action")
-
-        if action == "start":
-            result = token_service.begin_refresh()
-            if result["status"] == "success":
-                request.session.pop(OTP_CHALLENGE_SESSION_KEY, None)
-                messages.success(request, "Token renovado correctamente (sin MFA).")
-                return redirect("refresh_token")
-            if result["status"] == "mfa_required":
-                request.session[OTP_CHALLENGE_SESSION_KEY] = result["otp_session_challenge"]
-                awaiting_otp = True
-                messages.info(request, "Introduce el código MFA de tu autenticador.")
-            else:
-                messages.error(request, f"Error: {result['message']}")
-
-        elif action == "verify":
-            challenge = request.session.get(OTP_CHALLENGE_SESSION_KEY)
-            otp_code = (request.POST.get("otp_code") or "").strip()
-            if not challenge:
-                messages.error(request, "La sesión MFA expiró. Vuelve a empezar.")
-            else:
-                result = token_service.finish_refresh(challenge, otp_code)
-                if result["status"] == "success":
-                    request.session.pop(OTP_CHALLENGE_SESSION_KEY, None)
-                    messages.success(request, "Token renovado correctamente con MFA.")
-                    return redirect("refresh_token")
-                messages.error(request, f"Error: {result['message']}")
-                awaiting_otp = True
-
-        elif action == "cancel":
-            request.session.pop(OTP_CHALLENGE_SESSION_KEY, None)
-            awaiting_otp = False
-            messages.info(request, "Renovación cancelada.")
+        result = token_service.refresh_with_otp(request.POST.get("otp_code", ""))
+        if result["status"] == "success":
+            messages.success(request, "Token de Sorare renovado y guardado correctamente.")
             return redirect("refresh_token")
+        messages.error(request, f"No se pudo renovar el token: {result['message']}")
 
     return render(
         request,
         "dashboard/token.html",
         {
             "status": token_service.token_status(),
-            "awaiting_otp": awaiting_otp,
         },
     )

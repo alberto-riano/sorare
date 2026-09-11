@@ -70,3 +70,20 @@ def finish_refresh(otp_session_challenge: str, otp_code: str) -> dict:
         return {"status": "error", "message": "Sorare no devolvio token tras el MFA."}
 
     return result
+
+
+def refresh_with_otp(otp_code: str) -> dict:
+    """Renueva el JWT en una sola acción visible para el usuario.
+
+    EMAIL y PASSWORD se leen de la configuración privada. El desafío temporal
+    se obtiene y consume dentro de esta llamada; ni el desafío ni el código MFA
+    se persisten.
+    """
+    otp_code = str(otp_code or "").strip()
+    if not otp_code.isdigit() or len(otp_code) != 6:
+        return {"status": "error", "message": "Introduce un código MFA válido de 6 dígitos."}
+
+    initial = begin_refresh()
+    if initial.get("status") != "mfa_required":
+        return initial
+    return finish_refresh(initial.get("otp_session_challenge", ""), otp_code)
