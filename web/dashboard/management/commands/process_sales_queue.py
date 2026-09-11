@@ -15,7 +15,7 @@ from dashboard.models import (
 from dashboard.views import PATHS
 from web_services.movement_history import collect_movement_history, collect_public_reward_history
 from web_services.process_runner import run_card_delist, run_card_sale, sale_error_message
-from web_services.sales_inventory import collect_sales_inventory
+from web_services.sales_inventory import collect_active_listing_state, collect_sales_inventory, merge_active_listing_state
 
 
 MOVEMENT_INCREMENTAL_OVERLAP_DAYS = 2
@@ -252,12 +252,13 @@ def process_next_auction_refresh():
 
 def process_next_refresh():
     with transaction.atomic():
-        job = SalesRefreshJob.objects.select_for_update().filter(status=SalesRefreshJob.Status.QUEUED).first()
+        queued = SalesRefreshJob.objects.select_for_update().filter(status=SalesRefreshJob.Status.QUEUED)
+        job = queued.filter(mode=SalesRefreshJob.Mode.LISTINGS).first() or queued.first()
         if not job:
             return None
         job.status = SalesRefreshJob.Status.RUNNING
         job.started_at = timezone.now()
-        job.progress_label = "Descargando cartas de Sorare"
+        job.progress_label = "Revisando publicaciones" if job.mode == SalesRefreshJob.Mode.LISTINGS else "Descargando cartas de Sorare"
         job.save(update_fields=("status", "started_at", "progress_label"))
 
     try:
@@ -268,15 +269,28 @@ def process_next_refresh():
                 progress_label=label,
             )
 
-        cards = collect_sales_inventory(job.rarity, progress=save_progress)
-        SalesInventory.objects.update_or_create(
-            rarity=job.rarity,
-            defaults={"cards": cards, "refreshed_at": timezone.now()},
-        )
-        job.card_count = len(cards)
-        job.processed_count = len(cards)
-        job.total_count = len(cards)
-        job.progress_label = "Inventario actualizado"
+        if job.mode == SalesRefreshJob.Mode.LISTINGS:
+            remote_cards = collect_active_listing_state(job.rarity, progress=save_progress)
+            inventory = SalesInventory.objects.filter(rarity=job.rarity).first()
+            cards = merge_active_listing_state(list(inventory.cards if inventory else []), remote_cards, job.rarity)
+            SalesInventory.objects.update_or_create(
+                rarity=job.rarity,
+                defaults={"cards": cards, "listings_refreshed_at": timezone.now()},
+            )
+            job.card_count = sum(1 for card in cards if card.get("active_listing"))
+            job.processed_count = len(remote_cards)
+            job.total_count = len(remote_cards)
+            job.progress_label = "Publicaciones actualizadas"
+        else:
+            cards = collect_sales_inventory(job.rarity, progress=save_progress)
+            SalesInventory.objects.update_or_create(
+                rarity=job.rarity,
+                defaults={"cards": cards, "refreshed_at": timezone.now(), "listings_refreshed_at": timezone.now()},
+            )
+            job.card_count = len(cards)
+            job.processed_count = len(cards)
+            job.total_count = len(cards)
+            job.progress_label = "Inventario actualizado"
         job.status = SalesRefreshJob.Status.SUCCEEDED
     except Exception as exc:
         job.status = SalesRefreshJob.Status.FAILED

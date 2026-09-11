@@ -50,12 +50,33 @@ class MarketListingAlertTests(SimpleTestCase):
             "market_alert_min_saving_percent": "27.5",
             "market_alert_min_limited_value_eur": "2.25",
             "market_alert_min_comparables": "3",
+            "bargain_alert_enabled": "on", "bargain_alert_min_saving_percent": "40",
             "notify_mode": "all", "notify_drop_eur": "1", "rarity": "rare",
             "classic_players": "Jugador 10", "in_season_players": "",
         })
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(str(form.cleaned_data["market_alert_min_saving_percent"]), "27.5")
         self.assertEqual(form.cleaned_data["market_alert_min_comparables"], 3)
+
+    def test_strong_bargain_threshold_cannot_be_lower_than_normal_alerts(self):
+        form = TelegramSettingsForm({
+            "auction_alert_minutes": 3, "auction_alert_min_saving_percent": 20,
+            "auction_alert_rarities": ["rare"],
+            "market_alert_min_saving_percent": "27.5",
+            "market_alert_min_limited_value_eur": "2.25",
+            "market_alert_min_comparables": "3",
+            "bargain_alert_enabled": "on", "bargain_alert_min_saving_percent": "25",
+            "notify_mode": "all", "notify_drop_eur": "1", "rarity": "rare",
+            "classic_players": "Jugador 10", "in_season_players": "",
+        })
+        self.assertFalse(form.is_valid())
+        self.assertIn("bargain_alert_min_saving_percent", form.errors)
+
+    def test_premium_message_is_visibly_distinct(self):
+        message = market_listing_alert._message(
+            offer(), 603, {"fair_value": 900, "limited_value": 250, "ratio": 4}, 33, premium=True,
+        )
+        self.assertIn("GANGA REAL", message)
 
     @patch("web_services.process_runner._run_command")
     def test_runner_uses_market_listing_script(self, run_command):

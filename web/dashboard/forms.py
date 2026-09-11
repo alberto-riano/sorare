@@ -37,6 +37,10 @@ class TelegramSettingsForm(forms.Form):
         min_value=0, max_value=10000, decimal_places=2, max_digits=8, initial=1,
     )
     market_alert_min_comparables = forms.IntegerField(min_value=0, max_value=10, initial=0)
+    bargain_alert_enabled = forms.BooleanField(required=False)
+    bargain_alert_min_saving_percent = forms.DecimalField(
+        min_value=0, max_value=95, decimal_places=1, max_digits=4, initial=40,
+    )
     notify_mode = forms.ChoiceField(choices=NOTIFY_MODE_CHOICES)
     notify_drop_eur = forms.DecimalField(min_value=0, decimal_places=2, max_digits=8)
     send_all_offers_below_threshold = forms.BooleanField(required=False)
@@ -48,6 +52,21 @@ class TelegramSettingsForm(forms.Form):
     in_season_year = forms.IntegerField(required=False, min_value=2020, max_value=2100)
     classic_players = forms.CharField(widget=forms.Textarea(attrs={"rows": 10}))
     in_season_players = forms.CharField(widget=forms.Textarea(attrs={"rows": 8}), required=False)
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("bargain_alert_enabled"):
+            strong = cleaned.get("bargain_alert_min_saving_percent")
+            base = max(
+                cleaned.get("auction_alert_min_saving_percent") or 0,
+                cleaned.get("market_alert_min_saving_percent") or 0,
+            )
+            if strong is not None and strong < base:
+                self.add_error(
+                    "bargain_alert_min_saving_percent",
+                    "Debe ser igual o superior al umbral de los avisos normales.",
+                )
+        return cleaned
 
 
 class BidScheduleForm(forms.Form):

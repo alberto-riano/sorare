@@ -9,7 +9,7 @@ from cartas_para_vender import (
     fetch_cards_and_lineups,
     get_min_price_cached,
 )
-from sorare_utils import build_headers, fetch_exchange_rates
+from sorare_utils import build_headers, fetch_exchange_rates, graphql_request
 
 
 def _season_label(value) -> str:
@@ -28,6 +28,115 @@ def collection_display_name(value: str) -> str:
         str(value or "-"),
         flags=re.IGNORECASE,
     ).strip()
+
+
+def collect_active_listing_state(
+    rarity: str,
+    *,
+    progress: Callable[[int, int, str], None] | None = None,
+) -> list[dict]:
+    """Consulta las cartas propias y sólo los campos necesarios para publicaciones.
+
+    A diferencia de ``collect_sales_inventory``, no consulta suelos ni históricos
+    por jugador, por lo que normalmente requiere una petición por cada 100 cartas.
+    """
+    headers = build_headers()
+    rows: list[dict] = []
+    cursor = None
+    page = 0
+    while True:
+        page += 1
+        query = f"""
+        query QuickListingInventory($after: String) {{
+          currentUser {{
+            cards(rarities: [{rarity}], first: 100, after: $after) {{
+              nodes {{
+                assetId name slug rarityTyped seasonYear serialNumber inSeasonEligible
+                anyPlayer {{ slug displayName squaredPictureUrl }}
+                anyTeam {{ name pictureUrl }}
+                liveSingleSaleOffer {{
+                  id endDate receiverSide {{ amounts {{ eurCents }} }}
+                }}
+              }}
+              pageInfo {{ hasNextPage endCursor }}
+            }}
+          }}
+        }}
+        """
+        data = graphql_request(query, {"after": cursor}, headers=headers)
+        current_user = data.get("currentUser") or {}
+        connection = current_user.get("cards") or {}
+        nodes = connection.get("nodes") or []
+        rows.extend(nodes)
+        if progress:
+            progress(len(rows), len(rows) + (100 if (connection.get("pageInfo") or {}).get("hasNextPage") else 0), f"Página {page} · revisando publicaciones")
+        page_info = connection.get("pageInfo") or {}
+        if not page_info.get("hasNextPage"):
+            break
+        cursor = page_info.get("endCursor")
+    return rows
+
+
+def merge_active_listing_state(cached_cards: list[dict], remote_cards: list[dict], rarity: str) -> list[dict]:
+    """Aplica el estado en vivo de publicaciones sin recalcular datos comerciales."""
+    remote_by_asset = {card.get("assetId"): card for card in remote_cards if card.get("assetId")}
+    merged: list[dict] = []
+    cached_assets: set[str] = set()
+    for original in cached_cards or []:
+        card = dict(original)
+        asset_id = card.get("asset_id")
+        cached_assets.add(asset_id)
+        remote = remote_by_asset.get(asset_id) or {}
+        offer = remote.get("liveSingleSaleOffer") or {}
+        amounts = (offer.get("receiverSide") or {}).get("amounts") or {}
+        reasons = [
+            reason.strip() for reason in str(card.get("blocked_reason") or "").split(" · ")
+            if reason.strip() and reason.strip() != "Ya está a la venta"
+        ]
+        if offer.get("id"):
+            reasons.append("Ya está a la venta")
+        card.update({
+            "active_listing": bool(offer.get("id")),
+            "active_offer_id": offer.get("id") or "",
+            "active_offer_end": offer.get("endDate") or "",
+            "active_offer_eur": (int(amounts["eurCents"]) / 100) if amounts.get("eurCents") else None,
+            "blocked": bool(reasons),
+            "blocked_reason": " · ".join(reasons),
+        })
+        merged.append(card)
+
+    # Una carta publicada directamente en Sorare puede no existir todavía en la
+    # fotografía completa local. La incorporamos con los datos mínimos necesarios.
+    for remote in remote_cards:
+        asset_id = remote.get("assetId")
+        offer = remote.get("liveSingleSaleOffer") or {}
+        if not asset_id or asset_id in cached_assets or not offer.get("id"):
+            continue
+        player = remote.get("anyPlayer") or {}
+        team = remote.get("anyTeam") or {}
+        amounts = (offer.get("receiverSide") or {}).get("amounts") or {}
+        season_year = remote.get("seasonYear")
+        merged.append({
+            "asset_id": asset_id,
+            "card_slug": remote.get("slug") or "",
+            "player": player.get("displayName") or remote.get("name") or "Jugador",
+            "player_slug": player.get("slug") or "",
+            "player_picture_url": player.get("squaredPictureUrl") or "",
+            "team": team.get("name") or "-",
+            "team_picture_url": team.get("pictureUrl") or "",
+            "rarity": remote.get("rarityTyped") or rarity,
+            "season_year": season_year,
+            "season": _season_label(season_year),
+            "serial_number": remote.get("serialNumber"),
+            "in_season": bool(remote.get("inSeasonEligible")),
+            "active_listing": True,
+            "active_offer_id": offer.get("id") or "",
+            "active_offer_end": offer.get("endDate") or "",
+            "active_offer_eur": (int(amounts["eurCents"]) / 100) if amounts.get("eurCents") else None,
+            "blocked": True,
+            "blocked_reason": "Ya está a la venta",
+        })
+    return merged
 
 
 def collect_sales_inventory(

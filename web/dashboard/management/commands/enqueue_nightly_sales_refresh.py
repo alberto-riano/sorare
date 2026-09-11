@@ -22,6 +22,7 @@ class Command(BaseCommand):
         for rarity in RARITIES:
             active = SalesRefreshJob.objects.filter(
                 rarity=rarity,
+                mode=SalesRefreshJob.Mode.LISTINGS,
                 status__in=(SalesRefreshJob.Status.QUEUED, SalesRefreshJob.Status.RUNNING),
             ).exists()
             if active:
@@ -30,6 +31,7 @@ class Command(BaseCommand):
             job = SalesRefreshJob.objects.create(
                 user=user,
                 rarity=rarity,
+                mode=SalesRefreshJob.Mode.LISTINGS,
                 progress_label="En cola para actualización nocturna",
             )
             self.stdout.write(f"{rarity}: actualización #{job.pk} encolada.")

@@ -263,7 +263,7 @@ def _send_telegram(token, chat_id, text, photo_url=None):
     _telegram_post(token, "sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": False})
 
 
-def _message(offer, price, valuation, saving):
+def _message(offer, price, valuation, saving, *, premium=False):
     card = _card_from_offer(offer)
     player = card.get("anyPlayer") or {}
     team = card.get("anyTeam") or {}
@@ -275,8 +275,9 @@ def _message(offer, price, valuation, saving):
     if valuation.get("limited_value"):
         parts.append(f"Limited {valuation['limited_value']:.2f} € × {valuation['ratio']:.2f}")
     url = f"https://sorare.com/football/cards/{card.get('slug')}" if card.get("slug") else f"https://sorare.com/football/players/{player.get('slug', '')}"
+    heading = "💎 <b>GANGA REAL · Rare</b>" if premium else "🆕🔴 <b>Nueva oportunidad Rare</b>"
     return (
-        f"🆕🔴 <b>Nueva oportunidad Rare</b>\n"
+        f"{heading}\n"
         f"<b>{html.escape(str(player.get('displayName') or 'Jugador'))}</b> · {html.escape(str(team.get('name') or 'LaLiga'))}\n\n"
         f"Precio: <b>{price:.2f} €</b> · Valor: <b>{valuation['fair_value']:.2f} €</b> · Ahorro: <b>{saving:.1f}%</b>\n"
         f"{html.escape(' · '.join(parts))}\n\n"
@@ -293,6 +294,8 @@ def run(*, dry_run=False, now=None):
     min_saving = float(settings.get("MARKET_ALERT_MIN_SAVING_PERCENT") or 25)
     min_limited = float(settings.get("MARKET_ALERT_MIN_LIMITED_VALUE_EUR") or 1)
     min_comparables = int(settings.get("MARKET_ALERT_MIN_COMPARABLES") or 0)
+    bargain_enabled = settings.get("BARGAIN_ALERT_ENABLED", "false").lower() == "true"
+    bargain_min_saving = float(settings.get("BARGAIN_ALERT_MIN_SAVING_PERCENT") or 40)
     state = _load_state()
     settings_signature = f"{min_saving}:{min_limited}:{min_comparables}"
     settings_changed = state.get("settings_signature") not in (None, settings_signature)
@@ -313,7 +316,7 @@ def run(*, dry_run=False, now=None):
         if offer.get("id") and _offer_version_key(offer) not in seen and _matching_listing(offer, opportunity_rows)
     }
     new_candidates = list(candidates_by_id.values())
-    sent = evaluated = valued = failures = filtered = below_threshold = 0
+    sent = bargain_sent = evaluated = valued = failures = filtered = below_threshold = 0
     errors = []
     evaluations = []
     for candidate in new_candidates:
@@ -358,6 +361,16 @@ def run(*, dry_run=False, now=None):
                 else:
                     _send_telegram(config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_CHAT_ID"), message, (card.get("anyPlayer") or {}).get("squaredPictureUrl"))
                 sent += 1
+                if bargain_enabled and saving >= bargain_min_saving and config.get("TELEGRAM_BARGAIN_CHAT_ID"):
+                    premium_message = _message(candidate, price, valuation, saving, premium=True)
+                    if dry_run:
+                        print(premium_message)
+                    else:
+                        _send_telegram(
+                            config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_BARGAIN_CHAT_ID"), premium_message,
+                            (card.get("anyPlayer") or {}).get("squaredPictureUrl"),
+                        )
+                    bargain_sent += 1
             else:
                 filtered += 1
             evaluations.append({
@@ -382,6 +395,7 @@ def run(*, dry_run=False, now=None):
         "last_run_at": now.isoformat(), "last_result": "partial" if failures else "ok", "offers_scanned": len(offers),
         "new_candidates": len(new_candidates), "evaluated_count": evaluated, "valued_count": valued,
         "filtered_count": filtered, "below_threshold_count": below_threshold, "alerts_sent": sent,
+        "bargain_alerts_sent": bargain_sent,
         "max_saving_percent": max((row.get("saving_percent") or 0 for row in evaluations), default=0),
         "last_evaluations": evaluations[-8:], "failure_count": failures, "last_errors": errors[-3:],
     })

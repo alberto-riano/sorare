@@ -193,6 +193,7 @@ class SalesInventory(models.Model):
     rarity = models.CharField(max_length=16, unique=True)
     cards = models.JSONField(default=list)
     refreshed_at = models.DateTimeField(null=True, blank=True)
+    listings_refreshed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name_plural = "sales inventories"
@@ -277,6 +278,10 @@ class PublicRewardSyncJob(models.Model):
 
 
 class SalesRefreshJob(models.Model):
+    class Mode(models.TextChoices):
+        FULL = "full", "Inventario completo"
+        LISTINGS = "listings", "Sólo publicaciones"
+
     class Status(models.TextChoices):
         QUEUED = "queued", "En cola"
         RUNNING = "running", "Actualizando"
@@ -285,6 +290,7 @@ class SalesRefreshJob(models.Model):
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sorare_sales_refresh_jobs")
     rarity = models.CharField(max_length=16)
+    mode = models.CharField(max_length=12, choices=Mode.choices, default=Mode.FULL, db_index=True)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.QUEUED, db_index=True)
     card_count = models.PositiveIntegerField(default=0)
     processed_count = models.PositiveIntegerField(default=0)

@@ -20,7 +20,9 @@ class DelistRefreshTests(TestCase):
         self.assertContains(response, "fa-circle-minus")
 
     def test_refresh_action_enqueues_all_rarities_without_duplicates(self):
-        existing = SalesRefreshJob.objects.create(user=self.user, rarity="rare")
+        existing = SalesRefreshJob.objects.create(
+            user=self.user, rarity="rare", mode=SalesRefreshJob.Mode.LISTINGS,
+        )
 
         response = self.client.post(reverse("enqueue_delist_refresh"))
 
@@ -29,6 +31,7 @@ class DelistRefreshTests(TestCase):
         self.assertEqual({job["rarity"] for job in jobs}, {"limited", "rare", "super_rare"})
         self.assertEqual(next(job["id"] for job in jobs if job["rarity"] == "rare"), existing.pk)
         self.assertEqual(SalesRefreshJob.objects.count(), 3)
+        self.assertFalse(SalesRefreshJob.objects.exclude(mode=SalesRefreshJob.Mode.LISTINGS).exists())
 
     def test_refresh_status_can_return_requested_refresh_jobs(self):
         requested = SalesRefreshJob.objects.create(user=self.user, rarity="limited")
@@ -49,3 +52,4 @@ class DelistRefreshTests(TestCase):
             set(SalesRefreshJob.objects.values_list("rarity", flat=True)),
             {"limited", "rare", "super_rare"},
         )
+        self.assertFalse(SalesRefreshJob.objects.exclude(mode=SalesRefreshJob.Mode.LISTINGS).exists())

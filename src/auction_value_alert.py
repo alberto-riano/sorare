@@ -222,7 +222,7 @@ def _send_telegram(token, chat_id, text, photo_url=None):
     })
 
 
-def _message(row, detail, valuation, next_eur, saving, remaining_minutes):
+def _message(row, detail, valuation, next_eur, saving, remaining_minutes, *, premium=False):
     cards = detail.get("anyCards") or []
     card_slug = (cards[0] if cards else {}).get("slug")
     url = (
@@ -240,8 +240,9 @@ def _message(row, detail, valuation, next_eur, saving, remaining_minutes):
     if valuation.get("limited_floor") is not None:
         market_parts.append(f"Limited {valuation['limited_floor']:.2f} €")
     market_line = " · ".join(market_parts) or "Sin referencias de mercado"
+    marker = "💎 <b>GANGA REAL</b>\n" if premium else "🚨 "
     return (
-        f"🚨 <b>{html.escape(str(row.get('player') or 'Jugador'))}</b> · {html.escape(str(rarity_label))}\n"
+        f"{marker}<b>{html.escape(str(row.get('player') or 'Jugador'))}</b> · {html.escape(str(rarity_label))}\n"
         f"{html.escape(str(row.get('team') or 'LaLiga'))}\n\n"
         f"Puja: <b>{next_eur:.2f} €</b> · Valor: <b>{valuation['value']:.2f} €</b> · Ahorro: <b>{saving:.1f}%</b>\n"
         f"{html.escape(market_line)}\n"
@@ -258,6 +259,8 @@ def run(*, dry_run=False, now=None):
         return 0
     lead_minutes = int(settings.get("AUCTION_ALERT_MINUTES") or 3)
     min_saving = float(settings.get("AUCTION_ALERT_MIN_SAVING_PERCENT") or 20)
+    bargain_enabled = settings.get("BARGAIN_ALERT_ENABLED", "false").lower() == "true"
+    bargain_min_saving = float(settings.get("BARGAIN_ALERT_MIN_SAVING_PERCENT") or 40)
     selected_rarities = {
         value.strip() for value in settings.get("AUCTION_ALERT_RARITIES", "rare,super_rare").split(",")
         if value.strip() in ALLOWED_RARITIES
@@ -289,6 +292,7 @@ def run(*, dry_run=False, now=None):
     # evitamos consultar servicios externos en cada ejecución del temporizador.
     rates = (0.92, 1.17, float(eth_rate or 0) / 100)
     sent = 0
+    bargain_sent = 0
     for row in candidates:
         auction_id = row["auction_id"]
         detail = details.get(auction_id) or {}
@@ -328,17 +332,29 @@ def run(*, dry_run=False, now=None):
                     row.get("player_picture_url"),
                 )
             sent += 1
+            if bargain_enabled and saving >= bargain_min_saving and config.get("TELEGRAM_BARGAIN_CHAT_ID"):
+                premium_message = _message(
+                    row, detail, cached, next_eur, saving, remaining_minutes, premium=True,
+                )
+                if dry_run:
+                    print(premium_message)
+                else:
+                    _send_telegram(
+                        config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_BARGAIN_CHAT_ID"), premium_message,
+                        row.get("player_picture_url"),
+                    )
+                bargain_sent += 1
         checked[auction_id] = now.isoformat()
 
     cutoff = now - timedelta(days=2)
     state["checked"] = {key: value for key, value in checked.items() if (parse_date(value) or now) >= cutoff}
     state.update({
         "last_run_at": now.isoformat(), "last_result": "ok",
-        "candidate_count": len(candidates), "alerts_sent": sent,
+        "candidate_count": len(candidates), "alerts_sent": sent, "bargain_alerts_sent": bargain_sent,
     })
     if not dry_run:
         _save_state(state)
-    print(f"Revisadas {len(candidates)} subastas; {sent} avisos {'simulados' if dry_run else 'enviados'}.")
+    print(f"Revisadas {len(candidates)} subastas; {sent} avisos y {bargain_sent} gangas reales {'simuladas' if dry_run else 'enviadas'}.")
     return 0
 
 

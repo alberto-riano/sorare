@@ -1115,6 +1115,8 @@ def telegram_alerts(request):
         "market_alert_min_saving_percent": initial_source["MARKET_ALERT_MIN_SAVING_PERCENT"],
         "market_alert_min_limited_value_eur": initial_source["MARKET_ALERT_MIN_LIMITED_VALUE_EUR"],
         "market_alert_min_comparables": initial_source["MARKET_ALERT_MIN_COMPARABLES"],
+        "bargain_alert_enabled": initial_source["BARGAIN_ALERT_ENABLED"].lower() == "true",
+        "bargain_alert_min_saving_percent": initial_source["BARGAIN_ALERT_MIN_SAVING_PERCENT"],
         "notify_mode": initial_source["NOTIFY_MODE"],
         "notify_drop_eur": initial_source["NOTIFY_DROP_EUR"],
         "send_all_offers_below_threshold": initial_source["SEND_ALL_OFFERS_BELOW_THRESHOLD"].lower() == "true",
@@ -1144,6 +1146,8 @@ def telegram_alerts(request):
                     "MARKET_ALERT_MIN_SAVING_PERCENT": str(data["market_alert_min_saving_percent"]),
                     "MARKET_ALERT_MIN_LIMITED_VALUE_EUR": str(data["market_alert_min_limited_value_eur"]),
                     "MARKET_ALERT_MIN_COMPARABLES": str(data["market_alert_min_comparables"]),
+                    "BARGAIN_ALERT_ENABLED": _to_bool_text(bool(data["bargain_alert_enabled"])),
+                    "BARGAIN_ALERT_MIN_SAVING_PERCENT": str(data["bargain_alert_min_saving_percent"]),
                     "NOTIFY_MODE": data["notify_mode"],
                     "NOTIFY_DROP_EUR": str(data["notify_drop_eur"]),
                     "SEND_ALL_OFFERS_BELOW_THRESHOLD": _to_bool_text(bool(data["send_all_offers_below_threshold"])),
@@ -1527,11 +1531,16 @@ def delist_workbench(request):
     listings.sort(key=lambda card: (str(card.get("player") or "").casefold(), card.get("serial_number") or 0))
 
     refreshed_at = min(
-        (inventories[rarity].refreshed_at for rarity in selected_rarities if rarity in inventories and inventories[rarity].refreshed_at),
+        (
+            inventories[rarity].listings_refreshed_at or inventories[rarity].refreshed_at
+            for rarity in selected_rarities
+            if rarity in inventories and (inventories[rarity].listings_refreshed_at or inventories[rarity].refreshed_at)
+        ),
         default=None,
     )
     active_refreshes = list(SalesRefreshJob.objects.filter(
         rarity__in=allowed_rarities,
+        mode=SalesRefreshJob.Mode.LISTINGS,
         status__in=(SalesRefreshJob.Status.QUEUED, SalesRefreshJob.Status.RUNNING),
     ).order_by("created_at"))
     return render(request, "dashboard/delist.html", {
@@ -1551,9 +1560,14 @@ def enqueue_delist_refresh(request):
     for rarity in ("limited", "rare", "super_rare"):
         active = SalesRefreshJob.objects.filter(
             rarity=rarity,
+            mode=SalesRefreshJob.Mode.LISTINGS,
             status__in=(SalesRefreshJob.Status.QUEUED, SalesRefreshJob.Status.RUNNING),
         ).order_by("created_at").first()
-        jobs.append(active or SalesRefreshJob.objects.create(user=request.user, rarity=rarity))
+        jobs.append(active or SalesRefreshJob.objects.create(
+            user=request.user,
+            rarity=rarity,
+            mode=SalesRefreshJob.Mode.LISTINGS,
+        ))
     return JsonResponse({
         "jobs": [{"id": job.pk, "rarity": job.rarity, "status": job.status} for job in jobs],
     }, status=202)
