@@ -139,7 +139,7 @@ def _extract_floor(market, key, rates):
     return round(cents / 100, 2) if cents else None
 
 
-def _valuation(player_slug, rarity, headers, rates, now):
+def _valuation(player_slug, rarity, headers, rates, now, weights):
     query, variables = _floor_query(player_slug, rarity)
     market = graphql_request(query, variables, headers=headers).get("player") or {}
     floor = _extract_floor(market, "target", rates)
@@ -172,6 +172,9 @@ def _valuation(player_slug, rarity, headers, rates, now):
         market_floor_reference=floor,
         sales_confidence=summary.get("confidence"),
         ratio_source="fallback",
+        sales_weight=weights["sales"],
+        parity_weight=weights["parity"],
+        floor_weight=weights["floor"],
     )
     return {
         "value": fair_value,
@@ -254,38 +257,56 @@ def _message(row, detail, valuation, next_eur, saving, remaining_minutes, *, pre
 def run(*, dry_run=False, now=None):
     now = now or datetime.now(timezone.utc)
     settings = {**DEFAULT_TELEGRAM_SETTINGS, **parse_key_value_file(SETTINGS_PATH)}
-    if settings.get("AUCTION_ALERT_ENABLED", "false").lower() != "true" and not dry_run:
+    auction_enabled = settings.get("AUCTION_ALERT_ENABLED", "false").lower() == "true"
+    bargain_enabled = settings.get("BARGAIN_ALERT_ENABLED", "false").lower() == "true"
+    if not auction_enabled and not bargain_enabled and not dry_run:
         print("Alertas de subasta desactivadas.")
         return 0
     lead_minutes = int(settings.get("AUCTION_ALERT_MINUTES") or 3)
     min_saving = float(settings.get("AUCTION_ALERT_MIN_SAVING_PERCENT") or 20)
-    bargain_enabled = settings.get("BARGAIN_ALERT_ENABLED", "false").lower() == "true"
     bargain_min_saving = float(settings.get("BARGAIN_ALERT_MIN_SAVING_PERCENT") or 40)
+    bargain_lead_minutes = int(settings.get("BARGAIN_ALERT_AUCTION_MINUTES") or 10)
+    weights = {
+        "sales": int(settings.get("VALUATION_SALES_WEIGHT") or 3),
+        "parity": int(settings.get("VALUATION_PARITY_WEIGHT") or 2),
+        "floor": int(settings.get("VALUATION_FLOOR_WEIGHT") or 1),
+    }
     selected_rarities = {
         value.strip() for value in settings.get("AUCTION_ALERT_RARITIES", "rare,super_rare").split(",")
         if value.strip() in ALLOWED_RARITIES
     } or {"rare"}
-    rule = f"{lead_minutes}:{min_saving:.2f}:{','.join(sorted(selected_rarities))}"
+    rule = f"{lead_minutes}:{min_saving:.2f}:{bargain_enabled}:{bargain_lead_minutes}:{bargain_min_saving:.2f}:{weights}:{','.join(sorted(selected_rarities))}"
     state = _load_state()
     if state.get("rule") != rule:
-        state = {"rule": rule, "checked": {}, "values": {}}
-    checked = state.setdefault("checked", {})
+        state = {"rule": rule, "normal_checked": {}, "bargain_checked": {}, "values": {}}
+    normal_checked = state.setdefault("normal_checked", state.pop("checked", {}))
+    bargain_checked = state.setdefault("bargain_checked", {})
     values_cache = state.setdefault("values", {})
     cache = load_auction_cache() or {}
     universe = cache.get("alert_auctions") or cache.get("auctions") or []
     universe = [row for row in universe if (row.get("rarity") or "rare") in selected_rarities]
-    candidates = candidate_auctions(universe, now, lead_minutes, checked)
+    config = read_config()
+    premium_ready = bargain_enabled and bool(config.get("TELEGRAM_BARGAIN_CHAT_ID"))
+    max_lead_minutes = max(lead_minutes if auction_enabled else 0, bargain_lead_minutes if premium_ready else 0)
+    candidates = []
+    for row in universe:
+        auction_id = row.get("auction_id")
+        end = parse_date(row.get("end_date"))
+        remaining = (end - now).total_seconds() if end else 0
+        normal_due = auction_enabled and auction_id not in normal_checked and 0 < remaining <= lead_minutes * 60
+        bargain_due = premium_ready and auction_id not in bargain_checked and 0 < remaining <= bargain_lead_minutes * 60
+        if (normal_due or bargain_due) and remaining <= max_lead_minutes * 60:
+            candidates.append(row)
     if not candidates:
         state.update({
             "last_run_at": now.isoformat(), "last_result": "ok",
-            "candidate_count": 0, "alerts_sent": 0,
+            "candidate_count": 0, "alerts_sent": 0, "bargain_alerts_sent": 0,
         })
         if not dry_run:
             _save_state(state)
         print("No hay subastas nuevas dentro de la ventana de aviso.")
         return 0
 
-    config = read_config()
     headers = build_headers(config)
     details, eth_rate, nickname = _live_details(headers, [row["auction_id"] for row in candidates])
     # La tasa ETH procede del mismo snapshot de Sorare que ``minNextBid``. Así
@@ -297,12 +318,18 @@ def run(*, dry_run=False, now=None):
         auction_id = row["auction_id"]
         detail = details.get(auction_id) or {}
         end = parse_date(detail.get("endDate") or row.get("end_date"))
+        normal_due = auction_enabled and auction_id not in normal_checked and end and 0 < (end - now).total_seconds() <= lead_minutes * 60
+        bargain_due = premium_ready and auction_id not in bargain_checked and end and 0 < (end - now).total_seconds() <= bargain_lead_minutes * 60
         if not detail.get("open") or not end or end <= now:
-            checked[auction_id] = now.isoformat()
+            normal_checked[auction_id] = now.isoformat()
+            bargain_checked[auction_id] = now.isoformat()
             continue
         winner = (((detail.get("bestBid") or {}).get("userBidder") or {}).get("nickname") or "").strip()
         if winner and nickname and winner.casefold() == nickname.casefold():
-            checked[auction_id] = now.isoformat()
+            if normal_due:
+                normal_checked[auction_id] = now.isoformat()
+            if bargain_due:
+                bargain_checked[auction_id] = now.isoformat()
             continue
         next_eur = next_bid_eur(detail.get("minNextBid"), detail.get("currency"), eth_rate)
         if next_eur is None or next_eur <= 0:
@@ -313,16 +340,19 @@ def run(*, dry_run=False, now=None):
         cached = values_cache.get(value_key) or {}
         cached_at = parse_date(cached.get("calculated_at"))
         if not cached_at or now - cached_at > VALUE_TTL:
-            cached = _valuation(slug, rarity, headers, rates, now)
+            cached = _valuation(slug, rarity, headers, rates, now, weights)
             cached["calculated_at"] = now.isoformat()
             values_cache[value_key] = cached
         value = cached.get("value")
         if not value:
-            checked[auction_id] = now.isoformat()
+            if normal_due:
+                normal_checked[auction_id] = now.isoformat()
+            if bargain_due:
+                bargain_checked[auction_id] = now.isoformat()
             continue
         saving = (float(value) - next_eur) / float(value) * 100
         remaining_minutes = max(1, math.ceil((end - now).total_seconds() / 60))
-        if saving >= min_saving:
+        if normal_due and saving >= min_saving:
             message = _message(row, detail, cached, next_eur, saving, remaining_minutes)
             if dry_run:
                 print(message)
@@ -332,22 +362,26 @@ def run(*, dry_run=False, now=None):
                     row.get("player_picture_url"),
                 )
             sent += 1
-            if bargain_enabled and saving >= bargain_min_saving and config.get("TELEGRAM_BARGAIN_CHAT_ID"):
-                premium_message = _message(
-                    row, detail, cached, next_eur, saving, remaining_minutes, premium=True,
+        if bargain_due and saving >= bargain_min_saving:
+            premium_message = _message(
+                row, detail, cached, next_eur, saving, remaining_minutes, premium=True,
+            )
+            if dry_run:
+                print(premium_message)
+            else:
+                _send_telegram(
+                    config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_BARGAIN_CHAT_ID"), premium_message,
+                    row.get("player_picture_url"),
                 )
-                if dry_run:
-                    print(premium_message)
-                else:
-                    _send_telegram(
-                        config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_BARGAIN_CHAT_ID"), premium_message,
-                        row.get("player_picture_url"),
-                    )
-                bargain_sent += 1
-        checked[auction_id] = now.isoformat()
+            bargain_sent += 1
+        if normal_due:
+            normal_checked[auction_id] = now.isoformat()
+        if bargain_due:
+            bargain_checked[auction_id] = now.isoformat()
 
     cutoff = now - timedelta(days=2)
-    state["checked"] = {key: value for key, value in checked.items() if (parse_date(value) or now) >= cutoff}
+    state["normal_checked"] = {key: value for key, value in normal_checked.items() if (parse_date(value) or now) >= cutoff}
+    state["bargain_checked"] = {key: value for key, value in bargain_checked.items() if (parse_date(value) or now) >= cutoff}
     state.update({
         "last_run_at": now.isoformat(), "last_result": "ok",
         "candidate_count": len(candidates), "alerts_sent": sent, "bargain_alerts_sent": bargain_sent,

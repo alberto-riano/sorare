@@ -106,6 +106,9 @@ def estimate_fair_value(
     market_floor_reference=None,
     sales_confidence="low",
     ratio_source="fallback",
+    sales_weight=3,
+    parity_weight=2,
+    floor_weight=1,
 ):
     """Combina comparables de forma prudente sin usar el precio candidato.
 
@@ -115,11 +118,12 @@ def estimate_fair_value(
     """
     references = []
     if sales_reference:
-        references.append((float(sales_reference), 3 if sales_confidence != "low" else 1))
+        references.append((float(sales_reference), sales_weight if sales_confidence != "low" else min(1, sales_weight)))
     if parity_reference:
-        references.append((float(parity_reference), 2 if ratio_source == "learned" else 1))
+        references.append((float(parity_reference), parity_weight if ratio_source == "learned" else min(1, parity_weight)))
     if market_floor_reference:
-        references.append((float(market_floor_reference), 1))
+        references.append((float(market_floor_reference), floor_weight))
+    references = [(reference, weight) for reference, weight in references if weight > 0]
     if not references:
         return None
     total_weight = sum(weight for _, weight in references)

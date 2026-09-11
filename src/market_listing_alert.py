@@ -185,7 +185,7 @@ def _comparable_sales(prices, rates, now):
     return result
 
 
-def _player_valuation(candidate, headers, rates, now, ratio, ratio_source, snapshot_row=None):
+def _player_valuation(candidate, headers, rates, now, ratio, ratio_source, snapshot_row=None, weights=None):
     card = _card_from_offer(candidate)
     player_slug = (card.get("anyPlayer") or {}).get("slug")
     current_offers = get_live_single_sale_offers(player_slug, headers=headers)
@@ -220,12 +220,16 @@ def _player_valuation(candidate, headers, rates, now, ratio, ratio_source, snaps
     limited_values = [value for value in (limited_floor, limited_reference) if value]
     limited_value = min(limited_values) if limited_values else None
     parity = limited_value * ratio if limited_value else None
+    weights = weights or {"sales": 3, "parity": 2, "floor": 1}
     fair_value = estimate_fair_value(
         sales_reference=rare_reference,
         parity_reference=parity,
         market_floor_reference=rare_peer_floor,
         sales_confidence=rare_confidence,
         ratio_source=ratio_source,
+        sales_weight=weights["sales"],
+        parity_weight=weights["parity"],
+        floor_weight=weights["floor"],
     )
     cached_rare_sales = cached_rare.get("sales") or []
     comparable_count = len(rare_summary.get("sales") or [])
@@ -288,16 +292,22 @@ def _message(offer, price, valuation, saving, *, premium=False):
 def run(*, dry_run=False, now=None):
     now = now or datetime.now(timezone.utc)
     settings = {**DEFAULT_TELEGRAM_SETTINGS, **parse_key_value_file(SETTINGS_PATH)}
-    if settings.get("MARKET_ALERT_ENABLED", "false").lower() != "true" and not dry_run:
+    market_enabled = settings.get("MARKET_ALERT_ENABLED", "false").lower() == "true"
+    bargain_enabled = settings.get("BARGAIN_ALERT_ENABLED", "false").lower() == "true"
+    if not market_enabled and not bargain_enabled and not dry_run:
         print("Alertas de nuevas ventas desactivadas.")
         return 0
     min_saving = float(settings.get("MARKET_ALERT_MIN_SAVING_PERCENT") or 25)
     min_limited = float(settings.get("MARKET_ALERT_MIN_LIMITED_VALUE_EUR") or 1)
     min_comparables = int(settings.get("MARKET_ALERT_MIN_COMPARABLES") or 0)
-    bargain_enabled = settings.get("BARGAIN_ALERT_ENABLED", "false").lower() == "true"
     bargain_min_saving = float(settings.get("BARGAIN_ALERT_MIN_SAVING_PERCENT") or 40)
+    weights = {
+        "sales": int(settings.get("VALUATION_SALES_WEIGHT") or 3),
+        "parity": int(settings.get("VALUATION_PARITY_WEIGHT") or 2),
+        "floor": int(settings.get("VALUATION_FLOOR_WEIGHT") or 1),
+    }
     state = _load_state()
-    settings_signature = f"{min_saving}:{min_limited}:{min_comparables}"
+    settings_signature = f"{min_saving}:{min_limited}:{min_comparables}:{bargain_enabled}:{bargain_min_saving}:{weights}"
     settings_changed = state.get("settings_signature") not in (None, settings_signature)
     last_run = _parse_date(state.get("last_run_at"))
     updated_after = (last_run - timedelta(minutes=OVERLAP_MINUTES)) if last_run else (now - timedelta(minutes=POLL_INTERVAL_MINUTES + OVERLAP_MINUTES))
@@ -305,6 +315,7 @@ def run(*, dry_run=False, now=None):
 
     opportunity_rows, ratio, ratio_source = _opportunity_context()
     config = read_config()
+    premium_ready = bargain_enabled and bool(config.get("TELEGRAM_BARGAIN_CHAT_ID"))
     headers = build_headers(config)
     rates = fetch_exchange_rates()
     offers = _fetch_recent_listings(headers, updated_after)
@@ -333,7 +344,7 @@ def run(*, dry_run=False, now=None):
             card = _card_from_offer(candidate)
             slug = (card.get("anyPlayer") or {}).get("slug")
             snapshot_row = opportunity_rows.get(slug) or {}
-            valuation = _player_valuation(candidate, headers, rates, now, ratio, ratio_source, snapshot_row)
+            valuation = _player_valuation(candidate, headers, rates, now, ratio, ratio_source, snapshot_row, weights)
             evaluated += 1
             fair_value = valuation.get("fair_value")
             if fair_value:
@@ -354,14 +365,15 @@ def run(*, dry_run=False, now=None):
             elif saving < min_saving:
                 decision, eligible = f"Ahorro inferior al {min_saving:g}%", False
                 below_threshold += 1
-            if eligible and saving >= min_saving:
-                message = _message(candidate, price, valuation, saving)
-                if dry_run:
-                    print(message)
-                else:
-                    _send_telegram(config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_CHAT_ID"), message, (card.get("anyPlayer") or {}).get("squaredPictureUrl"))
-                sent += 1
-                if bargain_enabled and saving >= bargain_min_saving and config.get("TELEGRAM_BARGAIN_CHAT_ID"):
+            if eligible and ((market_enabled and saving >= min_saving) or (premium_ready and saving >= bargain_min_saving)):
+                if market_enabled and saving >= min_saving:
+                    message = _message(candidate, price, valuation, saving)
+                    if dry_run:
+                        print(message)
+                    else:
+                        _send_telegram(config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_CHAT_ID"), message, (card.get("anyPlayer") or {}).get("squaredPictureUrl"))
+                    sent += 1
+                if premium_ready and saving >= bargain_min_saving:
                     premium_message = _message(candidate, price, valuation, saving, premium=True)
                     if dry_run:
                         print(premium_message)

@@ -41,6 +41,10 @@ class TelegramSettingsForm(forms.Form):
     bargain_alert_min_saving_percent = forms.DecimalField(
         min_value=0, max_value=95, decimal_places=1, max_digits=4, initial=40,
     )
+    bargain_alert_auction_minutes = forms.IntegerField(min_value=1, max_value=180, initial=10)
+    valuation_sales_weight = forms.IntegerField(min_value=0, max_value=10, initial=3)
+    valuation_parity_weight = forms.IntegerField(min_value=0, max_value=10, initial=2)
+    valuation_floor_weight = forms.IntegerField(min_value=0, max_value=10, initial=1)
     notify_mode = forms.ChoiceField(choices=NOTIFY_MODE_CHOICES)
     notify_drop_eur = forms.DecimalField(min_value=0, decimal_places=2, max_digits=8)
     send_all_offers_below_threshold = forms.BooleanField(required=False)
@@ -66,6 +70,12 @@ class TelegramSettingsForm(forms.Form):
                     "bargain_alert_min_saving_percent",
                     "Debe ser igual o superior al umbral de los avisos normales.",
                 )
+        if sum((
+            cleaned.get("valuation_sales_weight") or 0,
+            cleaned.get("valuation_parity_weight") or 0,
+            cleaned.get("valuation_floor_weight") or 0,
+        )) == 0:
+            self.add_error("valuation_sales_weight", "Activa al menos una referencia para calcular el valor.")
         return cleaned
 
 

@@ -50,7 +50,8 @@ class MarketListingAlertTests(SimpleTestCase):
             "market_alert_min_saving_percent": "27.5",
             "market_alert_min_limited_value_eur": "2.25",
             "market_alert_min_comparables": "3",
-            "bargain_alert_enabled": "on", "bargain_alert_min_saving_percent": "40",
+            "bargain_alert_enabled": "on", "bargain_alert_min_saving_percent": "40", "bargain_alert_auction_minutes": "10",
+            "valuation_sales_weight": "3", "valuation_parity_weight": "2", "valuation_floor_weight": "1",
             "notify_mode": "all", "notify_drop_eur": "1", "rarity": "rare",
             "classic_players": "Jugador 10", "in_season_players": "",
         })
@@ -65,7 +66,8 @@ class MarketListingAlertTests(SimpleTestCase):
             "market_alert_min_saving_percent": "27.5",
             "market_alert_min_limited_value_eur": "2.25",
             "market_alert_min_comparables": "3",
-            "bargain_alert_enabled": "on", "bargain_alert_min_saving_percent": "25",
+            "bargain_alert_enabled": "on", "bargain_alert_min_saving_percent": "25", "bargain_alert_auction_minutes": "10",
+            "valuation_sales_weight": "3", "valuation_parity_weight": "2", "valuation_floor_weight": "1",
             "notify_mode": "all", "notify_drop_eur": "1", "rarity": "rare",
             "classic_players": "Jugador 10", "in_season_players": "",
         })
