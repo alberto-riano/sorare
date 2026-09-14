@@ -224,7 +224,7 @@ def _valid_lineups(cards: list[dict], max_points: int, odds_weight: float) -> li
 def propose_lineups(cards: list[dict], *, count: int = 4, max_points: int = 260, odds_weight: float = 0.3) -> dict:
     eligible = [
         card for card in cards
-        if card.get("candidate") and not card.get("in_lineup") and card.get("position") and card.get("average") is not None
+        if card.get("candidate") and card.get("position") and card.get("average") is not None
     ]
     selected, remaining = [], eligible
     for _ in range(count):
@@ -242,7 +242,7 @@ def propose_lineups(cards: list[dict], *, count: int = 4, max_points: int = 260,
     used = {card["asset_id"] for lineup in selected for card in lineup["cards"]}
     missing_average = [
         card for card in cards
-        if card.get("candidate") and not card.get("in_lineup") and card.get("average") is None
+        if card.get("candidate") and card.get("average") is None
     ]
     return {
         "lineups": selected,

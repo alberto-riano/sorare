@@ -141,7 +141,9 @@ def lineup_helper(request):
     # Limpia instantáneamente fotografías anteriores a este filtro: no deben
     # reaparecer Common/Limited aunque el usuario aún no haya refrescado.
     cards = [
-        {**card, "is_in_season": card.get("is_in_season") is True}
+        # Estar en una alineación de Sorare no impide valorarla en esta
+        # herramienta: aquí sólo se preparan opciones, no se envía ninguna.
+        {**card, "is_in_season": card.get("is_in_season") is True, "in_lineup": False}
         for card in (inventory.cards or [])
         if str(card.get("rarity") or "").casefold() == "rare"
     ]
@@ -170,7 +172,7 @@ def lineup_helper(request):
             updated = []
             for card in cards:
                 asset_id = str(card.get("asset_id") or "")
-                card["candidate"] = asset_id in candidate_ids and not card.get("in_lineup")
+                card["candidate"] = asset_id in candidate_ids
                 updated.append(card)
             cards = updated
             inventory.cards = cards
@@ -190,11 +192,11 @@ def lineup_helper(request):
         "total": sum(card.get("is_in_season") is True for card in cards),
         "with_average": sum(card.get("average") is not None for card in cards),
         "in_lineup": sum(bool(card.get("in_lineup")) for card in cards),
-        "selected": sum(bool(card.get("candidate")) and not card.get("in_lineup") for card in cards),
+        "selected": sum(bool(card.get("candidate")) for card in cards),
     }
     candidate_groups = {position: [] for position in position_sort}
     for card in cards:
-        if card.get("candidate") and not card.get("in_lineup") and card.get("position") in candidate_groups:
+        if card.get("candidate") and card.get("position") in candidate_groups:
             candidate_groups[card["position"]].append(card)
     team_pictures = {
         str(card.get("team") or ""): str(card.get("team_picture_url") or "")
