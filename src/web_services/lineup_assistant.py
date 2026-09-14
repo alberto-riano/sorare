@@ -102,7 +102,10 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
           cards(rarities: [rare], first: 100, after: $after) {
             nodes {
               assetId slug rarityTyped seasonYear serialNumber inSeasonEligible anyPositions
-              anyPlayer { slug displayName squaredPictureUrl lastFifteenSo5AverageScore }
+              anyPlayer {
+                slug displayName squaredPictureUrl
+                averageScore(type: LAST_FIFTEEN_SO5_AVERAGE_SCORE)
+              }
               anyTeam { name pictureUrl }
             }
             pageInfo { hasNextPage endCursor }
@@ -142,8 +145,8 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
                 "in_lineup": (raw.get("slug") or "") in lineup_slugs,
                 # L15 se publica en el jugador. Pedirlo junto a la carta evita
                 # decenas de consultas adicionales y hace ágil el selector.
-                "average": player.get("lastFifteenSo5AverageScore"),
-                "sorare_average": player.get("lastFifteenSo5AverageScore"),
+                "average": player.get("averageScore"),
+                "sorare_average": player.get("averageScore"),
                 # El pool ya no parte de toda la galería: sólo se usan las cartas
                 # que el manager añade expresamente como candidatas.
                 "candidate": bool(old.get("candidate", False)),
