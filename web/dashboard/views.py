@@ -158,21 +158,23 @@ def lineup_helper(request):
             except Exception as exc:
                 messages.error(request, f"No se pudieron actualizar las cartas: {str(exc)[:220]}")
         else:
+            candidate_ids = {
+                value.strip() for value in str(request.POST.get("candidate_asset_ids", "")).split(",") if value.strip()
+            }
             updated = []
             for card in cards:
                 asset_id = str(card.get("asset_id") or "")
-                if card.get("in_lineup"):
-                    updated.append(card)
-                    continue
-                raw_average = str(request.POST.get(f"average_{asset_id}", "")).strip().replace(",", ".")
-                try:
-                    average = float(raw_average) if raw_average else None
-                except ValueError:
-                    average = card.get("average")
-                if average is not None and not 0 <= average <= 100:
-                    average = card.get("average")
-                card["average"] = round(average, 2) if average is not None else None
-                card["excluded"] = request.POST.get(f"exclude_{asset_id}") == "on"
+                card["candidate"] = asset_id in candidate_ids and not card.get("in_lineup")
+                average_key = f"average_{asset_id}"
+                if average_key in request.POST:
+                    raw_average = str(request.POST.get(average_key, "")).strip().replace(",", ".")
+                    try:
+                        average = float(raw_average) if raw_average else None
+                    except ValueError:
+                        average = card.get("average")
+                    if average is not None and not 0 <= average <= 100:
+                        average = card.get("average")
+                    card["average"] = round(average, 2) if average is not None else None
                 updated.append(card)
             cards = updated
             inventory.cards = cards
@@ -184,7 +186,7 @@ def lineup_helper(request):
                 else:
                     messages.success(request, "Propuesta de cuatro alineaciones actualizada.")
             else:
-                messages.success(request, "Medias y descartes guardados.")
+                messages.success(request, "Candidatos y medias guardados.")
 
     position_sort = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
     cards = sorted(cards, key=lambda card: (position_sort.get(card.get("position"), 9), str(card.get("player") or "").casefold()))
@@ -192,13 +194,31 @@ def lineup_helper(request):
         "total": len(cards),
         "with_average": sum(card.get("average") is not None for card in cards),
         "in_lineup": sum(bool(card.get("in_lineup")) for card in cards),
-        "selected": sum(not card.get("excluded") and not card.get("in_lineup") for card in cards),
+        "selected": sum(bool(card.get("candidate")) and not card.get("in_lineup") for card in cards),
     }
+    candidate_groups = {position: [] for position in position_sort}
+    for card in cards:
+        if card.get("candidate") and not card.get("in_lineup") and card.get("position") in candidate_groups:
+            candidate_groups[card["position"]].append(card)
+    matches = []
+    for match in inventory.matches or []:
+        row = dict(match)
+        home_probability = float(row.get("home_prob") or 0)
+        away_probability = float(row.get("away_prob") or 0)
+        row.update({
+            "home_percent": round(home_probability * 100),
+            "away_percent": round(away_probability * 100),
+            "home_favorite": home_probability > away_probability,
+            "away_favorite": away_probability > home_probability,
+        })
+        matches.append(row)
     return render(request, "dashboard/lineup_helper.html", {
         "inventory": inventory,
         "cards": cards,
         "proposal": proposal,
         "summary": summary,
+        "candidate_groups": candidate_groups,
+        "matches": matches,
     })
 
 

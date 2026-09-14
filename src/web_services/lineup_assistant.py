@@ -68,7 +68,7 @@ def _legacy_average(name: str, values: dict[str, float]):
 
 
 def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
-    """Descarga tarjetas propias y conserva ajustes de media/exclusión locales."""
+    """Descarga tarjetas propias y conserva medias y candidatas locales."""
     previous = {str(card.get("asset_id")): card for card in (previous_cards or [])}
     old_averages = legacy_averages()
     headers = build_headers()
@@ -120,7 +120,9 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
                 "position": position_code(raw.get("anyPositions")),
                 "in_lineup": (raw.get("slug") or "") in lineup_slugs,
                 "average": average,
-                "excluded": bool(old.get("excluded", False)),
+                # El pool ya no parte de toda la galería: sólo se usan las cartas
+                # que el manager añade expresamente como candidatas.
+                "candidate": bool(old.get("candidate", False)),
             })
         page_info = connection.get("pageInfo") or {}
         if not page_info.get("hasNextPage"):
@@ -194,7 +196,7 @@ def _valid_lineups(cards: list[dict], max_points: int, odds_weight: float) -> li
 def propose_lineups(cards: list[dict], *, count: int = 4, max_points: int = 260, odds_weight: float = 0.3) -> dict:
     eligible = [
         card for card in cards
-        if not card.get("excluded") and not card.get("in_lineup") and card.get("position") and card.get("average") is not None
+        if card.get("candidate") and not card.get("in_lineup") and card.get("position") and card.get("average") is not None
     ]
     selected, remaining = [], eligible
     for _ in range(count):
@@ -210,7 +212,10 @@ def propose_lineups(cards: list[dict], *, count: int = 4, max_points: int = 260,
         ids = {card["asset_id"] for card in lineup}
         remaining = [card for card in remaining if card["asset_id"] not in ids]
     used = {card["asset_id"] for lineup in selected for card in lineup["cards"]}
-    missing_average = [card for card in cards if not card.get("excluded") and not card.get("in_lineup") and card.get("average") is None]
+    missing_average = [
+        card for card in cards
+        if card.get("candidate") and not card.get("in_lineup") and card.get("average") is None
+    ]
     return {
         "lineups": selected,
         "used_count": len(used),
