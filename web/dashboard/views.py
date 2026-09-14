@@ -35,7 +35,7 @@ from .models import (
     InstantPurchaseRefreshJob, InstantPurchaseSnapshot, MovementSnapshot, MovementSyncJob,
     PublicRewardSnapshot, PublicRewardSyncJob,
     OpportunityRefreshJob, OpportunitySnapshot, SaleBatchItem, SaleBatchJob,
-    LineupInventory, SalesInventory, SalesRefreshJob,
+    LineupInventory, LineupRefreshJob, SalesInventory, SalesRefreshJob,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -151,21 +151,7 @@ def lineup_helper(request):
 
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "refresh":
-            try:
-                cards = fetch_lineup_cards(cards)
-                odds, matches, odds_status = load_odds(cards)
-                cards = attach_odds(cards, odds)
-                inventory.cards = cards
-                inventory.odds = odds
-                inventory.matches = matches
-                inventory.refreshed_at = timezone.now()
-                inventory.odds_refreshed_at = timezone.now() if odds else None
-                inventory.save(update_fields=("cards", "odds", "matches", "refreshed_at", "odds_refreshed_at"))
-                messages.success(request, f"{len(cards)} cartas In-Season actualizadas. {odds_status}.")
-            except Exception as exc:
-                messages.error(request, f"No se pudieron actualizar las cartas: {str(exc)[:220]}")
-        else:
+        if action != "refresh":
             candidate_ids = {
                 value.strip() for value in str(request.POST.get("candidate_asset_ids", "")).split(",") if value.strip()
             }
@@ -248,7 +234,33 @@ def lineup_helper(request):
         "candidate_groups": candidate_groups,
         "matches": matches,
         "position_lanes": (("GK", "POR"), ("DEF", "DEF"), ("MID", "MED"), ("FWD", "DEL")),
+        "active_refresh": LineupRefreshJob.objects.filter(
+            user=request.user, status__in=(LineupRefreshJob.Status.QUEUED, LineupRefreshJob.Status.RUNNING),
+        ).order_by("-created_at").first(),
     })
+
+
+@require_POST
+def enqueue_lineup_refresh(request):
+    active = LineupRefreshJob.objects.filter(
+        user=request.user, status__in=(LineupRefreshJob.Status.QUEUED, LineupRefreshJob.Status.RUNNING),
+    ).order_by("-created_at").first()
+    job = active or LineupRefreshJob.objects.create(user=request.user, progress_label="En cola para consultar tus cartas")
+    return JsonResponse({"job_id": job.id, "status": job.status}, status=202)
+
+
+@require_GET
+def lineup_refresh_status(request):
+    jobs = LineupRefreshJob.objects.filter(user=request.user).order_by("-created_at")[:5]
+    return JsonResponse({"jobs": [{
+        "id": job.id,
+        "status": job.status,
+        "processed_count": job.processed_count,
+        "total_count": job.total_count,
+        "card_count": job.card_count,
+        "progress_label": job.progress_label,
+        "error": job.error,
+    } for job in jobs]})
 
 
 def _opportunity_team_catalog(snapshot=None, latest_job=None):

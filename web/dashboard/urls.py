@@ -46,4 +46,6 @@ urlpatterns = [
     path("ofertas-recibidas/precios/", views.offers_market_prices, name="offers_market_prices"),
     path("token/", views.refresh_token, name="refresh_token"),
     path("alineaciones/", views.lineup_helper, name="lineup_helper"),
+    path("alineaciones/actualizar/", views.enqueue_lineup_refresh, name="enqueue_lineup_refresh"),
+    path("alineaciones/estado/", views.lineup_refresh_status, name="lineup_refresh_status"),
 ]

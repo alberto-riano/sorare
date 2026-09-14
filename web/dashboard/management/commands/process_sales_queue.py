@@ -10,7 +10,7 @@ from dashboard.models import (
     AuctionRefreshJob, BidBatchItem, DelistBatchItem, DelistBatchJob, MovementSnapshot, MovementSyncJob, SaleBatchItem, SaleBatchJob,
     InstantPurchaseRefreshJob, InstantPurchaseSnapshot, OpportunityRefreshJob, OpportunitySnapshot,
     PublicRewardSnapshot, PublicRewardSyncJob,
-    SalesInventory, SalesRefreshJob,
+    LineupInventory, LineupRefreshJob, SalesInventory, SalesRefreshJob,
 )
 from dashboard.views import PATHS
 from web_services.movement_history import collect_movement_history, collect_public_reward_history
@@ -300,6 +300,59 @@ def process_next_refresh():
     job.save(update_fields=(
         "status", "card_count", "processed_count", "total_count",
         "progress_label", "error", "finished_at",
+    ))
+    return job
+
+
+def process_next_lineup_refresh():
+    """Construye el cache del ayudante fuera del request HTTP."""
+    with transaction.atomic():
+        job = LineupRefreshJob.objects.select_for_update().filter(
+            status=LineupRefreshJob.Status.QUEUED,
+        ).first()
+        if not job:
+            return None
+        job.status = LineupRefreshJob.Status.RUNNING
+        job.started_at = timezone.now()
+        job.progress_label = "Conectando con Sorare"
+        job.save(update_fields=("status", "started_at", "progress_label"))
+
+    try:
+        from web_services.lineup_assistant import attach_odds, fetch_lineup_cards, load_odds
+
+        inventory, _ = LineupInventory.objects.get_or_create(user=job.user)
+
+        def save_progress(processed, total, label):
+            LineupRefreshJob.objects.filter(pk=job.pk).update(
+                processed_count=processed,
+                total_count=total,
+                progress_label=label,
+            )
+
+        cards = fetch_lineup_cards(list(inventory.cards or []), progress=save_progress)
+        LineupRefreshJob.objects.filter(pk=job.pk).update(
+            processed_count=len(cards), total_count=len(cards), progress_label="Calculando cuotas de la jornada",
+        )
+        odds, matches, odds_status = load_odds(cards)
+        cards = attach_odds(cards, odds)
+        inventory.cards = cards
+        inventory.odds = odds
+        inventory.matches = matches
+        inventory.refreshed_at = timezone.now()
+        inventory.odds_refreshed_at = timezone.now() if odds else None
+        inventory.save(update_fields=("cards", "odds", "matches", "refreshed_at", "odds_refreshed_at"))
+        job.card_count = len(cards)
+        job.processed_count = len(cards)
+        job.total_count = len(cards)
+        job.progress_label = f"{len(cards)} cartas y {odds_status.casefold()}"
+        job.status = LineupRefreshJob.Status.SUCCEEDED
+    except Exception as exc:
+        job.status = LineupRefreshJob.Status.FAILED
+        job.progress_label = "Actualización interrumpida"
+        job.error = f"No se pudieron actualizar las cartas: {exc}"[:2000]
+    job.finished_at = timezone.now()
+    job.save(update_fields=(
+        "status", "processed_count", "total_count", "card_count", "progress_label", "error", "finished_at",
     ))
     return job
 
@@ -607,6 +660,11 @@ class Command(BaseCommand):
             error="El análisis se interrumpió; el snapshot anterior sigue disponible.",
             finished_at=timezone.now(),
         )
+        LineupRefreshJob.objects.filter(status=LineupRefreshJob.Status.RUNNING).update(
+            status=LineupRefreshJob.Status.FAILED,
+            error="La actualización se interrumpió; el inventario anterior sigue disponible.",
+            finished_at=timezone.now(),
+        )
         for job in SaleBatchJob.objects.filter(status=SaleBatchJob.Status.RUNNING):
             job.items.filter(status__in=(SaleBatchItem.Status.QUEUED, SaleBatchItem.Status.RUNNING)).update(
                 status=SaleBatchItem.Status.FAILED,
@@ -631,6 +689,7 @@ class Command(BaseCommand):
                 process_next_auction_refresh()
                 or process_next_opportunity_refresh()
                 or process_next_instant_purchase_refresh()
+                or process_next_lineup_refresh()
                 or process_next_refresh()
                 or process_next_movement_sync()
                 or process_next_public_reward_sync()

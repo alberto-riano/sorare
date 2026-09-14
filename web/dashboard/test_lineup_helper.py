@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from dashboard.models import LineupInventory
+from dashboard.models import LineupInventory, LineupRefreshJob
 from web_services.lineup_assistant import propose_lineups
 
 
@@ -20,14 +20,23 @@ class LineupAssistantTests(TestCase):
         self.user = get_user_model().objects.create_user(username="burguis")
         self.client.force_login(self.user)
 
-    def test_page_can_refresh_cards_without_excel(self):
-        rows = [card("gk", "GK", 50)]
-        with patch("dashboard.views.fetch_lineup_cards", return_value=rows), patch(
-            "dashboard.views.load_odds", return_value=({}, [], "Sin cuotas disponibles"),
-        ):
-            response = self.client.post(reverse("lineup_helper"), {"action": "refresh"})
+    def test_refresh_is_enqueued_without_blocking_page(self):
+        response = self.client.post(reverse("enqueue_lineup_refresh"))
 
-        self.assertContains(response, "1 cartas In-Season actualizadas")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(LineupRefreshJob.objects.get().status, LineupRefreshJob.Status.QUEUED)
+
+    def test_worker_persists_cards_from_enqueued_refresh(self):
+        job = LineupRefreshJob.objects.create(user=self.user)
+        rows = [card("gk", "GK", 50)]
+        with patch("web_services.lineup_assistant.fetch_lineup_cards", return_value=rows), patch(
+            "web_services.lineup_assistant.load_odds", return_value=({}, [], "Sin cuotas disponibles"),
+        ):
+            from dashboard.management.commands.process_sales_queue import process_next_lineup_refresh
+            process_next_lineup_refresh()
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, LineupRefreshJob.Status.SUCCEEDED)
         self.assertEqual(LineupInventory.objects.get(user=self.user).cards[0]["asset_id"], "gk")
 
     def test_proposal_never_reuses_a_card(self):

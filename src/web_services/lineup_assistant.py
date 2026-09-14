@@ -67,10 +67,11 @@ def _legacy_average(name: str, values: dict[str, float]):
     return None
 
 
-def fetch_l15_averages(asset_ids: list[str], headers) -> dict[str, float | None]:
+def fetch_l15_averages(asset_ids: list[str], headers, progress=None) -> dict[str, float | None]:
     """Lee L15 en lotes sin bloquear el refresco del inventario."""
     averages: dict[str, float | None] = {}
-    for start in range(0, len(asset_ids), 20):
+    total = len(asset_ids)
+    for start in range(0, total, 20):
         batch = asset_ids[start:start + 20]
         fields = "\n".join(
             f'card_{index}: anyCard(assetId: "{asset_id}") {{ assetId averageScore(type: LAST_FIFTEEN_SO5_AVERAGE_SCORE) }}'
@@ -83,10 +84,12 @@ def fetch_l15_averages(asset_ids: list[str], headers) -> dict[str, float | None]
         for item in (data.get("tokens") or {}).values():
             if isinstance(item, dict) and item.get("assetId"):
                 averages[str(item["assetId"])] = item.get("averageScore")
+        if progress:
+            progress(min(start + len(batch), total), total, "Consultando medias L15 de Sorare")
     return averages
 
 
-def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
+def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) -> list[dict]:
     """Descarga tarjetas propias y conserva medias y candidatas locales."""
     previous = {str(card.get("asset_id")): card for card in (previous_cards or [])}
     old_averages = legacy_averages()
@@ -99,7 +102,7 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
           cards(rarities: [rare], first: 100, after: $after) {
             nodes {
               assetId slug rarityTyped seasonYear serialNumber inSeasonEligible anyPositions
-              anyPlayer { slug displayName squaredPictureUrl }
+              anyPlayer { slug displayName squaredPictureUrl lastFifteenSo5AverageScore }
               anyTeam { name pictureUrl }
             }
             pageInfo { hasNextPage endCursor }
@@ -108,6 +111,7 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
         }
       }
     """
+    pages = 0
     while True:
         data = graphql_request(query, {"after": cursor}, headers=headers)
         user = data.get("currentUser") or {}
@@ -136,25 +140,33 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
                 "position": position_code(raw.get("anyPositions")),
                 "is_in_season": bool(raw.get("inSeasonEligible")),
                 "in_lineup": (raw.get("slug") or "") in lineup_slugs,
-                "average": None,
-                "sorare_average": None,
+                # L15 se publica en el jugador. Pedirlo junto a la carta evita
+                # decenas de consultas adicionales y hace ágil el selector.
+                "average": player.get("lastFifteenSo5AverageScore"),
+                "sorare_average": player.get("lastFifteenSo5AverageScore"),
                 # El pool ya no parte de toda la galería: sólo se usan las cartas
                 # que el manager añade expresamente como candidatas.
                 "candidate": bool(old.get("candidate", False)),
             })
+        pages += 1
+        if progress:
+            progress(len(cards), 0, f"Leyendo tus Rare In-Season · página {pages}")
         page_info = connection.get("pageInfo") or {}
         if not page_info.get("hasNextPage"):
             break
         cursor = page_info.get("endCursor")
-    l15_averages = fetch_l15_averages([card["asset_id"] for card in cards], headers)
+    missing_ids = [card["asset_id"] for card in cards if card.get("average") is None]
+    if progress and missing_ids:
+        progress(0, len(missing_ids), "Completando medias L15")
+    l15_averages = fetch_l15_averages(missing_ids, headers, progress=progress) if missing_ids else {}
     for card in cards:
         old = previous.get(str(card["asset_id"])) or {}
-        average = l15_averages.get(str(card["asset_id"]))
+        average = card.get("average") or l15_averages.get(str(card["asset_id"]))
         if average is None:
             average = old.get("average")
         if average is None:
             average = _legacy_average(card["player"], old_averages)
-        card["sorare_average"] = l15_averages.get(str(card["asset_id"]))
+        card["sorare_average"] = card.get("sorare_average") or l15_averages.get(str(card["asset_id"]))
         card["average"] = average
     return sorted(cards, key=lambda card: (POSITION_ORDER.get(card["position"], 9), card["player"].casefold(), card["serial_number"] or 0))
 
