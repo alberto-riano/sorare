@@ -31,7 +31,8 @@ from difflib import SequenceMatcher
 from itertools import combinations
 from collections import Counter
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sorare_utils import graphql_request, build_headers
@@ -477,7 +478,9 @@ def build_odds_map(odds_data, sorare_teams):
     if not odds_data:
         return {}, []
 
-    # Filtrar solo la jornada en curso: agrupar por fecha y tomar el primer bloque
+    # Sorare alterna dos jornadas semanales: viernes-lunes y martes-jueves.
+    # Desde viernes hasta lunes se prepara la siguiente (mar-jue); desde martes
+    # hasta jueves se prepara la siguiente (vie-lun), no el partido residual.
     odds_with_time = []
     for m in odds_data:
         ct = m.get('commence_time', '')
@@ -490,18 +493,27 @@ def build_odds_map(odds_data, sorare_teams):
     # Ordenar por fecha
     odds_with_time.sort(key=lambda x: x[0] or datetime.max.replace(tzinfo=timezone.utc))
 
-    # Tomar solo los partidos dentro de 3 días desde el primero (una jornada típica)
-    current_matchday = []
-    first_time = None
-    for t, m in odds_with_time:
-        if t is None:
-            continue
-        if first_time is None:
-            first_time = t
-        if (t - first_time).total_seconds() <= 3 * 86400:  # 3 días
-            current_matchday.append(m)
-        else:
-            break
+    madrid_today = datetime.now(ZoneInfo("Europe/Madrid")).date()
+    weekday = madrid_today.weekday()
+    if weekday in (4, 5, 6, 0):  # vie-lun -> próxima ventana mar-jue
+        days_until_start = (1 - weekday) % 7
+        span_days = 2
+    else:  # mar-jue -> próxima ventana vie-lun
+        days_until_start = (4 - weekday) % 7
+        span_days = 3
+    start_day = madrid_today + timedelta(days=days_until_start)
+    end_day = start_day + timedelta(days=span_days)
+    current_matchday = [
+        match for moment, match in odds_with_time
+        if moment is not None and start_day <= moment.astimezone(ZoneInfo("Europe/Madrid")).date() <= end_day
+    ]
+
+    # Si el proveedor aún no tiene esas cuotas, dejamos una degradación segura
+    # antes que una pantalla totalmente vacía.
+    if not current_matchday:
+        first_time = next((moment for moment, _ in odds_with_time if moment is not None), None)
+        if first_time:
+            current_matchday = [match for moment, match in odds_with_time if moment and (moment - first_time).total_seconds() <= 3 * 86400]
 
     odds_map = {}
     matches = []

@@ -57,4 +57,4 @@ class LineupAssistantTests(TestCase):
         saved = {row["asset_id"]: row for row in LineupInventory.objects.get(user=self.user).cards}
         self.assertTrue(saved["gk"]["candidate"])
         self.assertFalse(saved["def"]["candidate"])
-        self.assertEqual(saved["gk"]["average"], 55)
+        self.assertEqual(saved["gk"]["average"], 50)

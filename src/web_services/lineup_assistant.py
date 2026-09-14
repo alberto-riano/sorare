@@ -96,19 +96,20 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
         connection = user.get("cards") or {}
         lineup_slugs = set(user.get("blockchainCardsInLineups") or [])
         for raw in connection.get("nodes") or []:
+            if str(raw.get("rarityTyped") or "").casefold() != "rare":
+                continue
             asset_id = str(raw.get("assetId") or "")
             if not asset_id:
                 continue
             player = raw.get("anyPlayer") or {}
             team = raw.get("anyTeam") or {}
             old = previous.get(asset_id) or {}
-            # La media L15 de Sorare es el valor inicial. Si el manager ya la
-            # corrigió manualmente para una jornada concreta, respetamos esa
-            # edición local al refrescar el inventario.
+            # La media L15 de Sorare es la referencia de esta pantalla: no
+            # pedimos al manager que mantenga un Excel paralelo.
             sorare_average = raw.get("averageScore")
-            average = old.get("average")
+            average = sorare_average
             if average is None:
-                average = sorare_average
+                average = old.get("average")
             if average is None:
                 average = _legacy_average(player.get("displayName") or "", old_averages)
             cards.append({

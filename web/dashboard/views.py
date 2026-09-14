@@ -48,7 +48,7 @@ DEFAULT_MOVEMENT_START_DATE = date(2026, 8, 12)
 sys.path.insert(0, str(REPO_ROOT / 'src'))
 
 from web_services import token_service  # noqa: E402  (requiere src en sys.path)
-from web_services.lineup_assistant import attach_odds, fetch_lineup_cards, load_odds, propose_lineups  # noqa: E402
+from web_services.lineup_assistant import attach_odds, fetch_lineup_cards, load_odds, normalize, propose_lineups  # noqa: E402
 
 
 def healthz(_request):
@@ -165,16 +165,6 @@ def lineup_helper(request):
             for card in cards:
                 asset_id = str(card.get("asset_id") or "")
                 card["candidate"] = asset_id in candidate_ids and not card.get("in_lineup")
-                average_key = f"average_{asset_id}"
-                if average_key in request.POST:
-                    raw_average = str(request.POST.get(average_key, "")).strip().replace(",", ".")
-                    try:
-                        average = float(raw_average) if raw_average else None
-                    except ValueError:
-                        average = card.get("average")
-                    if average is not None and not 0 <= average <= 100:
-                        average = card.get("average")
-                    card["average"] = round(average, 2) if average is not None else None
                 updated.append(card)
             cards = updated
             inventory.cards = cards
@@ -186,7 +176,7 @@ def lineup_helper(request):
                 else:
                     messages.success(request, "Propuesta de cuatro alineaciones actualizada.")
             else:
-                messages.success(request, "Candidatos y medias guardados.")
+                messages.success(request, "Candidatos guardados.")
 
     position_sort = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
     cards = sorted(cards, key=lambda card: (position_sort.get(card.get("position"), 9), str(card.get("player") or "").casefold()))
@@ -204,7 +194,26 @@ def lineup_helper(request):
         str(card.get("team") or ""): str(card.get("team_picture_url") or "")
         for card in cards if card.get("team")
     }
+    normalized_team_pictures = {
+        normalize(team): picture for team, picture in team_pictures.items() if picture
+    }
+
+    def team_picture(team_name):
+        if team_name in team_pictures:
+            return team_pictures[team_name]
+        target = normalize(team_name)
+        if target in normalized_team_pictures:
+            return normalized_team_pictures[target]
+        # The odds provider sometimes uses just "Alavés" while Sorare keeps
+        # "Deportivo Alavés". A contained normalized name is safe here because
+        # we are resolving only the 20 clubs of a single matchday.
+        for name, picture in normalized_team_pictures.items():
+            if target and (target in name or name in target):
+                return picture
+        return ""
+
     matches = []
+    spanish_weekdays = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
     for match in inventory.matches or []:
         row = dict(match)
         home_probability = float(row.get("home_prob") or 0)
@@ -214,9 +223,14 @@ def lineup_helper(request):
             "away_percent": round(away_probability * 100),
             "home_favorite": home_probability > away_probability,
             "away_favorite": away_probability > home_probability,
-            "home_picture_url": team_pictures.get(str(row.get("home") or ""), ""),
-            "away_picture_url": team_pictures.get(str(row.get("away") or ""), ""),
+            "home_picture_url": team_picture(str(row.get("home") or "")),
+            "away_picture_url": team_picture(str(row.get("away") or "")),
         })
+        try:
+            kickoff = datetime.fromisoformat(str(row.get("commence") or "").replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Madrid"))
+            row["kickoff_label"] = f"{spanish_weekdays[kickoff.weekday()]} {kickoff.day} · {kickoff:%H:%M}"
+        except (ValueError, TypeError):
+            row["kickoff_label"] = ""
         matches.append(row)
     return render(request, "dashboard/lineup_helper.html", {
         "inventory": inventory,
