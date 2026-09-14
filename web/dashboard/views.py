@@ -138,7 +138,13 @@ def index(request):
 
 def lineup_helper(request):
     inventory, _ = LineupInventory.objects.get_or_create(user=request.user)
-    cards = list(inventory.cards or [])
+    # Limpia instantáneamente fotografías anteriores a este filtro: no deben
+    # reaparecer Common/Limited aunque el usuario aún no haya refrescado.
+    cards = [
+        {**card, "is_in_season": card.get("is_in_season") is True}
+        for card in (inventory.cards or [])
+        if str(card.get("rarity") or "").casefold() == "rare"
+    ]
     proposal = None
 
     if request.method == "POST":
@@ -181,7 +187,7 @@ def lineup_helper(request):
     position_sort = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
     cards = sorted(cards, key=lambda card: (position_sort.get(card.get("position"), 9), str(card.get("player") or "").casefold()))
     summary = {
-        "total": sum(bool(card.get("is_in_season", True)) for card in cards),
+        "total": sum(card.get("is_in_season") is True for card in cards),
         "with_average": sum(card.get("average") is not None for card in cards),
         "in_lineup": sum(bool(card.get("in_lineup")) for card in cards),
         "selected": sum(bool(card.get("candidate")) and not card.get("in_lineup") for card in cards),

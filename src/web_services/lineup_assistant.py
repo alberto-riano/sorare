@@ -67,6 +67,25 @@ def _legacy_average(name: str, values: dict[str, float]):
     return None
 
 
+def fetch_l15_averages(asset_ids: list[str], headers) -> dict[str, float | None]:
+    """Lee L15 en lotes sin bloquear el refresco del inventario."""
+    averages: dict[str, float | None] = {}
+    for start in range(0, len(asset_ids), 20):
+        batch = asset_ids[start:start + 20]
+        fields = "\n".join(
+            f'card_{index}: anyCard(assetId: "{asset_id}") {{ assetId averageScore(type: LAST_FIFTEEN_SO5_AVERAGE_SCORE) }}'
+            for index, asset_id in enumerate(batch)
+        )
+        try:
+            data = graphql_request(f"query LineupL15 {{ tokens {{ {fields} }} }}", headers=headers)
+        except Exception:
+            continue
+        for item in (data.get("tokens") or {}).values():
+            if isinstance(item, dict) and item.get("assetId"):
+                averages[str(item["assetId"])] = item.get("averageScore")
+    return averages
+
+
 def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
     """Descarga tarjetas propias y conserva medias y candidatas locales."""
     previous = {str(card.get("asset_id")): card for card in (previous_cards or [])}
@@ -80,7 +99,6 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
           cards(first: 100, after: $after) {
             nodes {
               assetId slug rarityTyped seasonYear serialNumber inSeasonEligible anyPositions
-              averageScore(type: LAST_FIFTEEN_SO5_AVERAGE_SCORE)
               anyPlayer { slug displayName squaredPictureUrl }
               anyTeam { name pictureUrl }
             }
@@ -104,14 +122,6 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
             player = raw.get("anyPlayer") or {}
             team = raw.get("anyTeam") or {}
             old = previous.get(asset_id) or {}
-            # La media L15 de Sorare es la referencia de esta pantalla: no
-            # pedimos al manager que mantenga un Excel paralelo.
-            sorare_average = raw.get("averageScore")
-            average = sorare_average
-            if average is None:
-                average = old.get("average")
-            if average is None:
-                average = _legacy_average(player.get("displayName") or "", old_averages)
             cards.append({
                 "asset_id": asset_id,
                 "slug": raw.get("slug") or "",
@@ -126,8 +136,8 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
                 "position": position_code(raw.get("anyPositions")),
                 "is_in_season": bool(raw.get("inSeasonEligible")),
                 "in_lineup": (raw.get("slug") or "") in lineup_slugs,
-                "average": average,
-                "sorare_average": sorare_average,
+                "average": None,
+                "sorare_average": None,
                 # El pool ya no parte de toda la galería: sólo se usan las cartas
                 # que el manager añade expresamente como candidatas.
                 "candidate": bool(old.get("candidate", False)),
@@ -136,6 +146,16 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
         if not page_info.get("hasNextPage"):
             break
         cursor = page_info.get("endCursor")
+    l15_averages = fetch_l15_averages([card["asset_id"] for card in cards], headers)
+    for card in cards:
+        old = previous.get(str(card["asset_id"])) or {}
+        average = l15_averages.get(str(card["asset_id"]))
+        if average is None:
+            average = old.get("average")
+        if average is None:
+            average = _legacy_average(card["player"], old_averages)
+        card["sorare_average"] = l15_averages.get(str(card["asset_id"]))
+        card["average"] = average
     return sorted(cards, key=lambda card: (POSITION_ORDER.get(card["position"], 9), card["player"].casefold(), card["serial_number"] or 0))
 
 
