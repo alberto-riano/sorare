@@ -191,7 +191,7 @@ def lineup_helper(request):
     position_sort = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
     cards = sorted(cards, key=lambda card: (position_sort.get(card.get("position"), 9), str(card.get("player") or "").casefold()))
     summary = {
-        "total": len(cards),
+        "total": sum(bool(card.get("is_in_season", True)) for card in cards),
         "with_average": sum(card.get("average") is not None for card in cards),
         "in_lineup": sum(bool(card.get("in_lineup")) for card in cards),
         "selected": sum(bool(card.get("candidate")) and not card.get("in_lineup") for card in cards),
@@ -200,6 +200,10 @@ def lineup_helper(request):
     for card in cards:
         if card.get("candidate") and not card.get("in_lineup") and card.get("position") in candidate_groups:
             candidate_groups[card["position"]].append(card)
+    team_pictures = {
+        str(card.get("team") or ""): str(card.get("team_picture_url") or "")
+        for card in cards if card.get("team")
+    }
     matches = []
     for match in inventory.matches or []:
         row = dict(match)
@@ -210,6 +214,8 @@ def lineup_helper(request):
             "away_percent": round(away_probability * 100),
             "home_favorite": home_probability > away_probability,
             "away_favorite": away_probability > home_probability,
+            "home_picture_url": team_pictures.get(str(row.get("home") or ""), ""),
+            "away_picture_url": team_pictures.get(str(row.get("away") or ""), ""),
         })
         matches.append(row)
     return render(request, "dashboard/lineup_helper.html", {
@@ -219,6 +225,7 @@ def lineup_helper(request):
         "summary": summary,
         "candidate_groups": candidate_groups,
         "matches": matches,
+        "position_lanes": (("GK", "POR"), ("DEF", "DEF"), ("MID", "MED"), ("FWD", "DEL")),
     })
 
 

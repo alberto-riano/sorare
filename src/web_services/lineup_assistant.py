@@ -80,6 +80,7 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
           cards(first: 100, after: $after) {
             nodes {
               assetId slug rarityTyped seasonYear serialNumber inSeasonEligible anyPositions
+              averageScore(type: LAST_FIFTEEN_SO5_AVERAGE_SCORE)
               anyPlayer { slug displayName squaredPictureUrl }
               anyTeam { name pictureUrl }
             }
@@ -95,15 +96,19 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
         connection = user.get("cards") or {}
         lineup_slugs = set(user.get("blockchainCardsInLineups") or [])
         for raw in connection.get("nodes") or []:
-            if not raw.get("inSeasonEligible"):
-                continue
             asset_id = str(raw.get("assetId") or "")
             if not asset_id:
                 continue
             player = raw.get("anyPlayer") or {}
             team = raw.get("anyTeam") or {}
             old = previous.get(asset_id) or {}
+            # La media L15 de Sorare es el valor inicial. Si el manager ya la
+            # corrigió manualmente para una jornada concreta, respetamos esa
+            # edición local al refrescar el inventario.
+            sorare_average = raw.get("averageScore")
             average = old.get("average")
+            if average is None:
+                average = sorare_average
             if average is None:
                 average = _legacy_average(player.get("displayName") or "", old_averages)
             cards.append({
@@ -118,8 +123,10 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
                 "season_year": raw.get("seasonYear"),
                 "serial_number": raw.get("serialNumber"),
                 "position": position_code(raw.get("anyPositions")),
+                "is_in_season": bool(raw.get("inSeasonEligible")),
                 "in_lineup": (raw.get("slug") or "") in lineup_slugs,
                 "average": average,
+                "sorare_average": sorare_average,
                 # El pool ya no parte de toda la galería: sólo se usan las cartas
                 # que el manager añade expresamente como candidatas.
                 "candidate": bool(old.get("candidate", False)),
