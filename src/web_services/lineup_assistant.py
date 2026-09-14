@@ -96,7 +96,7 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
     query = """
       query LineupInventory($after: String) {
         currentUser {
-          cards(first: 100, after: $after) {
+          cards(rarities: [rare], first: 100, after: $after) {
             nodes {
               assetId slug rarityTyped seasonYear serialNumber inSeasonEligible anyPositions
               anyPlayer { slug displayName squaredPictureUrl }
@@ -114,7 +114,7 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None) -> list[dict]:
         connection = user.get("cards") or {}
         lineup_slugs = set(user.get("blockchainCardsInLineups") or [])
         for raw in connection.get("nodes") or []:
-            if str(raw.get("rarityTyped") or "").casefold() != "rare":
+            if str(raw.get("rarityTyped") or "").casefold() != "rare" or not raw.get("inSeasonEligible"):
                 continue
             asset_id = str(raw.get("assetId") or "")
             if not asset_id:
