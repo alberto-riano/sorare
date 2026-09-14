@@ -199,6 +199,16 @@ class SalesInventory(models.Model):
         verbose_name_plural = "sales inventories"
 
 
+class LineupInventory(models.Model):
+    """Fotografía ligera de las cartas In-Season usada por el ayudante."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sorare_lineup_inventory")
+    cards = models.JSONField(default=list)
+    odds = models.JSONField(default=dict)
+    matches = models.JSONField(default=list)
+    refreshed_at = models.DateTimeField(null=True, blank=True)
+    odds_refreshed_at = models.DateTimeField(null=True, blank=True)
+
+
 class MovementSnapshot(models.Model):
     """Copia local del historial económico normalizado de una cuenta."""
 

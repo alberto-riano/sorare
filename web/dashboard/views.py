@@ -20,6 +20,7 @@ from django.db import transaction
 from django.http import FileResponse
 from django.shortcuts import redirect, render
 from django.templatetags.static import static
+from django.utils import timezone
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
@@ -34,7 +35,7 @@ from .models import (
     InstantPurchaseRefreshJob, InstantPurchaseSnapshot, MovementSnapshot, MovementSyncJob,
     PublicRewardSnapshot, PublicRewardSyncJob,
     OpportunityRefreshJob, OpportunitySnapshot, SaleBatchItem, SaleBatchJob,
-    SalesInventory, SalesRefreshJob,
+    LineupInventory, SalesInventory, SalesRefreshJob,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -47,6 +48,7 @@ DEFAULT_MOVEMENT_START_DATE = date(2026, 8, 12)
 sys.path.insert(0, str(REPO_ROOT / 'src'))
 
 from web_services import token_service  # noqa: E402  (requiere src en sys.path)
+from web_services.lineup_assistant import attach_odds, fetch_lineup_cards, load_odds, propose_lineups  # noqa: E402
 
 
 def healthz(_request):
@@ -126,12 +128,78 @@ def index(request):
         {
             "title": "Lineup Helper",
             "icon": "fas fa-users",
-            "description": "Siguiente fase: asistente visual para alinear y comparar opciones.",
-            "url": None,
-            "status": "Proxima iteracion",
+            "description": "Prepara cuatro alineaciones In-Season con medias y cuotas.",
+            "url": "lineup_helper",
+            "status": "Disponible",
         },
     ]
     return render(request, "dashboard/index.html", {"cards": cards})
+
+
+def lineup_helper(request):
+    inventory, _ = LineupInventory.objects.get_or_create(user=request.user)
+    cards = list(inventory.cards or [])
+    proposal = None
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "refresh":
+            try:
+                cards = fetch_lineup_cards(cards)
+                odds, matches, odds_status = load_odds(cards)
+                cards = attach_odds(cards, odds)
+                inventory.cards = cards
+                inventory.odds = odds
+                inventory.matches = matches
+                inventory.refreshed_at = timezone.now()
+                inventory.odds_refreshed_at = timezone.now() if odds else None
+                inventory.save(update_fields=("cards", "odds", "matches", "refreshed_at", "odds_refreshed_at"))
+                messages.success(request, f"{len(cards)} cartas In-Season actualizadas. {odds_status}.")
+            except Exception as exc:
+                messages.error(request, f"No se pudieron actualizar las cartas: {str(exc)[:220]}")
+        else:
+            updated = []
+            for card in cards:
+                asset_id = str(card.get("asset_id") or "")
+                if card.get("in_lineup"):
+                    updated.append(card)
+                    continue
+                raw_average = str(request.POST.get(f"average_{asset_id}", "")).strip().replace(",", ".")
+                try:
+                    average = float(raw_average) if raw_average else None
+                except ValueError:
+                    average = card.get("average")
+                if average is not None and not 0 <= average <= 100:
+                    average = card.get("average")
+                card["average"] = round(average, 2) if average is not None else None
+                card["excluded"] = request.POST.get(f"exclude_{asset_id}") == "on"
+                updated.append(card)
+            cards = updated
+            inventory.cards = cards
+            inventory.save(update_fields=("cards",))
+            if action == "generate":
+                proposal = propose_lineups(cards)
+                if len(proposal["lineups"]) < 4:
+                    messages.warning(request, "No se han podido completar cuatro alineaciones con las cartas y medias seleccionadas.")
+                else:
+                    messages.success(request, "Propuesta de cuatro alineaciones actualizada.")
+            else:
+                messages.success(request, "Medias y descartes guardados.")
+
+    position_sort = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
+    cards = sorted(cards, key=lambda card: (position_sort.get(card.get("position"), 9), str(card.get("player") or "").casefold()))
+    summary = {
+        "total": len(cards),
+        "with_average": sum(card.get("average") is not None for card in cards),
+        "in_lineup": sum(bool(card.get("in_lineup")) for card in cards),
+        "selected": sum(not card.get("excluded") and not card.get("in_lineup") for card in cards),
+    }
+    return render(request, "dashboard/lineup_helper.html", {
+        "inventory": inventory,
+        "cards": cards,
+        "proposal": proposal,
+        "summary": summary,
+    })
 
 
 def _opportunity_team_catalog(snapshot=None, latest_job=None):
