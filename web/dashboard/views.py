@@ -191,6 +191,15 @@ def lineup_helper(request):
         str(card.get("team") or ""): str(card.get("team_picture_url") or "")
         for card in cards if card.get("team")
     }
+    # Las cartas propias no cubren necesariamente los 20 equipos. Reutilizamos
+    # el catálogo del mercado para no perder el escudo del rival (por ejemplo,
+    # si no tienes ninguna carta del Alavés).
+    opportunity_snapshot = OpportunitySnapshot.objects.filter(market_key="laliga-2026").first()
+    for catalog_team in _opportunity_team_catalog(opportunity_snapshot):
+        name = str(catalog_team.get("name") or "")
+        picture = str(catalog_team.get("picture_url") or "")
+        if name and picture:
+            team_pictures.setdefault(name, picture)
     normalized_team_pictures = {
         normalize(team): picture for team, picture in team_pictures.items() if picture
     }

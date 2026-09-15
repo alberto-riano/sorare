@@ -7,7 +7,7 @@ from django.urls import reverse
 
 from dashboard.models import LineupInventory, LineupRefreshJob
 from lineup_helper import matchday_window
-from web_services.lineup_assistant import attach_odds, is_laliga_team, propose_lineups
+from web_services.lineup_assistant import attach_odds, is_laliga_team, propose_lineups, team_code
 
 
 def card(asset_id, position, average, team="Equipo"):
@@ -74,6 +74,10 @@ class LineupAssistantTests(TestCase):
     def test_laliga_filter_uses_domestic_league(self):
         self.assertTrue(is_laliga_team({"name": "Cualquier club", "domesticLeague": {"slug": "laliga-ea-sports"}}))
         self.assertFalse(is_laliga_team({"name": "Crystal Palace FC", "domesticLeague": {"slug": "premier-league"}}))
+
+    def test_alaves_abbreviations_remain_in_the_laliga_pool(self):
+        self.assertTrue(is_laliga_team({"name": "D. Alavés", "domesticLeague": {}}))
+        self.assertEqual(team_code("D. Alavés"), "ALA")
 
     def test_matchday_window_keeps_tuesday_short_and_wednesday_switches(self):
         self.assertEqual(matchday_window(date(2026, 9, 15)), (date(2026, 9, 15), date(2026, 9, 17)))

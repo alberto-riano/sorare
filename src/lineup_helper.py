@@ -367,7 +367,7 @@ ODDS_TEAM_ALIASES = {
     'valencia': ['valencia cf'],
     'sevilla': ['sevilla fc'],
     'osasuna': ['ca osasuna'],
-    'alaves': ['deportivo alavés', 'deportivo alaves'],
+    'alaves': ['deportivo alavés', 'deportivo alaves', 'd. alavés', 'd alaves', 'alavés'],
     'las palmas': ['ud las palmas'],
     'leganes': ['cd leganés', 'cd leganes'],
     'valladolid': ['real valladolid'],

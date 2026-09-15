@@ -168,6 +168,12 @@
     input.addEventListener("focus", function () { drawResults(position); });
     input.addEventListener("input", function () { drawResults(position); });
   });
+  document.addEventListener("pointerdown", function (event) {
+    positions.forEach(function (position) {
+      var lane = document.getElementById("results-" + position).closest(".lh-lane");
+      if (!lane.contains(event.target)) document.getElementById("results-" + position).innerHTML = "";
+    });
+  });
   var clearButton = document.getElementById("clearCandidates");
   if (clearButton) {
     clearButton.addEventListener("click", function () {

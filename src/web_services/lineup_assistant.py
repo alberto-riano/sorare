@@ -22,6 +22,9 @@ POSITION_LABELS = {"GK": "POR", "DEF": "DEF", "MID": "MED", "FWD": "DEL"}
 # cartas antiguas a las que Sorare no devuelva la liga todavía.
 LALIGA_TEAM_NAMES = {
     "athletic club", "atletico de madrid", "ca osasuna", "deportivo alaves",
+    # Sorare no conserva un único nombre histórico para el Alavés: hay cartas
+    # como "D. Alavés" y otras que sólo indican "Alavés".
+    "d alaves", "alaves", "deportivo alaves sad",
     "elche cf", "espanyol de barcelona", "fc barcelona", "getafe cf",
     "girona fc", "levante ud", "rcd mallorca", "rayo vallecano", "real betis",
     "real madrid", "real oviedo", "real sociedad", "sevilla fc", "valencia cf",
@@ -30,7 +33,8 @@ LALIGA_TEAM_NAMES = {
 }
 TEAM_CODES = {
     "athletic club": "ATH", "atletico de madrid": "ATM", "ca osasuna": "OSA",
-    "deportivo alaves": "ALA", "elche cf": "ELC", "espanyol de barcelona": "ESP",
+    "deportivo alaves": "ALA", "d alaves": "ALA", "alaves": "ALA", "deportivo alaves sad": "ALA",
+    "elche cf": "ELC", "espanyol de barcelona": "ESP",
     "fc barcelona": "BAR", "getafe cf": "GET", "girona fc": "GIR", "levante ud": "LEV",
     "rcd mallorca": "MLL", "rayo vallecano": "RAY", "real betis": "BET", "real madrid": "RMA",
     "real oviedo": "OVI", "real sociedad": "RSO", "sevilla fc": "SEV", "valencia cf": "VAL",
@@ -41,7 +45,11 @@ TEAM_CODES = {
 
 def normalize(value: str) -> str:
     value = unicodedata.normalize("NFD", str(value or "").casefold())
-    return " ".join("".join(char for char in value if unicodedata.category(char) != "Mn").split())
+    value = "".join(
+        char for char in value
+        if unicodedata.category(char) != "Mn" and (char.isalnum() or char.isspace())
+    )
+    return " ".join(value.split())
 
 
 def position_code(values) -> str:
