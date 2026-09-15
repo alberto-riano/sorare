@@ -100,7 +100,7 @@
 
   function syncSelected() {
     selectedInput.value = Object.keys(chosen).join(",");
-    selectedTotal.textContent = Object.keys(chosen).length;
+    if (selectedTotal) selectedTotal.textContent = Object.keys(chosen).length;
   }
 
   function selectedAt(position) {
