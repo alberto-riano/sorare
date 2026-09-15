@@ -92,7 +92,7 @@ def fetch_l10_averages(asset_ids: list[str], headers, progress=None) -> dict[str
     for start in range(0, total, 20):
         batch = asset_ids[start:start + 20]
         fields = "\n".join(
-            f'card_{index}: anyCard(assetId: "{asset_id}") {{ assetId averageScore(type: LAST_TEN_SO5_AVERAGE_SCORE) }}'
+            f'card_{index}: anyCard(assetId: "{asset_id}") {{ assetId averageScore(type: LAST_TEN_PLAYED_SO5_AVERAGE_SCORE) }}'
             for index, asset_id in enumerate(batch)
         )
         try:
@@ -121,7 +121,7 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
               assetId slug rarityTyped seasonYear serialNumber inSeasonEligible anyPositions pictureUrl
               anyPlayer {
                 slug displayName squaredPictureUrl
-                averageScore(type: LAST_TEN_SO5_AVERAGE_SCORE)
+                averageScore(type: LAST_TEN_PLAYED_SO5_AVERAGE_SCORE)
               }
               anyTeam { name pictureUrl domesticLeague { slug displayName } }
             }
