@@ -123,7 +123,10 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
                 slug displayName squaredPictureUrl
                 averageScore(type: LAST_TEN_PLAYED_SO5_AVERAGE_SCORE)
               }
-              anyTeam { name pictureUrl domesticLeague { slug displayName } }
+              anyTeam {
+                name pictureUrl
+                ... on Club { domesticLeague { slug displayName } }
+              }
             }
             pageInfo { hasNextPage endCursor }
           }
