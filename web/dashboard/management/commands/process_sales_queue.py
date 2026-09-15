@@ -335,6 +335,11 @@ def process_next_lineup_refresh():
         )
         odds, matches, odds_status = load_odds(cards)
         cards = attach_odds(cards, odds)
+        # Este ayudante prepara exclusivamente la jornada visible. Si las cuotas
+        # están disponibles, una carta sin rival no puede formar parte del pool.
+        # Si el proveedor falla, conservamos el inventario para no vaciarlo.
+        if odds:
+            cards = [card for card in cards if card.get("win_probability") is not None]
         inventory.cards = cards
         inventory.odds = odds
         inventory.matches = matches

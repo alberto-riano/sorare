@@ -87,6 +87,17 @@
     return card.average == null ? "0" : escapeHtml(card.average);
   }
 
+  function fixture(card) {
+    if (!card.fixture_home_code || !card.fixture_away_code) {
+      return '<small>' + escapeHtml(card.team) + '</small>';
+    }
+    var home = escapeHtml(card.fixture_home_code);
+    var away = escapeHtml(card.fixture_away_code);
+    if (card.fixture_is_home) home = "<b>" + home + "</b>";
+    else away = "<b>" + away + "</b>";
+    return '<small class="fixture">' + home + ' <i>-</i> ' + away + '</small>';
+  }
+
   function syncSelected() {
     selectedInput.value = Object.keys(chosen).join(",");
     selectedTotal.textContent = Object.keys(chosen).length;
@@ -106,7 +117,7 @@
     cardsAtPosition.forEach(function (card) {
       var row = document.createElement("article");
       row.className = "candidate";
-      row.innerHTML = '<span class="candidate-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong><small>" + escapeHtml(card.team) + '</small></span><b class="average">' + average(card) + '</b><button type="button"><i class="fas fa-xmark"></i></button>';
+      row.innerHTML = '<span class="candidate-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong>" + fixture(card) + '</span><b class="average">' + average(card) + '</b><button type="button"><i class="fas fa-xmark"></i></button>';
       row.querySelector("button").onclick = function () {
         delete chosen[String(card.asset_id)];
         syncSelected();
@@ -136,7 +147,7 @@
       row.type = "button";
       row.className = "lane-result";
       row.disabled = Boolean(chosen[String(card.asset_id)]);
-      row.innerHTML = '<span class="lane-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong><small>" + escapeHtml(card.team) + '</small></span><b class="average">' + average(card) + "</b>";
+      row.innerHTML = '<span class="lane-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong>" + fixture(card) + '</span><b class="average">' + average(card) + "</b>";
       row.onclick = function () {
         chosen[String(card.asset_id)] = card;
         syncSelected();

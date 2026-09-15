@@ -28,6 +28,15 @@ LALIGA_TEAM_NAMES = {
     "villarreal cf", "real club deportivo de la coruna", "real racing club de santander",
     "malaga cf",
 }
+TEAM_CODES = {
+    "athletic club": "ATH", "atletico de madrid": "ATM", "ca osasuna": "OSA",
+    "deportivo alaves": "ALA", "elche cf": "ELC", "espanyol de barcelona": "ESP",
+    "fc barcelona": "BAR", "getafe cf": "GET", "girona fc": "GIR", "levante ud": "LEV",
+    "rcd mallorca": "MLL", "rayo vallecano": "RAY", "real betis": "BET", "real madrid": "RMA",
+    "real oviedo": "OVI", "real sociedad": "RSO", "sevilla fc": "SEV", "valencia cf": "VAL",
+    "villarreal cf": "VIL", "real club deportivo de la coruna": "DEP",
+    "real racing club de santander": "RAC", "malaga cf": "MAL",
+}
 
 
 def normalize(value: str) -> str:
@@ -83,6 +92,15 @@ def is_laliga_team(team: dict) -> bool:
     league = team.get("domesticLeague") or {}
     league_text = f"{league.get('slug') or ''} {league.get('displayName') or ''}".casefold()
     return "laliga" in league_text or normalize(team.get("name")) in LALIGA_TEAM_NAMES
+
+
+def team_code(name: str) -> str:
+    """Abreviatura estable para el cruce, sin depender de la fuente de cuotas."""
+    normalized = normalize(name)
+    if normalized in TEAM_CODES:
+        return TEAM_CODES[normalized]
+    words = [word for word in normalized.split() if word not in {"cf", "fc", "de", "del", "club", "real"}]
+    return "".join(word[0] for word in words[:3]).upper() or "—"
 
 
 def fetch_l10_averages(asset_ids: list[str], headers, progress=None) -> dict[str, float | None]:
@@ -221,6 +239,12 @@ def attach_odds(cards: list[dict], odds: dict) -> list[dict]:
         row["win_percent"] = round(float(info["win_prob"]) * 100) if info.get("win_prob") is not None else None
         row["opponent"] = info.get("opponent") or ""
         row["home"] = info.get("home")
+        is_home = bool(info.get("home"))
+        own_code = team_code(str(row.get("team") or ""))
+        opponent_code = team_code(str(info.get("opponent") or ""))
+        row["fixture_home_code"] = own_code if is_home else opponent_code
+        row["fixture_away_code"] = opponent_code if is_home else own_code
+        row["fixture_is_home"] = is_home
         attached.append(row)
     return attached
 

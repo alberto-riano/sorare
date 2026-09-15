@@ -7,7 +7,7 @@ from django.urls import reverse
 
 from dashboard.models import LineupInventory, LineupRefreshJob
 from lineup_helper import matchday_window
-from web_services.lineup_assistant import is_laliga_team, propose_lineups
+from web_services.lineup_assistant import attach_odds, is_laliga_team, propose_lineups
 
 
 def card(asset_id, position, average, team="Equipo"):
@@ -79,3 +79,11 @@ class LineupAssistantTests(TestCase):
         self.assertEqual(matchday_window(date(2026, 9, 15)), (date(2026, 9, 15), date(2026, 9, 17)))
         self.assertEqual(matchday_window(date(2026, 9, 16)), (date(2026, 9, 18), date(2026, 9, 22)))
         self.assertEqual(matchday_window(date(2026, 9, 18)), (date(2026, 9, 18), date(2026, 9, 22)))
+
+    def test_fixture_is_attached_with_own_team_in_bold_position(self):
+        row = attach_odds([card("odysseas", "GK", 43, "Sevilla FC")], {
+            "Sevilla FC": {"win_prob": .31, "opponent": "Real Club Deportivo de La Coruña", "home": False},
+        })[0]
+        self.assertEqual(row["fixture_home_code"], "DEP")
+        self.assertEqual(row["fixture_away_code"], "SEV")
+        self.assertFalse(row["fixture_is_home"])
