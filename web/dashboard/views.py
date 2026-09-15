@@ -147,7 +147,6 @@ def lineup_helper(request):
         for card in (inventory.cards or [])
         if (
             str(card.get("rarity") or "").casefold() == "rare"
-            and card.get("is_in_season") is True
             and card.get("is_laliga") is True
         )
     ]
@@ -237,7 +236,7 @@ def lineup_helper(request):
         "summary": summary,
         "candidate_groups": candidate_groups,
         "matches": matches,
-        "position_lanes": (("GK", "POR"), ("DEF", "DEF"), ("MID", "MED"), ("FWD", "DEL")),
+        "position_lanes": (("GK", "POR"), ("DEF", "DEF"), ("MID", "MED"), ("FWD", "DEL"), ("CLASSIC", "Classic")),
         "active_refresh": LineupRefreshJob.objects.filter(
             user=request.user, status__in=(LineupRefreshJob.Status.QUEUED, LineupRefreshJob.Status.RUNNING),
         ).order_by("-created_at").first(),

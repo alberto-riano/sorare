@@ -64,7 +64,7 @@
   if (!dataNode) return;
 
   var cards = JSON.parse(dataNode.textContent || "[]");
-  var positions = ["GK", "DEF", "MID", "FWD"];
+  var positions = ["GK", "DEF", "MID", "FWD", "CLASSIC"];
   var chosen = {};
   cards.forEach(function (card) {
     if (card.candidate) chosen[String(card.asset_id)] = card;
@@ -105,7 +105,7 @@
 
   function selectedAt(position) {
     return Object.keys(chosen).map(function (id) { return chosen[id]; }).filter(function (card) {
-      return card.position === position;
+      return position === "CLASSIC" ? !card.is_in_season : card.is_in_season && card.position === position;
     });
   }
 
@@ -133,7 +133,11 @@
     var box = document.getElementById("results-" + position);
     var term = (input.value || "").trim().toLocaleLowerCase("es");
     var matches = cards.filter(function (card) {
-      if (card.position !== position) return false;
+      if (position === "CLASSIC") {
+        if (card.is_in_season) return false;
+      } else if (!card.is_in_season || card.position !== position) {
+        return false;
+      }
       var text = (String(card.player || "") + " " + String(card.team || "")).toLocaleLowerCase("es");
       return !term || text.includes(term);
     }).slice(0, 14);
@@ -164,5 +168,16 @@
     input.addEventListener("focus", function () { drawResults(position); });
     input.addEventListener("input", function () { drawResults(position); });
   });
+  var clearButton = document.getElementById("clearCandidates");
+  if (clearButton) {
+    clearButton.addEventListener("click", function () {
+      chosen = {};
+      syncSelected();
+      positions.forEach(function (position) {
+        drawSelected(position);
+        drawResults(position);
+      });
+    });
+  }
   syncSelected();
 }());

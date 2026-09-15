@@ -87,3 +87,16 @@ class LineupAssistantTests(TestCase):
         self.assertEqual(row["fixture_home_code"], "DEP")
         self.assertEqual(row["fixture_away_code"], "SEV")
         self.assertFalse(row["fixture_is_home"])
+
+    def test_a_lineup_uses_at_most_one_classic_card(self):
+        rows = [
+            card("gk", "GK", 50, "G"), card("def-1", "DEF", 49, "D1"),
+            card("def-2", "DEF", 48, "D2"), card("mid", "MID", 47, "M"),
+            card("fwd", "FWD", 46, "F"),
+        ]
+        for row in rows[1:]:
+            row["is_in_season"] = False
+
+        result = propose_lineups(rows, count=1)
+
+        self.assertEqual(result["lineups"], [])

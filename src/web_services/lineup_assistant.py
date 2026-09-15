@@ -161,7 +161,6 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
         for raw in connection.get("nodes") or []:
             if (
                 str(raw.get("rarityTyped") or "").casefold() != "rare"
-                or not raw.get("inSeasonEligible")
                 or not is_laliga_team(raw.get("anyTeam") or {})
             ):
                 continue
@@ -274,6 +273,10 @@ def _valid_lineups(cards: list[dict], max_points: int, odds_weight: float) -> li
                         lineup = [goalkeeper, *defence, *midfield, *attack]
                         total = sum(float(card.get("average") or 0) for card in lineup)
                         if total > max_points:
+                            continue
+                        # Cada una de las cuatro alineaciones puede completar
+                        # su núcleo In-Season con una sola carta Classic.
+                        if sum(not card.get("is_in_season") for card in lineup) > 1:
                             continue
                         team_counts = Counter(card.get("team") for card in lineup)
                         if any(count > 2 for count in team_counts.values()):
