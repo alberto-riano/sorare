@@ -83,8 +83,8 @@
     return url ? '<img src="' + escapeHtml(url) + '" alt="">' : '<i class="fas fa-user"></i>';
   }
 
-  function l15(card) {
-    return card.average == null ? "L15 —" : "L15 " + escapeHtml(card.average);
+  function average(card) {
+    return card.average == null ? "0" : escapeHtml(card.average);
   }
 
   function syncSelected() {
@@ -106,7 +106,7 @@
     cardsAtPosition.forEach(function (card) {
       var row = document.createElement("article");
       row.className = "candidate";
-      row.innerHTML = '<span class="candidate-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong><small>" + escapeHtml(card.team) + '</small></span><b class="average">' + l15(card) + '</b><button type="button"><i class="fas fa-xmark"></i></button>';
+      row.innerHTML = '<span class="candidate-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong><small>" + escapeHtml(card.team) + '</small></span><b class="average">' + average(card) + '</b><button type="button"><i class="fas fa-xmark"></i></button>';
       row.querySelector("button").onclick = function () {
         delete chosen[String(card.asset_id)];
         syncSelected();
@@ -136,7 +136,7 @@
       row.type = "button";
       row.className = "lane-result";
       row.disabled = Boolean(chosen[String(card.asset_id)]);
-      row.innerHTML = '<span class="lane-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong><small>" + escapeHtml(card.team) + '</small></span><b class="l15">' + l15(card) + "</b>";
+      row.innerHTML = '<span class="lane-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong><small>" + escapeHtml(card.team) + '</small></span><b class="average">' + average(card) + "</b>";
       row.onclick = function () {
         chosen[String(card.asset_id)] = card;
         syncSelected();

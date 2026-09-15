@@ -17,6 +17,18 @@ LEGACY_XLSX = ROOT / "input" / "lineups.xlsx"
 POSITION_ORDER = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
 POSITION_LABELS = {"GK": "POR", "DEF": "DEF", "MID": "MED", "FWD": "DEL"}
 
+# La competición se decide con ``domesticLeague`` (no por la nacionalidad del
+# jugador). La lista de nombres es únicamente una red de seguridad para las
+# cartas antiguas a las que Sorare no devuelva la liga todavía.
+LALIGA_TEAM_NAMES = {
+    "athletic club", "atletico de madrid", "ca osasuna", "deportivo alaves",
+    "elche cf", "espanyol de barcelona", "fc barcelona", "getafe cf",
+    "girona fc", "levante ud", "rcd mallorca", "rayo vallecano", "real betis",
+    "real madrid", "real oviedo", "real sociedad", "sevilla fc", "valencia cf",
+    "villarreal cf", "real club deportivo de la coruna", "real racing club de santander",
+    "malaga cf",
+}
+
 
 def normalize(value: str) -> str:
     value = unicodedata.normalize("NFD", str(value or "").casefold())
@@ -67,32 +79,37 @@ def _legacy_average(name: str, values: dict[str, float]):
     return None
 
 
-def fetch_l15_averages(asset_ids: list[str], headers, progress=None) -> dict[str, float | None]:
-    """Lee L15 en lotes sin bloquear el refresco del inventario."""
+def is_laliga_team(team: dict) -> bool:
+    league = team.get("domesticLeague") or {}
+    league_text = f"{league.get('slug') or ''} {league.get('displayName') or ''}".casefold()
+    return "laliga" in league_text or normalize(team.get("name")) in LALIGA_TEAM_NAMES
+
+
+def fetch_l10_averages(asset_ids: list[str], headers, progress=None) -> dict[str, float | None]:
+    """Lee L10 en lotes sin bloquear el refresco del inventario."""
     averages: dict[str, float | None] = {}
     total = len(asset_ids)
     for start in range(0, total, 20):
         batch = asset_ids[start:start + 20]
         fields = "\n".join(
-            f'card_{index}: anyCard(assetId: "{asset_id}") {{ assetId averageScore(type: LAST_FIFTEEN_SO5_AVERAGE_SCORE) }}'
+            f'card_{index}: anyCard(assetId: "{asset_id}") {{ assetId averageScore(type: LAST_TEN_SO5_AVERAGE_SCORE) }}'
             for index, asset_id in enumerate(batch)
         )
         try:
-            data = graphql_request(f"query LineupL15 {{ tokens {{ {fields} }} }}", headers=headers)
+            data = graphql_request(f"query LineupL10 {{ tokens {{ {fields} }} }}", headers=headers)
         except Exception:
             continue
         for item in (data.get("tokens") or {}).values():
             if isinstance(item, dict) and item.get("assetId"):
                 averages[str(item["assetId"])] = item.get("averageScore")
         if progress:
-            progress(min(start + len(batch), total), total, "Consultando medias L15 de Sorare")
+            progress(min(start + len(batch), total), total, "Consultando medias L10 de Sorare")
     return averages
 
 
 def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) -> list[dict]:
     """Descarga tarjetas propias y conserva medias y candidatas locales."""
     previous = {str(card.get("asset_id")): card for card in (previous_cards or [])}
-    old_averages = legacy_averages()
     headers = build_headers()
     cursor = None
     cards = []
@@ -101,12 +118,12 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
         currentUser {
           cards(rarities: [rare], first: 100, after: $after) {
             nodes {
-              assetId slug rarityTyped seasonYear serialNumber inSeasonEligible anyPositions
+              assetId slug rarityTyped seasonYear serialNumber inSeasonEligible anyPositions pictureUrl
               anyPlayer {
                 slug displayName squaredPictureUrl
-                averageScore(type: LAST_FIFTEEN_SO5_AVERAGE_SCORE)
+                averageScore(type: LAST_TEN_SO5_AVERAGE_SCORE)
               }
-              anyTeam { name pictureUrl }
+              anyTeam { name pictureUrl domesticLeague { slug displayName } }
             }
             pageInfo { hasNextPage endCursor }
           }
@@ -121,7 +138,11 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
         connection = user.get("cards") or {}
         lineup_slugs = set(user.get("blockchainCardsInLineups") or [])
         for raw in connection.get("nodes") or []:
-            if str(raw.get("rarityTyped") or "").casefold() != "rare" or not raw.get("inSeasonEligible"):
+            if (
+                str(raw.get("rarityTyped") or "").casefold() != "rare"
+                or not raw.get("inSeasonEligible")
+                or not is_laliga_team(raw.get("anyTeam") or {})
+            ):
                 continue
             asset_id = str(raw.get("assetId") or "")
             if not asset_id:
@@ -135,6 +156,7 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
                 "player": player.get("displayName") or "Jugador",
                 "player_slug": player.get("slug") or "",
                 "player_picture_url": player.get("squaredPictureUrl") or "",
+                "card_picture_url": raw.get("pictureUrl") or "",
                 "team": team.get("name") or "Sin equipo",
                 "team_picture_url": team.get("pictureUrl") or "",
                 "rarity": raw.get("rarityTyped") or "",
@@ -142,8 +164,9 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
                 "serial_number": raw.get("serialNumber"),
                 "position": position_code(raw.get("anyPositions")),
                 "is_in_season": bool(raw.get("inSeasonEligible")),
+                "is_laliga": True,
                 "in_lineup": (raw.get("slug") or "") in lineup_slugs,
-                # L15 se publica en el jugador. Pedirlo junto a la carta evita
+                # L10 se publica en el jugador. Pedirlo junto a la carta evita
                 # decenas de consultas adicionales y hace ágil el selector.
                 "average": player.get("averageScore"),
                 "sorare_average": player.get("averageScore"),
@@ -160,16 +183,15 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
         cursor = page_info.get("endCursor")
     missing_ids = [card["asset_id"] for card in cards if card.get("average") is None]
     if progress and missing_ids:
-        progress(0, len(missing_ids), "Completando medias L15")
-    l15_averages = fetch_l15_averages(missing_ids, headers, progress=progress) if missing_ids else {}
+        progress(0, len(missing_ids), "Completando medias L10")
+    l10_averages = fetch_l10_averages(missing_ids, headers, progress=progress) if missing_ids else {}
     for card in cards:
-        old = previous.get(str(card["asset_id"])) or {}
-        average = card.get("average") or l15_averages.get(str(card["asset_id"]))
+        average = card.get("average") or l10_averages.get(str(card["asset_id"]))
+        # La media mostrada es siempre la L10 de Sorare. Si la API todavía no
+        # la publica para esa carta se enseña 0, nunca una media manual o L15.
         if average is None:
-            average = old.get("average")
-        if average is None:
-            average = _legacy_average(card["player"], old_averages)
-        card["sorare_average"] = card.get("sorare_average") or l15_averages.get(str(card["asset_id"]))
+            average = 0
+        card["sorare_average"] = card.get("sorare_average") or l10_averages.get(str(card["asset_id"]))
         card["average"] = average
     return sorted(cards, key=lambda card: (POSITION_ORDER.get(card["position"], 9), card["player"].casefold(), card["serial_number"] or 0))
 

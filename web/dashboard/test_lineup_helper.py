@@ -1,3 +1,4 @@
+from datetime import date
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -5,13 +6,15 @@ from django.test import TestCase
 from django.urls import reverse
 
 from dashboard.models import LineupInventory, LineupRefreshJob
-from web_services.lineup_assistant import propose_lineups
+from lineup_helper import matchday_window
+from web_services.lineup_assistant import is_laliga_team, propose_lineups
 
 
 def card(asset_id, position, average, team="Equipo"):
     return {
         "asset_id": asset_id, "player": asset_id, "position": position, "average": average,
         "team": team, "rarity": "rare", "candidate": True, "in_lineup": False,
+        "is_in_season": True, "is_laliga": True,
     }
 
 
@@ -67,3 +70,12 @@ class LineupAssistantTests(TestCase):
         self.assertTrue(saved["gk"]["candidate"])
         self.assertFalse(saved["def"]["candidate"])
         self.assertEqual(saved["gk"]["average"], 50)
+
+    def test_laliga_filter_uses_domestic_league(self):
+        self.assertTrue(is_laliga_team({"name": "Cualquier club", "domesticLeague": {"slug": "laliga-ea-sports"}}))
+        self.assertFalse(is_laliga_team({"name": "Crystal Palace FC", "domesticLeague": {"slug": "premier-league"}}))
+
+    def test_matchday_window_keeps_tuesday_short_and_wednesday_switches(self):
+        self.assertEqual(matchday_window(date(2026, 9, 15)), (date(2026, 9, 15), date(2026, 9, 17)))
+        self.assertEqual(matchday_window(date(2026, 9, 16)), (date(2026, 9, 18), date(2026, 9, 22)))
+        self.assertEqual(matchday_window(date(2026, 9, 18)), (date(2026, 9, 18), date(2026, 9, 22)))

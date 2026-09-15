@@ -467,6 +467,24 @@ def _match_odds_team(odds_name, sorare_teams):
     return best_team if best_score >= 0.45 else None
 
 
+def matchday_window(today):
+    """Devuelve la ventana de la jornada que se está preparando en Madrid.
+
+    Sorare separa estas jornadas en viernes→martes y martes→jueves. El martes
+    aún se prepara la corta de esa misma tarde; desde el miércoles se empieza a
+    ver la siguiente de viernes→martes.
+    """
+    weekday = today.weekday()
+    if weekday == 1:  # martes: jornada corta mar-jue
+        return today, today + timedelta(days=2)
+    if weekday in (2, 3):  # mié-jue: siguiente ventana vie-mar
+        start = today + timedelta(days=4 - weekday)
+        return start, start + timedelta(days=4)
+    # vie-lun: ventana actual vie-mar
+    start = today - timedelta(days=(weekday - 4) % 7)
+    return start, start + timedelta(days=4)
+
+
 def build_odds_map(odds_data, sorare_teams):
     """
     Construye mapa de cuotas y lista de partidos.
@@ -478,9 +496,7 @@ def build_odds_map(odds_data, sorare_teams):
     if not odds_data:
         return {}, []
 
-    # Sorare alterna dos jornadas semanales: viernes-lunes y martes-jueves.
-    # Desde viernes hasta lunes se prepara la siguiente (mar-jue); desde martes
-    # hasta jueves se prepara la siguiente (vie-lun), no el partido residual.
+    # Sorare alterna dos jornadas semanales: viernes-martes y martes-jueves.
     odds_with_time = []
     for m in odds_data:
         ct = m.get('commence_time', '')
@@ -494,15 +510,7 @@ def build_odds_map(odds_data, sorare_teams):
     odds_with_time.sort(key=lambda x: x[0] or datetime.max.replace(tzinfo=timezone.utc))
 
     madrid_today = datetime.now(ZoneInfo("Europe/Madrid")).date()
-    weekday = madrid_today.weekday()
-    if weekday in (4, 5, 6, 0):  # vie-lun -> próxima ventana mar-jue
-        days_until_start = (1 - weekday) % 7
-        span_days = 2
-    else:  # mar-jue -> próxima ventana vie-lun
-        days_until_start = (4 - weekday) % 7
-        span_days = 3
-    start_day = madrid_today + timedelta(days=days_until_start)
-    end_day = start_day + timedelta(days=span_days)
+    start_day, end_day = matchday_window(madrid_today)
     current_matchday = [
         match for moment, match in odds_with_time
         if moment is not None and start_day <= moment.astimezone(ZoneInfo("Europe/Madrid")).date() <= end_day

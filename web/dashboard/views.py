@@ -145,7 +145,11 @@ def lineup_helper(request):
         # herramienta: aquí sólo se preparan opciones, no se envía ninguna.
         {**card, "is_in_season": card.get("is_in_season") is True, "in_lineup": False}
         for card in (inventory.cards or [])
-        if str(card.get("rarity") or "").casefold() == "rare"
+        if (
+            str(card.get("rarity") or "").casefold() == "rare"
+            and card.get("is_in_season") is True
+            and card.get("is_laliga") is True
+        )
     ]
     proposal = None
 
@@ -176,7 +180,7 @@ def lineup_helper(request):
     cards = sorted(cards, key=lambda card: (position_sort.get(card.get("position"), 9), str(card.get("player") or "").casefold()))
     summary = {
         "total": sum(card.get("is_in_season") is True for card in cards),
-        "with_average": sum(card.get("average") is not None for card in cards),
+        "with_average": sum(float(card.get("average") or 0) > 0 for card in cards),
         "in_lineup": sum(bool(card.get("in_lineup")) for card in cards),
         "selected": sum(bool(card.get("candidate")) for card in cards),
     }
