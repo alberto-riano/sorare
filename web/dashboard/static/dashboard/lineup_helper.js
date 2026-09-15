@@ -87,6 +87,15 @@
     return card.average == null ? "0" : escapeHtml(card.average);
   }
 
+  // El filtro es deliberadamente tolerante: escribir "alvaro" o "vinicius"
+  // encuentra igualmente Álvaro García y Vinícius, sin exigir tildes.
+  function searchNormalize(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase("es");
+  }
+
   function fixture(card) {
     if (!card.fixture_home_code || !card.fixture_away_code) {
       return '<small>' + escapeHtml(card.team) + '</small>';
@@ -131,14 +140,14 @@
   function drawResults(position) {
     var input = document.querySelector('.lane-input[data-position="' + position + '"]');
     var box = document.getElementById("results-" + position);
-    var term = (input.value || "").trim().toLocaleLowerCase("es");
+    var term = searchNormalize(input.value).trim();
     var matches = cards.filter(function (card) {
       if (position === "CLASSIC") {
         if (card.is_in_season) return false;
       } else if (!card.is_in_season || card.position !== position) {
         return false;
       }
-      var text = (String(card.player || "") + " " + String(card.team || "")).toLocaleLowerCase("es");
+      var text = searchNormalize(String(card.player || "") + " " + String(card.team || ""));
       return !term || text.includes(term);
     }).slice(0, 14);
     box.innerHTML = "";
