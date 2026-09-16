@@ -23,11 +23,11 @@ EOF
 
 sudo tee /etc/systemd/system/sorare-auctions-refresh.timer >/dev/null <<EOF
 [Unit]
-Description=Reconstruir completamente el mercado Sorare cada treinta minutos
+Description=Reconstruir completamente el mercado Sorare cada dos horas
 
 [Timer]
 OnBootSec=15s
-OnUnitActiveSec=30min
+OnUnitActiveSec=2h
 Persistent=true
 Unit=sorare-auctions-refresh.service
 

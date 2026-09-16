@@ -23,11 +23,11 @@ EOF
 
 sudo tee /etc/systemd/system/sorare-opportunities-refresh.timer >/dev/null <<EOF
 [Unit]
-Description=Actualizar oportunidades Sorare cada dos horas
+Description=Actualizar oportunidades Sorare cada mañana a las 08:30 de Madrid
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=2h
+OnCalendar=*-*-* 08:30:00 Europe/Madrid
+AccuracySec=1min
 Persistent=true
 Unit=sorare-opportunities-refresh.service
 
