@@ -1,6 +1,6 @@
 import json
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -74,11 +74,19 @@ class MarketListingAlertTests(SimpleTestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("bargain_alert_min_saving_percent", form.errors)
 
-    def test_premium_message_is_visibly_distinct(self):
+    def test_bargain_message_uses_rarity_icon_and_explains_limited_ratio(self):
         message = market_listing_alert._message(
             offer(), 603, {"fair_value": 900, "limited_value": 250, "ratio": 4}, 33, premium=True,
         )
-        self.assertIn("GANGA REAL", message)
+        self.assertIn("🔴 <b>Kylian Mbappé</b>", message)
+        self.assertIn("equiv. Rare por Limited 250.00 € × 4.00 = 1000.00 €", message)
+
+    def test_same_price_is_suppressed_for_48_hours_but_lower_price_is_new(self):
+        notified = {}
+        market_listing_alert._remember_price_alert(notified, "market", offer(), 603, NOW)
+        self.assertTrue(market_listing_alert._repeat_price_alert(notified, "market", offer(), 603, NOW + timedelta(hours=2)))
+        self.assertFalse(market_listing_alert._repeat_price_alert(notified, "market", offer(), 602, NOW + timedelta(hours=2)))
+        self.assertFalse(market_listing_alert._repeat_price_alert(notified, "market", offer(), 603, NOW + timedelta(hours=49)))
 
     @patch("web_services.process_runner._run_command")
     def test_runner_uses_market_listing_script(self, run_command):
@@ -159,7 +167,9 @@ class MarketListingAlertTests(SimpleTestCase):
         "MARKET_ALERT_MIN_LIMITED_VALUE_EUR": "1", "MARKET_ALERT_MIN_COMPARABLES": "1",
     })
     def test_run_alerts_once_and_remembers_offer(self, _settings, _context, _config, _headers, _rates, fetch, valuation, send, _sleep):
-        fetch.return_value = [offer()]
+        same_price_after_refresh = offer()
+        same_price_after_refresh["updatedAt"] = "2026-09-05T10:30:00Z"
+        fetch.side_effect = [[offer()], [same_price_after_refresh]]
         valuation.return_value = {
             "fair_value": 900, "limited_value": 250, "rare_sales_count": 2,
             "rare_peer_floor": 1000, "rare_sales_reference": 875, "ratio": 4,
@@ -171,4 +181,5 @@ class MarketListingAlertTests(SimpleTestCase):
                 self.assertEqual(market_listing_alert.run(now=NOW), 0)
                 state = json.loads(state_path.read_text())
         send.assert_called_once()
+        self.assertEqual(valuation.call_count, 1)
         self.assertTrue(any(key.startswith("offer-new:") for key in state["seen"]))

@@ -35,6 +35,7 @@ POLL_INTERVAL_MINUTES = 30
 OVERLAP_MINUTES = 3
 MAX_HISTORY_DAYS = 45
 REQUEST_INTERVAL_SECONDS = 1.05
+REPEAT_ALERT_WINDOW = timedelta(hours=48)
 
 RECENT_LISTINGS_QUERY = """
 query RecentMarketListings($updatedAfter: ISO8601DateTime!, $first: Int!, $after: String) {
@@ -151,6 +152,35 @@ def _offer_version_key(offer):
     amount_signature = ":".join(str(amounts.get(key) or "") for key in ("eurCents", "usdCents", "gbpCents", "wei"))
     version = offer.get("updatedAt") or offer.get("startDate") or ""
     return f"{offer.get('id')}:{version}:{amount_signature}"
+
+
+def _alert_price_key(offer):
+    """Agrupa avisos por jugador y rareza, no por cada refresco de Sorare."""
+    card = _card_from_offer(offer)
+    player_slug = (card.get("anyPlayer") or {}).get("slug") or ""
+    rarity = card.get("rarityTyped") or "rare"
+    return f"{player_slug}:{rarity}"
+
+
+def _repeat_price_alert(notified_prices, channel, offer, price, now):
+    """Evita repetir durante 48 h el mismo precio (o uno peor).
+
+    Sorare puede cambiar ``updatedAt`` aunque el anuncio siga igual. Si baja el
+    precio sí vuelve a ser una señal nueva y, por tanto, se deja pasar.
+    """
+    entry = ((notified_prices.get(channel) or {}).get(_alert_price_key(offer)) or {})
+    alerted_at = _parse_date(entry.get("at"))
+    try:
+        alerted_price = float(entry.get("price"))
+    except (TypeError, ValueError):
+        return False
+    return bool(alerted_at and now - alerted_at < REPEAT_ALERT_WINDOW and price >= alerted_price)
+
+
+def _remember_price_alert(notified_prices, channel, offer, price, now):
+    notified_prices.setdefault(channel, {})[_alert_price_key(offer)] = {
+        "price": round(float(price), 2), "at": now.isoformat(),
+    }
 
 
 def _matching_listing(offer, player_slugs):
@@ -277,12 +307,15 @@ def _message(offer, price, valuation, saving, *, premium=False):
     if valuation.get("rare_sales_reference"):
         parts.append(f"ventas/pujas {valuation['rare_sales_reference']:.2f} €")
     if valuation.get("limited_value"):
-        parts.append(f"Limited {valuation['limited_value']:.2f} € × {valuation['ratio']:.2f}")
+        parity = valuation.get("parity_reference") or (valuation["limited_value"] * valuation["ratio"])
+        parts.append(
+            f"equiv. Rare por Limited {valuation['limited_value']:.2f} € × {valuation['ratio']:.2f} = {parity:.2f} €"
+        )
     url = f"https://sorare.com/football/cards/{card.get('slug')}" if card.get("slug") else f"https://sorare.com/football/players/{player.get('slug', '')}"
-    heading = "💎 <b>GANGA REAL · Rare</b>" if premium else "🆕🔴 <b>Nueva oportunidad Rare</b>"
+    rarity_icon = "🔵" if card.get("rarityTyped") == "super_rare" else "🔴"
     return (
-        f"{heading}\n"
-        f"<b>{html.escape(str(player.get('displayName') or 'Jugador'))}</b> · {html.escape(str(team.get('name') or 'LaLiga'))}\n\n"
+        f"{rarity_icon} <b>{html.escape(str(player.get('displayName') or 'Jugador'))}</b>\n"
+        f"{html.escape(str(team.get('name') or 'LaLiga'))} · In-Season\n\n"
         f"Precio: <b>{price:.2f} €</b> · Valor: <b>{valuation['fair_value']:.2f} €</b> · Ahorro: <b>{saving:.1f}%</b>\n"
         f"{html.escape(' · '.join(parts))}\n\n"
         f"<a href=\"{html.escape(url, quote=True)}\">Ver carta y comprar</a>"
@@ -322,12 +355,13 @@ def run(*, dry_run=False, now=None):
     candidates = [offer for offer in offers if _matching_listing(offer, opportunity_rows)]
     seen = {} if settings_changed else state.setdefault("seen", {})
     pending = state.setdefault("pending", {})
+    notified_prices = state.setdefault("notified_prices", {})
     candidates_by_id = {
         _offer_version_key(offer): offer for offer in [*pending.values(), *candidates]
         if offer.get("id") and _offer_version_key(offer) not in seen and _matching_listing(offer, opportunity_rows)
     }
     new_candidates = list(candidates_by_id.values())
-    sent = bargain_sent = evaluated = valued = failures = filtered = below_threshold = 0
+    sent = bargain_sent = evaluated = valued = failures = filtered = below_threshold = repeat_suppressed = 0
     errors = []
     evaluations = []
     for candidate in new_candidates:
@@ -342,6 +376,24 @@ def run(*, dry_run=False, now=None):
                 evaluations.append({"player": player, "decision": "Precio no convertible a EUR"})
                 continue
             card = _card_from_offer(candidate)
+            normal_already_sent = market_enabled and _repeat_price_alert(
+                notified_prices, "market", candidate, price, now,
+            )
+            bargain_already_sent = premium_ready and _repeat_price_alert(
+                notified_prices, "bargain", candidate, price, now,
+            )
+            # Si todas las conversaciones que podrían recibirlo ya lo vieron a
+            # este precio (o a uno mejor), no gastamos dos consultas extra en
+            # revalorar el mismo anuncio actualizado por Sorare.
+            active_channels = int(market_enabled) + int(premium_ready)
+            repeated_channels = int(normal_already_sent) + int(bargain_already_sent)
+            if active_channels and active_channels == repeated_channels:
+                seen[version_key] = now.isoformat()
+                pending.pop(version_key, None)
+                filtered += 1
+                repeat_suppressed += 1
+                evaluations.append({"player": player, "price": price, "decision": "Ya avisada a este precio o uno inferior (<48 h)"})
+                continue
             slug = (card.get("anyPlayer") or {}).get("slug")
             snapshot_row = opportunity_rows.get(slug) or {}
             valuation = _player_valuation(candidate, headers, rates, now, ratio, ratio_source, snapshot_row, weights)
@@ -366,14 +418,15 @@ def run(*, dry_run=False, now=None):
                 decision, eligible = f"Ahorro inferior al {min_saving:g}%", False
                 below_threshold += 1
             if eligible and ((market_enabled and saving >= min_saving) or (premium_ready and saving >= bargain_min_saving)):
-                if market_enabled and saving >= min_saving:
+                if market_enabled and saving >= min_saving and not normal_already_sent:
                     message = _message(candidate, price, valuation, saving)
                     if dry_run:
                         print(message)
                     else:
                         _send_telegram(config.get("TELEGRAM_BOT_TOKEN"), config.get("TELEGRAM_CHAT_ID"), message, (card.get("anyPlayer") or {}).get("squaredPictureUrl"))
                     sent += 1
-                if premium_ready and saving >= bargain_min_saving:
+                    _remember_price_alert(notified_prices, "market", candidate, price, now)
+                if premium_ready and saving >= bargain_min_saving and not bargain_already_sent:
                     premium_message = _message(candidate, price, valuation, saving, premium=True)
                     if dry_run:
                         print(premium_message)
@@ -383,6 +436,9 @@ def run(*, dry_run=False, now=None):
                             (card.get("anyPlayer") or {}).get("squaredPictureUrl"),
                         )
                     bargain_sent += 1
+                    _remember_price_alert(notified_prices, "bargain", candidate, price, now)
+                if normal_already_sent or bargain_already_sent:
+                    decision = "Aviso repetido omitido: mismo precio durante 48 h"
             else:
                 filtered += 1
             evaluations.append({
@@ -402,12 +458,21 @@ def run(*, dry_run=False, now=None):
     cutoff = now - timedelta(days=9)
     state["seen"] = {key: value for key, value in seen.items() if (_parse_date(value) or now) >= cutoff}
     state["pending"] = pending
+    notified_cutoff = now - REPEAT_ALERT_WINDOW
+    state["notified_prices"] = {
+        channel: {
+            key: entry for key, entry in prices.items()
+            if (_parse_date((entry or {}).get("at")) or now) >= notified_cutoff
+        }
+        for channel, prices in notified_prices.items() if isinstance(prices, dict)
+    }
     state.update({
         "settings_signature": settings_signature,
         "last_run_at": now.isoformat(), "last_result": "partial" if failures else "ok", "offers_scanned": len(offers),
         "new_candidates": len(new_candidates), "evaluated_count": evaluated, "valued_count": valued,
         "filtered_count": filtered, "below_threshold_count": below_threshold, "alerts_sent": sent,
         "bargain_alerts_sent": bargain_sent,
+        "repeat_suppressed_count": repeat_suppressed,
         "max_saving_percent": max((row.get("saving_percent") or 0 for row in evaluations), default=0),
         "last_evaluations": evaluations[-8:], "failure_count": failures, "last_errors": errors[-3:],
     })
