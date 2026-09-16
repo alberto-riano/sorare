@@ -35,7 +35,8 @@ class AuctionValueAlertTests(TestCase):
             40, 20, 3,
         )
 
-        self.assertIn("🔵 Super Rare", message)
+        self.assertIn("🔵 <b>Jugador</b>", message)
+        self.assertNotIn("GANGA REAL", message)
         self.assertIn("Termina a las <b>18:30</b>", message)
         self.assertIn("Limited 11.00 €", message)
         self.assertNotIn("quedan aprox.", message)

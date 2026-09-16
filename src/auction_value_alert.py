@@ -29,7 +29,6 @@ STATE_PATH = ROOT / "output" / "auction_value_alert_state.json"
 VALUE_TTL = timedelta(minutes=15)
 SEASON_YEAR = 2026
 ALLOWED_RARITIES = {"rare", "super_rare"}
-RARITY_LABELS = {"rare": "🔴 Rare", "super_rare": "🔵 Super Rare"}
 
 
 def parse_date(value):
@@ -232,7 +231,7 @@ def _message(row, detail, valuation, next_eur, saving, remaining_minutes, *, pre
         "https://sorare.com/football/market/shop/auctions?card=" + card_slug
         if card_slug else "https://sorare.com/football/players/" + row.get("player_slug", "")
     )
-    rarity_label = RARITY_LABELS.get(row.get("rarity"), row.get("rarity") or "Rare")
+    rarity_icon = "🔵" if row.get("rarity") == "super_rare" else "🔴"
     end_at = parse_date(detail.get("endDate") or row.get("end_date"))
     end_label = end_at.astimezone(ZoneInfo("Europe/Madrid")).strftime("%H:%M") if end_at else "--:--"
     market_parts = []
@@ -243,10 +242,9 @@ def _message(row, detail, valuation, next_eur, saving, remaining_minutes, *, pre
     if valuation.get("limited_floor") is not None:
         market_parts.append(f"Limited {valuation['limited_floor']:.2f} €")
     market_line = " · ".join(market_parts) or "Sin referencias de mercado"
-    marker = "💎 <b>GANGA REAL</b>\n" if premium else "🚨 "
     return (
-        f"{marker}<b>{html.escape(str(row.get('player') or 'Jugador'))}</b> · {html.escape(str(rarity_label))}\n"
-        f"{html.escape(str(row.get('team') or 'LaLiga'))}\n\n"
+        f"{rarity_icon} <b>{html.escape(str(row.get('player') or 'Jugador'))}</b>\n"
+        f"{html.escape(str(row.get('team') or 'LaLiga'))} · In-Season\n\n"
         f"Puja: <b>{next_eur:.2f} €</b> · Valor: <b>{valuation['value']:.2f} €</b> · Ahorro: <b>{saving:.1f}%</b>\n"
         f"{html.escape(market_line)}\n"
         f"⏱ Termina a las <b>{end_label}</b> · quedan <b>{max(1, remaining_minutes)} min</b>\n\n"
