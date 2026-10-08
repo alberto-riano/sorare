@@ -151,9 +151,14 @@ def lineup_helper(request):
         )
     ]
     proposal = None
+    starter_min = 0
 
     if request.method == "POST":
         action = request.POST.get("action")
+        try:
+            starter_min = min(max(int(request.POST.get("starter_min") or 0), 0), 100)
+        except ValueError:
+            starter_min = 0
         if action != "refresh":
             candidate_ids = {
                 value.strip() for value in str(request.POST.get("candidate_asset_ids", "")).split(",") if value.strip()
@@ -167,7 +172,13 @@ def lineup_helper(request):
             inventory.cards = cards
             inventory.save(update_fields=("cards",))
             if action == "generate":
-                proposal = propose_lineups(cards)
+                # El filtro de titularidad también limita las cartas que entran
+                # en la propuesta; sin % publicado no se pueden garantizar.
+                pool = [
+                    card for card in cards
+                    if not starter_min or (card.get("starter_percent") is not None and card["starter_percent"] >= starter_min)
+                ]
+                proposal = propose_lineups(pool)
                 if len(proposal["lineups"]) < 4:
                     messages.warning(request, "No se han podido completar cuatro alineaciones con las cartas y medias seleccionadas.")
                 else:
@@ -252,6 +263,8 @@ def lineup_helper(request):
         "inventory": inventory,
         "cards": cards,
         "proposal": proposal,
+        "starter_min": starter_min,
+        "starter_steps": range(10, 101, 10),
         "summary": summary,
         "candidate_groups": candidate_groups,
         "matches": matches,

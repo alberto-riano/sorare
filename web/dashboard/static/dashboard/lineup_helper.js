@@ -81,6 +81,13 @@
     starterFilter.disabled = true;
     if (starterNote) starterNote.hidden = false;
   }
+  // Se recuerda el último filtro salvo que la página ya venga con uno elegido.
+  if (starterFilter && !starterFilter.disabled && starterFilter.value === "0") {
+    try {
+      var savedFilter = localStorage.getItem("lineupStarterFilter");
+      if (savedFilter && starterFilter.querySelector('option[value="' + savedFilter + '"]')) starterFilter.value = savedFilter;
+    } catch (error) {}
+  }
 
   function minimumStarter() {
     return starterFilter && !starterFilter.disabled ? Number(starterFilter.value) || 0 : 0;
@@ -111,7 +118,7 @@
     var level = value >= 70 ? "high" : value >= 40 ? "mid" : "low";
     var title = "Probabilidad de titularidad según Sorare";
     if (card.starter_reliability) title += " · fiabilidad " + String(card.starter_reliability).toLowerCase();
-    return '<b class="starter starter-' + level + '" title="' + escapeHtml(title) + '">' + escapeHtml(value) + "%</b>";
+    return '<b class="starter starter-' + level + '" title="' + escapeHtml(title) + '"><i class="fas fa-shirt"></i> ' + escapeHtml(value) + "%</b>";
   }
 
   // El filtro es deliberadamente tolerante: escribir "alvaro" o "vinicius"
@@ -152,7 +159,9 @@
     box.innerHTML = cardsAtPosition.length ? "" : '<span class="empty">Sin candidatas</span>';
     cardsAtPosition.forEach(function (card) {
       var row = document.createElement("article");
-      row.className = "candidate";
+      var minimum = minimumStarter();
+      // Las candidatas por debajo del filtro se atenúan: no entran en la propuesta.
+      row.className = "candidate" + (minimum && (card.starter_percent == null || Number(card.starter_percent) < minimum) ? " below" : "");
       row.innerHTML = '<span class="candidate-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong>" + fixture(card) + '</span>' + starter(card) + '<b class="average">' + average(card) + '</b><button type="button"><i class="fas fa-xmark"></i></button>';
       row.querySelector("button").onclick = function () {
         delete chosen[String(card.asset_id)];
@@ -200,6 +209,16 @@
     });
   }
 
+  if (starterFilter) {
+    starterFilter.addEventListener("change", function () {
+      try { localStorage.setItem("lineupStarterFilter", starterFilter.value); } catch (error) {}
+      positions.forEach(function (position) {
+        drawSelected(position);
+        var input = document.querySelector('.lane-input[data-position="' + position + '"]');
+        if (input.value || document.getElementById("results-" + position).innerHTML) drawResults(position);
+      });
+    });
+  }
   positions.forEach(function (position) {
     drawSelected(position);
     var input = document.querySelector('.lane-input[data-position="' + position + '"]');

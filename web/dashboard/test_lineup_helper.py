@@ -156,8 +156,8 @@ class LineupAssistantTests(TestCase):
         })
 
         content = response.content.decode()
-        self.assertRegex(content, r'class="starter lh-starter starter-high"[^>]*>92%</b>')
-        self.assertRegex(content, r'class="starter lh-starter starter-low"[^>]*>35%</b>')
+        self.assertRegex(content, r'class="starter lh-starter starter-high"[^>]*><i class="fas fa-shirt"></i> 92%</b>')
+        self.assertRegex(content, r'class="starter lh-starter starter-low"[^>]*><i class="fas fa-shirt"></i> 35%</b>')
 
     def test_clear_removes_saved_candidates(self):
         LineupInventory.objects.create(user=self.user, cards=[card("gk", "GK", 50), card("def", "DEF", 42)])
@@ -187,3 +187,22 @@ class LineupAssistantTests(TestCase):
             cards = fetch_lineup_cards()
 
         self.assertEqual([(row["asset_id"], row["team"]) for row in cards], [("fichado", "Sevilla FC")])
+
+    def test_starter_filter_limits_the_proposal(self):
+        rows = [
+            card("gk", "GK", 50, "G"), card("def-1", "DEF", 49, "D1"),
+            card("def-2", "DEF", 48, "D2"), card("mid", "MID", 47, "M"),
+            card("fwd", "FWD", 46, "F"),
+        ]
+        for row, percent in zip(rows, (90, 80, 70, 60, 20)):
+            row["starter_percent"] = percent
+        LineupInventory.objects.create(user=self.user, cards=rows)
+        ids = ",".join(row["asset_id"] for row in rows)
+
+        response = self.client.post(reverse("lineup_helper"), {"action": "generate", "candidate_asset_ids": ids, "starter_min": "30"})
+        self.assertEqual(response.context["proposal"]["lineups"], [])
+        self.assertContains(response, '<option value="30" selected>')
+        self.assertContains(response, '<option value="100">')
+
+        response = self.client.post(reverse("lineup_helper"), {"action": "generate", "candidate_asset_ids": ids, "starter_min": "20"})
+        self.assertEqual(len(response.context["proposal"]["lineups"]), 1)
