@@ -193,6 +193,7 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
               anyPlayer {
                 slug displayName squaredPictureUrl
                 averageScore(type: LAST_TEN_PLAYED_SO5_AVERAGE_SCORE)
+                activeClub { name pictureUrl domesticLeague { slug displayName } }
               }
               anyTeam {
                 name pictureUrl
@@ -212,16 +213,20 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
         connection = user.get("cards") or {}
         lineup_slugs = set(user.get("blockchainCardsInLineups") or [])
         for raw in connection.get("nodes") or []:
+            player = raw.get("anyPlayer") or {}
+            # La carta conserva el club con el que se emitió (p. ej. Owono sigue
+            # saliendo como Alavés). Manda el club actual del jugador: si ya no
+            # juega en LaLiga o no tiene club, no se alinea aquí.
+            team = player.get("activeClub") or {}
             if (
                 str(raw.get("rarityTyped") or "").casefold() != "rare"
-                or not is_laliga_team(raw.get("anyTeam") or {})
+                or not team
+                or not is_laliga_team(team)
             ):
                 continue
             asset_id = str(raw.get("assetId") or "")
             if not asset_id:
                 continue
-            player = raw.get("anyPlayer") or {}
-            team = raw.get("anyTeam") or {}
             old = previous.get(asset_id) or {}
             cards.append({
                 "asset_id": asset_id,

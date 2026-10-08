@@ -172,6 +172,8 @@ def lineup_helper(request):
                     messages.warning(request, "No se han podido completar cuatro alineaciones con las cartas y medias seleccionadas.")
                 else:
                     messages.success(request, "Propuesta de cuatro alineaciones actualizada.")
+            elif action == "clear":
+                messages.success(request, "Candidatas eliminadas.")
             else:
                 messages.success(request, "Candidatos guardados.")
 

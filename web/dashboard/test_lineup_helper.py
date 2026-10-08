@@ -140,3 +140,32 @@ class LineupAssistantTests(TestCase):
         content = response.content.decode()
         self.assertRegex(content, r'class="starter lh-starter starter-high"[^>]*>92%</b>')
         self.assertRegex(content, r'class="starter lh-starter starter-low"[^>]*>35%</b>')
+
+    def test_clear_removes_saved_candidates(self):
+        LineupInventory.objects.create(user=self.user, cards=[card("gk", "GK", 50), card("def", "DEF", 42)])
+
+        self.client.post(reverse("lineup_helper"), {"action": "clear", "candidate_asset_ids": ""})
+
+        self.assertFalse(any(row["candidate"] for row in LineupInventory.objects.get(user=self.user).cards))
+
+    def test_cards_follow_the_players_current_club(self):
+        def node(asset_id, active_club):
+            return {
+                "assetId": asset_id, "slug": asset_id, "rarityTyped": "rare", "inSeasonEligible": True,
+                "anyPositions": ["Goalkeeper"], "serialNumber": 1,
+                "anyPlayer": {"slug": asset_id, "displayName": asset_id, "averageScore": 50, "activeClub": active_club},
+                "anyTeam": {"name": "D. Alavés", "domesticLeague": {"slug": "laliga-es"}},
+            }
+
+        page = {"currentUser": {"cards": {"nodes": [
+            node("owono", {"name": "Benfica", "domesticLeague": {"slug": "liga-portugal"}}),
+            node("libre", None),
+            node("fichado", {"name": "Sevilla FC", "domesticLeague": {"slug": "laliga-es"}}),
+        ], "pageInfo": {"hasNextPage": False}}, "blockchainCardsInLineups": []}}
+        with patch("web_services.lineup_assistant.build_headers", return_value={}), patch(
+            "web_services.lineup_assistant.graphql_request", return_value=page,
+        ), patch("web_services.lineup_assistant.fetch_starter_odds", return_value={}):
+            from web_services.lineup_assistant import fetch_lineup_cards
+            cards = fetch_lineup_cards()
+
+        self.assertEqual([(row["asset_id"], row["team"]) for row in cards], [("fichado", "Sevilla FC")])

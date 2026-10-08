@@ -72,6 +72,24 @@
 
   var selectedInput = document.getElementById("candidateAssetIds");
   var selectedTotal = document.getElementById("selectedTotal");
+  var starterFilter = document.getElementById("starterFilter");
+  var starterNote = document.getElementById("starterFilterNote");
+  var hasStarterData = cards.some(function (card) { return card.starter_percent != null; });
+  // Sorare no siempre publica la titularidad; sin datos el filtro dejaría el
+  // buscador vacío.
+  if (starterFilter && !hasStarterData) {
+    starterFilter.disabled = true;
+    if (starterNote) starterNote.hidden = false;
+  }
+
+  function minimumStarter() {
+    return starterFilter && !starterFilter.disabled ? Number(starterFilter.value) || 0 : 0;
+  }
+
+  // Por defecto, las cartas con mejor media primero.
+  function byAverage(a, b) {
+    return (Number(b.average) || 0) - (Number(a.average) || 0);
+  }
 
   function escapeHtml(value) {
     return String(value || "").replace(/[&<>"']/g, function (char) {
@@ -124,7 +142,7 @@
   function selectedAt(position) {
     return Object.keys(chosen).map(function (id) { return chosen[id]; }).filter(function (card) {
       return position === "CLASSIC" ? !card.is_in_season : card.is_in_season && card.position === position;
-    });
+    }).sort(byAverage);
   }
 
   function drawSelected(position) {
@@ -150,18 +168,20 @@
     var input = document.querySelector('.lane-input[data-position="' + position + '"]');
     var box = document.getElementById("results-" + position);
     var term = searchNormalize(input.value).trim();
+    var minimum = minimumStarter();
     var matches = cards.filter(function (card) {
       if (position === "CLASSIC") {
         if (card.is_in_season) return false;
       } else if (!card.is_in_season || card.position !== position) {
         return false;
       }
+      if (minimum && (card.starter_percent == null || Number(card.starter_percent) < minimum)) return false;
       var text = searchNormalize(String(card.player || "") + " " + String(card.team || ""));
       return !term || text.includes(term);
-    }).slice(0, 14);
+    }).sort(byAverage).slice(0, 14);
     box.innerHTML = "";
     if (!matches.length) {
-      box.innerHTML = '<div class="empty">' + (term ? "No hay coincidencias" : "No hay cartas guardadas para esta posición") + "</div>";
+      box.innerHTML = '<div class="empty">' + (term || minimumStarter() ? "No hay coincidencias" : "No hay cartas guardadas para esta posición") + "</div>";
       return;
     }
     matches.forEach(function (card) {
@@ -197,10 +217,17 @@
     clearButton.addEventListener("click", function () {
       chosen = {};
       syncSelected();
-      positions.forEach(function (position) {
-        drawSelected(position);
-        drawResults(position);
-      });
+      positions.forEach(drawSelected);
+      // Limpiar también se guarda; si no, al recargar o actualizar volvían
+      // las candidatas.
+      var form = clearButton.closest("form");
+      var action = document.createElement("input");
+      action.type = "hidden";
+      action.name = "action";
+      action.value = "clear";
+      form.appendChild(action);
+      clearButton.disabled = true;
+      form.submit();
     });
   }
   syncSelected();
