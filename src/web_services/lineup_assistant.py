@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from itertools import combinations
+import json
 from pathlib import Path
 import unicodedata
 
@@ -134,6 +135,49 @@ def fetch_l10_averages(asset_ids: list[str], headers, progress=None) -> dict[str
     return averages
 
 
+def fetch_starter_odds(player_slugs: list[str], headers, progress=None) -> dict[str, dict]:
+    """Lee la probabilidad de titularidad del próximo partido.
+
+    Se consulta aparte para que un fallo no rompa el refresco. Sorare rechaza
+    varios alias de anyPlayer en la raíz, así que se pide con players(slugs:).
+    """
+    odds: dict[str, dict] = {}
+    total = len(player_slugs)
+    for start in range(0, total, 20):
+        batch = player_slugs[start:start + 20]
+        query = f"""
+          query LineupStarterOdds {{
+            players(slugs: {json.dumps(batch)}) {{
+              slug
+              anyFutureGameStats(first: 1) {{
+                ... on PlayerGameStats {{
+                  footballPlayingStatusOdds(newVersion: true) {{ starterOddsBasisPoints reliability }}
+                }}
+              }}
+            }}
+          }}
+        """
+        try:
+            data = graphql_request(query, headers=headers)
+        except Exception:
+            continue
+        for item in data.get("players") or []:
+            if not isinstance(item, dict) or not item.get("slug"):
+                continue
+            stats = (item.get("anyFutureGameStats") or [{}])[0] or {}
+            status = stats.get("footballPlayingStatusOdds") or {}
+            basis_points = status.get("starterOddsBasisPoints")
+            if basis_points is None:
+                continue
+            odds[item["slug"]] = {
+                "starter_percent": round(int(basis_points) / 100),
+                "starter_reliability": status.get("reliability") or "",
+            }
+        if progress:
+            progress(min(start + len(batch), total), total, "Consultando % de titularidad")
+    return odds
+
+
 def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) -> list[dict]:
     """Descarga tarjetas propias y conserva medias y candidatas locales."""
     previous = {str(card.get("asset_id")): card for card in (previous_cards or [])}
@@ -222,6 +266,12 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
             average = 0
         card["sorare_average"] = card.get("sorare_average") or l10_averages.get(str(card["asset_id"]))
         card["average"] = average
+    slugs = sorted({card["player_slug"] for card in cards if card.get("player_slug")})
+    starter_odds = fetch_starter_odds(slugs, headers, progress=progress) if slugs else {}
+    for card in cards:
+        info = starter_odds.get(card.get("player_slug")) or {}
+        card["starter_percent"] = info.get("starter_percent")
+        card["starter_reliability"] = info.get("starter_reliability", "")
     return sorted(cards, key=lambda card: (POSITION_ORDER.get(card["position"], 9), card["player"].casefold(), card["serial_number"] or 0))
 
 

@@ -7,7 +7,7 @@ from django.urls import reverse
 
 from dashboard.models import LineupInventory, LineupRefreshJob
 from lineup_helper import matchday_window
-from web_services.lineup_assistant import attach_odds, is_laliga_team, propose_lineups, team_code
+from web_services.lineup_assistant import attach_odds, fetch_starter_odds, is_laliga_team, propose_lineups, team_code
 
 
 def card(asset_id, position, average, team="Equipo"):
@@ -104,3 +104,39 @@ class LineupAssistantTests(TestCase):
         result = propose_lineups(rows, count=1)
 
         self.assertEqual(result["lineups"], [])
+
+    def test_starter_odds_keep_only_players_with_a_percentage(self):
+        response = {"players": [
+            {"slug": "pedri", "anyFutureGameStats": [
+                {"footballPlayingStatusOdds": {"starterOddsBasisPoints": 8450, "reliability": "HIGH"}},
+            ]},
+            {"slug": "sin-partido", "anyFutureGameStats": []},
+            {"slug": "sin-cuota", "anyFutureGameStats": [{"footballPlayingStatusOdds": None}]},
+        ]}
+        with patch("web_services.lineup_assistant.graphql_request", return_value=response) as request:
+            odds = fetch_starter_odds(["pedri", "sin-partido", "sin-cuota"], headers={})
+
+        self.assertEqual(odds, {"pedri": {"starter_percent": 84, "starter_reliability": "HIGH"}})
+        self.assertIn('"pedri"', request.call_args.args[0])
+
+    def test_starter_odds_failure_does_not_break_refresh(self):
+        with patch("web_services.lineup_assistant.graphql_request", side_effect=RuntimeError("caído")):
+            self.assertEqual(fetch_starter_odds(["pedri"], headers={}), {})
+
+    def test_proposal_shows_starter_percentage(self):
+        rows = [
+            card("gk", "GK", 50, "G"), card("def-1", "DEF", 49, "D1"),
+            card("def-2", "DEF", 48, "D2"), card("mid", "MID", 47, "M"),
+            card("fwd", "FWD", 46, "F"),
+        ]
+        rows[0]["starter_percent"] = 92
+        rows[3]["starter_percent"] = 35
+        LineupInventory.objects.create(user=self.user, cards=rows)
+
+        response = self.client.post(reverse("lineup_helper"), {
+            "action": "generate", "candidate_asset_ids": ",".join(row["asset_id"] for row in rows),
+        })
+
+        content = response.content.decode()
+        self.assertRegex(content, r'class="starter lh-starter starter-high"[^>]*>92%</b>')
+        self.assertRegex(content, r'class="starter lh-starter starter-low"[^>]*>35%</b>')

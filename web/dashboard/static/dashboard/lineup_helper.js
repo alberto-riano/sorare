@@ -87,6 +87,15 @@
     return card.average == null ? "0" : escapeHtml(card.average);
   }
 
+  function starter(card) {
+    if (card.starter_percent == null) return "";
+    var value = Number(card.starter_percent);
+    var level = value >= 70 ? "high" : value >= 40 ? "mid" : "low";
+    var title = "Probabilidad de titularidad según Sorare";
+    if (card.starter_reliability) title += " · fiabilidad " + String(card.starter_reliability).toLowerCase();
+    return '<b class="starter starter-' + level + '" title="' + escapeHtml(title) + '">' + escapeHtml(value) + "%</b>";
+  }
+
   // El filtro es deliberadamente tolerante: escribir "alvaro" o "vinicius"
   // encuentra igualmente Álvaro García y Vinícius, sin exigir tildes.
   function searchNormalize(value) {
@@ -126,7 +135,7 @@
     cardsAtPosition.forEach(function (card) {
       var row = document.createElement("article");
       row.className = "candidate";
-      row.innerHTML = '<span class="candidate-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong>" + fixture(card) + '</span><b class="average">' + average(card) + '</b><button type="button"><i class="fas fa-xmark"></i></button>';
+      row.innerHTML = '<span class="candidate-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong>" + fixture(card) + '</span>' + starter(card) + '<b class="average">' + average(card) + '</b><button type="button"><i class="fas fa-xmark"></i></button>';
       row.querySelector("button").onclick = function () {
         delete chosen[String(card.asset_id)];
         syncSelected();
@@ -160,7 +169,7 @@
       row.type = "button";
       row.className = "lane-result";
       row.disabled = Boolean(chosen[String(card.asset_id)]);
-      row.innerHTML = '<span class="lane-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong>" + fixture(card) + '</span><b class="average">' + average(card) + "</b>";
+      row.innerHTML = '<span class="lane-photo">' + photo(card.player_picture_url) + '</span><span><strong>' + escapeHtml(card.player) + "</strong>" + fixture(card) + '</span>' + starter(card) + '<b class="average">' + average(card) + "</b>";
       row.onclick = function () {
         chosen[String(card.asset_id)] = card;
         syncSelected();
