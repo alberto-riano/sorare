@@ -216,7 +216,15 @@ def lineup_helper(request):
         for name, picture in normalized_team_pictures.items():
             if target and (target in name or name in target):
                 return picture
-        return ""
+        # "Celta Vigo" (cuotas) frente a "RC Celta" (Sorare) no se contienen:
+        # usamos los mismos alias que el cruce de cuotas.
+        try:
+            from lineup_helper import _match_odds_team
+
+            alias = _match_odds_team(team_name, list(team_pictures))
+        except Exception:
+            alias = None
+        return team_pictures.get(alias, "") if alias else ""
 
     matches = []
     spanish_weekdays = ("lun", "mar", "mié", "jue", "vie", "sáb", "dom")

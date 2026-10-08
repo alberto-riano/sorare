@@ -29,7 +29,7 @@ LALIGA_TEAM_NAMES = {
     "girona fc", "levante ud", "rcd mallorca", "rayo vallecano", "real betis",
     "real madrid", "real oviedo", "real sociedad", "sevilla fc", "valencia cf",
     "villarreal cf", "real club deportivo de la coruna", "real racing club de santander",
-    "malaga cf",
+    "malaga cf", "rc celta", "rc celta de vigo", "real club celta de vigo", "celta de vigo",
 }
 TEAM_CODES = {
     "athletic club": "ATH", "atletico de madrid": "ATM", "ca osasuna": "OSA",
@@ -40,6 +40,7 @@ TEAM_CODES = {
     "real oviedo": "OVI", "real sociedad": "RSO", "sevilla fc": "SEV", "valencia cf": "VAL",
     "villarreal cf": "VIL", "real club deportivo de la coruna": "DEP",
     "real racing club de santander": "RAC", "malaga cf": "MAL",
+    "rc celta": "CEL", "rc celta de vigo": "CEL", "real club celta de vigo": "CEL", "celta de vigo": "CEL",
 }
 
 

@@ -358,7 +358,9 @@ ODDS_TEAM_ALIASES = {
     'athletic bilbao': ['athletic club'],
     'barcelona': ['fc barcelona'],
     'real betis': ['real betis balompié', 'real betis'],
-    'celta vigo': ['rc celta de vigo', 'celta de vigo'],
+    # Sorare ha usado "RC Celta", "RC Celta de Vigo" y "Real Club Celta de
+    # Vigo"; "celta" al final cubre cualquier variante del club.
+    'celta vigo': ['rc celta de vigo', 'real club celta de vigo', 'celta de vigo', 'rc celta', 'celta'],
     'espanyol': ['rcd espanyol'],
     'mallorca': ['rcd mallorca'],
     'getafe': ['getafe cf'],
