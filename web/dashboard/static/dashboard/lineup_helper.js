@@ -118,7 +118,7 @@
     var level = value >= 70 ? "high" : value >= 40 ? "mid" : "low";
     var title = "Probabilidad de titularidad según Sorare";
     if (card.starter_reliability) title += " · fiabilidad " + String(card.starter_reliability).toLowerCase();
-    return '<b class="starter starter-' + level + '" title="' + escapeHtml(title) + '"><i class="fas fa-shirt"></i> ' + escapeHtml(value) + "%</b>";
+    return '<b class="starter starter-' + level + '" title="' + escapeHtml(title) + '">' + escapeHtml(value) + "%</b>";
   }
 
   // El filtro es deliberadamente tolerante: escribir "alvaro" o "vinicius"

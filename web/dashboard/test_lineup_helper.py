@@ -156,8 +156,8 @@ class LineupAssistantTests(TestCase):
         })
 
         content = response.content.decode()
-        self.assertRegex(content, r'class="starter lh-starter starter-high"[^>]*><i class="fas fa-shirt"></i> 92%</b>')
-        self.assertRegex(content, r'class="starter lh-starter starter-low"[^>]*><i class="fas fa-shirt"></i> 35%</b>')
+        self.assertRegex(content, r'class="starter lh-starter starter-high"[^>]*>92%</b>')
+        self.assertRegex(content, r'class="starter lh-starter starter-low"[^>]*>35%</b>')
 
     def test_clear_removes_saved_candidates(self):
         LineupInventory.objects.create(user=self.user, cards=[card("gk", "GK", 50), card("def", "DEF", 42)])
