@@ -7,6 +7,7 @@ from itertools import combinations
 from pathlib import Path
 import time
 import unicodedata
+from urllib.parse import urlencode
 
 from openpyxl import load_workbook
 import requests
@@ -136,16 +137,32 @@ def fetch_l10_averages(asset_ids: list[str], headers, progress=None) -> dict[str
     return averages
 
 
-ALGOLIA_CARD_INDEX = "BlockchainCard_New"
+# Las cartas en venta se reindexan a menudo; el índice general tiene cartas
+# con pronósticos antiguos o vacíos y sólo sirve de respaldo.
+ALGOLIA_ODDS_INDEXES = ("CardsOnSale_StarterOdds", "BlockchainCard_New")
 
 
-def fetch_starter_odds(card_slugs: list[str], headers, progress=None) -> dict[str, dict]:
+def _algolia_odds(hits: list, now: float) -> dict | None:
+    for hit in hits or []:
+        status = (hit or {}).get("playing_status_odds") or {}
+        basis_points = status.get("starter_odds_basis_points")
+        valid_until = status.get("valid_until")
+        if basis_points is not None and not (valid_until and valid_until < now):
+            return {
+                "starter_percent": round(int(basis_points) / 100),
+                # Algolia no publica la fiabilidad del pronóstico.
+                "starter_reliability": status.get("reliability") or "",
+            }
+    return None
+
+
+def fetch_starter_odds(player_slugs: list[str], headers, progress=None) -> dict[str, dict]:
     """Lee la probabilidad de titularidad del próximo partido.
 
     La API GraphQL devuelve null en footballPlayingStatusOdds con nuestro token;
-    la web de Sorare lo lee del índice de cartas de Algolia. La clave de
-    búsqueda es pública y se pide a la config de Sorare en cada refresco. Se
-    consulta aparte para que un fallo no rompa el refresco.
+    la web de Sorare lo lee del buscador de Algolia. La clave de búsqueda es
+    pública y se pide a la config de Sorare en cada refresco. Se consulta aparte
+    para que un fallo no rompa el refresco.
     """
     odds: dict[str, dict] = {}
     try:
@@ -158,44 +175,43 @@ def fetch_starter_odds(card_slugs: list[str], headers, progress=None) -> dict[st
             "X-Algolia-Application-Id": app_id,
             "X-Algolia-API-Key": config["algoliaSearchApiKey"],
         }
-        index = f"{ALGOLIA_CARD_INDEX}{config.get('algoliaIndexSuffix') or ''}"
+        suffix = config.get("algoliaIndexSuffix") or ""
     except Exception:
         return odds
     now = time.time()
-    total = len(card_slugs)
-    for start in range(0, total, 100):
-        batch = card_slugs[start:start + 100]
-        # El slug de la carta es el objectID del índice: se leen por lotes sin
-        # depender de filtros ni facetas.
-        payload = {"requests": [
-            {"indexName": index, "objectID": slug, "attributesToRetrieve": ["player", "playing_status_odds"]}
-            for slug in batch
-        ]}
-        try:
-            response = requests.post(
-                f"https://{app_id}-dsn.algolia.net/1/indexes/*/objects",
-                json=payload, headers=algolia_headers, timeout=20,
-            )
-            response.raise_for_status()
-            results = response.json().get("results") or []
-        except Exception:
-            continue
-        for hit in results:
-            if not isinstance(hit, dict):
+    total = len(player_slugs)
+    for index in ALGOLIA_ODDS_INDEXES:
+        pending = [slug for slug in player_slugs if slug not in odds]
+        for start in range(0, len(pending), 50):
+            batch = pending[start:start + 50]
+            payload = {"requests": [
+                {
+                    "indexName": f"{index}{suffix}",
+                    "params": urlencode({
+                        "query": "",
+                        "filters": f'player.slug:"{slug}"',
+                        "hitsPerPage": 5,
+                        "attributesToRetrieve": '["playing_status_odds"]',
+                        "attributesToHighlight": "[]",
+                    }),
+                }
+                for slug in batch
+            ]}
+            try:
+                response = requests.post(
+                    f"https://{app_id}-dsn.algolia.net/1/indexes/*/queries",
+                    json=payload, headers=algolia_headers, timeout=20,
+                )
+                response.raise_for_status()
+                results = response.json().get("results") or []
+            except Exception:
                 continue
-            player_slug = (hit.get("player") or {}).get("slug")
-            status = hit.get("playing_status_odds") or {}
-            basis_points = status.get("starter_odds_basis_points")
-            valid_until = status.get("valid_until")
-            if not player_slug or basis_points is None or (valid_until and valid_until < now):
-                continue
-            odds[player_slug] = {
-                "starter_percent": round(int(basis_points) / 100),
-                # Algolia no publica la fiabilidad del pronóstico.
-                "starter_reliability": status.get("reliability") or "",
-            }
-        if progress:
-            progress(min(start + len(batch), total), total, "Consultando % de titularidad")
+            for slug, result in zip(batch, results):
+                found = _algolia_odds((result or {}).get("hits"), now)
+                if found:
+                    odds[slug] = found
+            if progress:
+                progress(min(len(odds), total), total, "Consultando % de titularidad")
     return odds
 
 
@@ -292,7 +308,7 @@ def fetch_lineup_cards(previous_cards: list[dict] | None = None, progress=None) 
             average = 0
         card["sorare_average"] = card.get("sorare_average") or l10_averages.get(str(card["asset_id"]))
         card["average"] = average
-    slugs = sorted({card["slug"] for card in cards if card.get("slug")})
+    slugs = sorted({card["player_slug"] for card in cards if card.get("player_slug")})
     starter_odds = fetch_starter_odds(slugs, headers, progress=progress) if slugs else {}
     for card in cards:
         info = starter_odds.get(card.get("player_slug")) or {}

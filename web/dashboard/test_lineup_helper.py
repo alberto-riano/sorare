@@ -107,33 +107,39 @@ class LineupAssistantTests(TestCase):
 
     def test_starter_odds_keep_only_players_with_a_percentage(self):
         config = {"config": {"algoliaApplicationId": "APP", "algoliaSearchApiKey": "KEY", "algoliaIndexSuffix": ""}}
-        algolia = Mock()
-        algolia.json.return_value = {"results": [
-            {"player": {"slug": "pedri"}, "playing_status_odds": {"starter_odds_basis_points": 8450, "valid_until": 4102444800}},
-            {"player": {"slug": "sin-cuota"}, "playing_status_odds": None},
-            {"player": {"slug": "caducada"}, "playing_status_odds": {"starter_odds_basis_points": 9000, "valid_until": 1}},
-            None,
+        on_sale = Mock()
+        on_sale.json.return_value = {"results": [
+            {"hits": [{"playing_status_odds": {"starter_odds_basis_points": 8450, "valid_until": 4102444800}}]},
+            {"hits": [{"playing_status_odds": None}]},
+            {"hits": []},
+        ]}
+        fallback = Mock()
+        fallback.json.return_value = {"results": [
+            {"hits": [{"playing_status_odds": None}, {"playing_status_odds": {"starter_odds_basis_points": 3000}}]},
+            {"hits": [{"playing_status_odds": {"starter_odds_basis_points": 9000, "valid_until": 1}}]},
         ]}
         with patch("web_services.lineup_assistant.graphql_request", return_value=config), patch(
-            "web_services.lineup_assistant.requests.post", return_value=algolia,
+            "web_services.lineup_assistant.requests.post", side_effect=[on_sale, fallback],
         ) as post:
-            odds = fetch_starter_odds(["pedri-2026-rare-1", "sin-cuota-2026-rare-1", "caducada-2026-rare-1", "borrada"], headers={})
+            odds = fetch_starter_odds(["pedri", "sin-venta", "caducada"], headers={})
 
-        self.assertEqual(odds, {"pedri": {"starter_percent": 84, "starter_reliability": ""}})
-        requests_sent = post.call_args.kwargs["json"]["requests"]
-        self.assertEqual(requests_sent[0], {
-            "indexName": "BlockchainCard_New", "objectID": "pedri-2026-rare-1",
-            "attributesToRetrieve": ["player", "playing_status_odds"],
+        self.assertEqual(odds, {
+            "pedri": {"starter_percent": 84, "starter_reliability": ""},
+            "sin-venta": {"starter_percent": 30, "starter_reliability": ""},
         })
+        first, second = (call.kwargs["json"]["requests"] for call in post.call_args_list)
+        self.assertEqual(first[0]["indexName"], "CardsOnSale_StarterOdds")
+        self.assertIn("player.slug%3A%22pedri%22", first[0]["params"])
+        self.assertEqual([request["indexName"] for request in second], ["BlockchainCard_New"] * 2)
 
     def test_starter_odds_failure_does_not_break_refresh(self):
         with patch("web_services.lineup_assistant.graphql_request", side_effect=RuntimeError("caído")):
-            self.assertEqual(fetch_starter_odds(["pedri-2026-rare-1"], headers={}), {})
+            self.assertEqual(fetch_starter_odds(["pedri"], headers={}), {})
         config = {"config": {"algoliaApplicationId": "APP", "algoliaSearchApiKey": "KEY", "algoliaIndexSuffix": ""}}
         with patch("web_services.lineup_assistant.graphql_request", return_value=config), patch(
             "web_services.lineup_assistant.requests.post", side_effect=RuntimeError("caído"),
         ):
-            self.assertEqual(fetch_starter_odds(["pedri-2026-rare-1"], headers={}), {})
+            self.assertEqual(fetch_starter_odds(["pedri"], headers={}), {})
 
     def test_proposal_shows_starter_percentage(self):
         rows = [
