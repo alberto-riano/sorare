@@ -207,6 +207,24 @@ class LineupAssistantTests(TestCase):
         response = self.client.post(reverse("lineup_helper"), {"action": "generate", "candidate_asset_ids": ids, "starter_min": "20"})
         self.assertEqual(len(response.context["proposal"]["lineups"]), 1)
 
+    def test_proposal_lists_candidates_left_out(self):
+        rows = [
+            card("gk", "GK", 50, "G"), card("def-1", "DEF", 49, "D1"),
+            card("def-2", "DEF", 48, "D2"), card("mid", "MID", 47, "M"),
+            card("fwd", "FWD", 46, "F"), card("gk-2", "GK", 40, "G2"),
+            card("low", "MID", 45, "L"),
+        ]
+        for row, percent in zip(rows, (90, 80, 70, 60, 50, 90, 10)):
+            row["starter_percent"] = percent
+        LineupInventory.objects.create(user=self.user, cards=rows)
+        ids = ",".join(row["asset_id"] for row in rows)
+
+        response = self.client.post(reverse("lineup_helper"), {"action": "generate", "candidate_asset_ids": ids, "starter_min": "20"})
+
+        reasons = {row["asset_id"]: row["left_reason"] for row in response.context["proposal"]["left_out"]}
+        self.assertEqual(reasons, {"gk-2": "No cabe", "low": "Titularidad < 20%"})
+        self.assertContains(response, "Sin alinear (2)")
+
     def test_four_lineups_without_repeating_a_player(self):
         def row(asset_id, position, average, team, player=None, in_season=True):
             data = card(asset_id, position, average, team)

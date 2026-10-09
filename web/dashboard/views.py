@@ -179,6 +179,24 @@ def lineup_helper(request):
                     if not starter_min or (card.get("starter_percent") is not None and card["starter_percent"] >= starter_min)
                 ]
                 proposal = propose_lineups(pool)
+                # Candidatas que no entran en ninguna alineación, con el motivo.
+                used = {str(card.get("asset_id")) for lineup in proposal["lineups"] for card in lineup["cards"]}
+                pool_ids = {str(card.get("asset_id")) for card in pool}
+                left_out = []
+                for card in cards:
+                    if not card.get("candidate") or str(card.get("asset_id")) in used:
+                        continue
+                    if str(card.get("asset_id")) not in pool_ids:
+                        reason = f"Titularidad < {starter_min}%"
+                    elif card.get("average") is None:
+                        reason = "Sin media"
+                    elif not card.get("position"):
+                        reason = "Sin posición"
+                    else:
+                        reason = "No cabe"
+                    left_out.append({**card, "left_reason": reason})
+                left_out.sort(key=lambda card: -float(card.get("average") or 0))
+                proposal["left_out"] = left_out
                 if len(proposal["lineups"]) < 4:
                     messages.warning(request, "No se han podido completar cuatro alineaciones con las cartas y medias seleccionadas.")
                 else:
