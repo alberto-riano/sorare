@@ -261,6 +261,19 @@ class LineupAssistantTests(TestCase):
         self.assertTrue(saved["weak"])
         self.assertFalse(saved["mid"])
 
+    def test_lineup_count_can_be_chosen(self):
+        rows = [card(f"gk-{i}", "GK", 50 - i, f"G{i}") for i in range(3)]
+        rows += [card(f"def-{i}", "DEF", 49 - i, f"D{i}") for i in range(6)]
+        rows += [card(f"mid-{i}", "MID", 47 - i, f"M{i}") for i in range(3)]
+        rows += [card(f"fwd-{i}", "FWD", 46 - i, f"F{i}") for i in range(3)]
+        LineupInventory.objects.create(user=self.user, cards=rows)
+        ids = ",".join(row["asset_id"] for row in rows)
+
+        response = self.client.post(reverse("lineup_helper"), {"action": "generate", "candidate_asset_ids": ids, "lineup_count": "2"})
+
+        self.assertEqual(len(response.context["proposal"]["lineups"]), 2)
+        self.assertContains(response, "2 alineaciones")
+
     def test_four_lineups_without_repeating_a_player(self):
         def row(asset_id, position, average, team, player=None, in_season=True):
             data = card(asset_id, position, average, team)

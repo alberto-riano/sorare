@@ -369,6 +369,26 @@
       if (!lane.contains(event.target)) document.getElementById("results-" + position).innerHTML = "";
     });
   });
+  // Número de alineaciones a proponer (1-6); se recuerda entre visitas.
+  var generateButton = document.querySelector('button[name="action"][value="generate"]');
+  if (generateButton) {
+    var countSelect = document.createElement("select");
+    countSelect.name = "lineup_count";
+    countSelect.className = "lh-count";
+    countSelect.setAttribute("aria-label", "Número de alineaciones");
+    for (var count = 1; count <= 6; count += 1) {
+      countSelect.add(new Option(count + (count === 1 ? " alineación" : " alineaciones"), String(count)));
+    }
+    countSelect.value = "4";
+    try {
+      var savedCount = localStorage.getItem("lineupCount");
+      if (savedCount && Number(savedCount) >= 1 && Number(savedCount) <= 6) countSelect.value = savedCount;
+    } catch (error) {}
+    countSelect.addEventListener("change", function () {
+      try { localStorage.setItem("lineupCount", countSelect.value); } catch (error) {}
+    });
+    generateButton.before(countSelect);
+  }
   var clearButton = document.getElementById("clearCandidates");
   if (clearButton) {
     clearButton.addEventListener("click", function () {

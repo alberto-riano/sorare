@@ -152,6 +152,7 @@ def lineup_helper(request):
     ]
     proposal = None
     starter_min = 0
+    lineup_count = 4
 
     if request.method == "POST":
         action = request.POST.get("action")
@@ -159,6 +160,10 @@ def lineup_helper(request):
             starter_min = min(max(int(request.POST.get("starter_min") or 0), 0), 100)
         except ValueError:
             starter_min = 0
+        try:
+            lineup_count = min(max(int(request.POST.get("lineup_count") or 4), 1), 6)
+        except ValueError:
+            lineup_count = 4
         if action != "refresh":
             candidate_ids = {
                 value.strip() for value in str(request.POST.get("candidate_asset_ids", "")).split(",") if value.strip()
@@ -193,7 +198,7 @@ def lineup_helper(request):
                     card for card in cards
                     if not starter_min or (card.get("starter_percent") is not None and card["starter_percent"] >= starter_min)
                 ]
-                proposal = propose_lineups(pool)
+                proposal = propose_lineups(pool, count=lineup_count)
                 # Candidatas que no entran en ninguna alineación, con el motivo.
                 used = {str(card.get("asset_id")) for lineup in proposal["lineups"] for card in lineup["cards"]}
                 pool_ids = {str(card.get("asset_id")) for card in pool}
@@ -216,10 +221,10 @@ def lineup_helper(request):
                     left_out.append({**card, "left_reason": reason})
                 left_out.sort(key=lambda card: -float(card.get("average") or 0))
                 proposal["left_out"] = left_out
-                if len(proposal["lineups"]) < 4:
-                    messages.warning(request, "No se han podido completar cuatro alineaciones con las cartas y medias seleccionadas.")
+                if len(proposal["lineups"]) < lineup_count:
+                    messages.warning(request, f"No se han podido completar {lineup_count} alineaciones con las cartas y medias seleccionadas.")
                 else:
-                    messages.success(request, "Propuesta de cuatro alineaciones actualizada.")
+                    messages.success(request, f"Propuesta de {lineup_count} alineaciones actualizada.")
             elif action == "clear":
                 messages.success(request, "Candidatas eliminadas.")
             else:
