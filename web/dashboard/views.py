@@ -170,10 +170,14 @@ def lineup_helper(request):
                 if len(members) > 1:
                     number = len(set(combo_of.values())) + 1
                     combo_of.update({member: number for member in members})
+            fixed_ids = {
+                value.strip() for value in str(request.POST.get("fixed", "")).split(",") if value.strip() in candidate_ids
+            }
             updated = []
             for card in cards:
                 asset_id = str(card.get("asset_id") or "")
                 card["candidate"] = asset_id in candidate_ids
+                card["fixed"] = asset_id in fixed_ids
                 if asset_id in combo_of:
                     card["combo"] = combo_of[asset_id]
                 else:
@@ -203,6 +207,8 @@ def lineup_helper(request):
                         reason = "Sin media"
                     elif not card.get("position"):
                         reason = "Sin posición"
+                    elif card.get("fixed"):
+                        reason = "Fija, pero no cabe"
                     elif card.get("combo"):
                         reason = "Su combinación no cabe"
                     else:

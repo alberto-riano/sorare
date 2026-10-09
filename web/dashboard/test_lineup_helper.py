@@ -247,6 +247,20 @@ class LineupAssistantTests(TestCase):
         self.assertEqual(saved["def-0"], 1)
         self.assertIsNone(saved["fwd-0"])
 
+    def test_fixed_cards_always_get_a_lineup(self):
+        rows = [card("gk", "GK", 50, "G"), card("def-1", "DEF", 49, "D1"), card("def-2", "DEF", 48, "D2"),
+                card("mid", "MID", 47, "M"), card("fwd", "FWD", 46, "F"), card("weak", "MID", 10, "W")]
+        LineupInventory.objects.create(user=self.user, cards=rows)
+        ids = ",".join(row["asset_id"] for row in rows)
+
+        response = self.client.post(reverse("lineup_helper"), {"action": "generate", "candidate_asset_ids": ids, "fixed": "weak"})
+
+        used = {player["asset_id"] for player in response.context["proposal"]["lineups"][0]["cards"]}
+        self.assertIn("weak", used)
+        saved = {row["asset_id"]: row.get("fixed") for row in LineupInventory.objects.get(user=self.user).cards}
+        self.assertTrue(saved["weak"])
+        self.assertFalse(saved["mid"])
+
     def test_four_lineups_without_repeating_a_player(self):
         def row(asset_id, position, average, team, player=None, in_season=True):
             data = card(asset_id, position, average, team)

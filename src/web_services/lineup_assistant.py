@@ -360,6 +360,8 @@ def _effective_score(card: dict, odds_weight: float) -> float:
 # Premio por combinación cumplida: las parejas fijadas por el usuario deben
 # entrar aunque haya opciones algo mejores sin ellas.
 COMBO_BONUS = 30
+# Las cartas marcadas como fijas entran siempre que quepan.
+FIXED_BONUS = 100
 
 
 def _valid_lineups(cards: list[dict], max_points: int, odds_weight: float) -> list[tuple[float, list[dict]]]:
@@ -372,9 +374,9 @@ def _valid_lineups(cards: list[dict], max_points: int, odds_weight: float) -> li
     combo_sizes = {combo: size for combo, size in combo_sizes.items() if size > 1}
     for cards_at_position in by_position.values():
         cards_at_position.sort(key=lambda card: _effective_score(card, odds_weight), reverse=True)
-        # Las cartas de una combinación no se recortan nunca.
+        # Las cartas fijas o de una combinación no se recortan nunca.
         cards_at_position[:] = cards_at_position[:12] + [
-            card for card in cards_at_position[12:] if card.get("combo") in combo_sizes
+            card for card in cards_at_position[12:] if card.get("fixed") or card.get("combo") in combo_sizes
         ]
     result = []
     for goalkeeper in by_position["GK"]:
@@ -404,6 +406,7 @@ def _valid_lineups(cards: list[dict], max_points: int, odds_weight: float) -> li
                             continue
                         score = sum(_effective_score(card, odds_weight) for card in lineup)
                         score += COMBO_BONUS * len(combos)
+                        score += FIXED_BONUS * sum(bool(card.get("fixed")) for card in lineup)
                         if any(card.get("position") == "DEF" and card.get("team") == goalkeeper.get("team") for card in lineup):
                             score += 1
                         result.append((round(score, 2), lineup))

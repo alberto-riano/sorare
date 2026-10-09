@@ -70,8 +70,11 @@
   var combos = [];
   var linking = null;
   var savedCombos = {};
+  // Cartas fijas: entran sí o sí en alguna alineación.
+  var fixed = {};
   cards.forEach(function (card) {
     if (card.candidate) chosen[String(card.asset_id)] = card;
+    if (card.candidate && card.fixed) fixed[String(card.asset_id)] = true;
     if (card.candidate && card.combo) {
       (savedCombos[card.combo] = savedCombos[card.combo] || []).push(String(card.asset_id));
     }
@@ -84,6 +87,10 @@
   combosInput.type = "hidden";
   combosInput.name = "combos";
   document.getElementById("candidateAssetIds").after(combosInput);
+  var fixedInput = document.createElement("input");
+  fixedInput.type = "hidden";
+  fixedInput.name = "fixed";
+  combosInput.after(fixedInput);
   var comboBar = document.createElement("div");
   comboBar.className = "lh-combos";
   var comboHelp = document.createElement("span");
@@ -248,6 +255,8 @@
     });
     if (linking !== null && !chosen[linking]) linking = null;
     selectedInput.value = Object.keys(chosen).join(",");
+    Object.keys(fixed).forEach(function (id) { if (!chosen[id]) delete fixed[id]; });
+    fixedInput.value = Object.keys(fixed).join(",");
     combosInput.value = combos.map(function (group) { return group.join("+"); }).join(";");
     if (selectedTotal) selectedTotal.textContent = Object.keys(chosen).length;
     drawCombos();
@@ -285,6 +294,19 @@
       if (combo !== -1) linkButton.classList.add("on");
       linkButton.onclick = function () { link(id); };
       row.lastElementChild.before(linkButton);
+      var fixButton = iconButton("fa-thumbtack", fixed[id] ? "Fija: entra sí o sí (pulsa para quitar)" : "Marcar como fija");
+      fixButton.classList.add("fix");
+      if (fixed[id]) {
+        fixButton.classList.add("on");
+        row.classList.add("fixed");
+      }
+      fixButton.onclick = function () {
+        if (fixed[id]) delete fixed[id];
+        else fixed[id] = true;
+        syncSelected();
+        drawSelected(position);
+      };
+      linkButton.before(fixButton);
       box.appendChild(row);
     });
   }
