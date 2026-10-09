@@ -225,6 +225,28 @@ class LineupAssistantTests(TestCase):
         self.assertEqual(reasons, {"gk-2": "No cabe", "low": "Titularidad < 20%"})
         self.assertContains(response, "Sin alinear (2)")
 
+    def test_combinations_go_in_the_same_lineup(self):
+        rows = [card(f"gk-{i}", "GK", 50 - i, f"G{i}") for i in range(2)]
+        rows += [card(f"def-{i}", "DEF", 49 - i, f"D{i}") for i in range(4)]
+        rows += [card(f"mid-{i}", "MID", 47 - i, f"M{i}") for i in range(2)]
+        rows += [card(f"fwd-{i}", "FWD", 46 - i, f"F{i}") for i in range(2)]
+        LineupInventory.objects.create(user=self.user, cards=rows)
+        ids = ",".join(row["asset_id"] for row in rows)
+
+        # El segundo portero va con el mejor defensa, que sin la combinación
+        # acabaría junto al primero.
+        response = self.client.post(reverse("lineup_helper"), {
+            "action": "generate", "candidate_asset_ids": ids, "combos": "gk-1+def-0;fwd-0+nope",
+        })
+
+        lineups = [{player["asset_id"] for player in lineup["cards"]} for lineup in response.context["proposal"]["lineups"]]
+        self.assertEqual(len(lineups), 2)
+        self.assertTrue(any({"gk-1", "def-0"} <= lineup for lineup in lineups))
+        saved = {row["asset_id"]: row.get("combo") for row in LineupInventory.objects.get(user=self.user).cards}
+        self.assertEqual(saved["gk-1"], 1)
+        self.assertEqual(saved["def-0"], 1)
+        self.assertIsNone(saved["fwd-0"])
+
     def test_four_lineups_without_repeating_a_player(self):
         def row(asset_id, position, average, team, player=None, in_season=True):
             data = card(asset_id, position, average, team)

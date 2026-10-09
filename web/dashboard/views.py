@@ -163,10 +163,21 @@ def lineup_helper(request):
             candidate_ids = {
                 value.strip() for value in str(request.POST.get("candidate_asset_ids", "")).split(",") if value.strip()
             }
+            # Combinaciones que deben ir juntas: "id+id;id+id" (sólo candidatas).
+            combo_of = {}
+            for group in str(request.POST.get("combos", "")).split(";"):
+                members = [value.strip() for value in group.split("+") if value.strip() in candidate_ids]
+                if len(members) > 1:
+                    number = len(set(combo_of.values())) + 1
+                    combo_of.update({member: number for member in members})
             updated = []
             for card in cards:
                 asset_id = str(card.get("asset_id") or "")
                 card["candidate"] = asset_id in candidate_ids
+                if asset_id in combo_of:
+                    card["combo"] = combo_of[asset_id]
+                else:
+                    card.pop("combo", None)
                 updated.append(card)
             cards = updated
             inventory.cards = cards
@@ -192,6 +203,8 @@ def lineup_helper(request):
                         reason = "Sin media"
                     elif not card.get("position"):
                         reason = "Sin posición"
+                    elif card.get("combo"):
+                        reason = "Su combinación no cabe"
                     else:
                         reason = "No cabe"
                     left_out.append({**card, "left_reason": reason})

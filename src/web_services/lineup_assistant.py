@@ -357,14 +357,25 @@ def _effective_score(card: dict, odds_weight: float) -> float:
     return round(average * (1 + (float(probability) - 0.5) * odds_weight), 2)
 
 
+# Premio por combinación cumplida: las parejas fijadas por el usuario deben
+# entrar aunque haya opciones algo mejores sin ellas.
+COMBO_BONUS = 30
+
+
 def _valid_lineups(cards: list[dict], max_points: int, odds_weight: float) -> list[tuple[float, list[dict]]]:
     by_position = {position: [] for position in POSITION_ORDER}
     for card in cards:
         if card.get("position") in by_position:
             by_position[card["position"]].append(card)
+    # Combinaciones fijadas: sólo cuentan los miembros presentes en el pool.
+    combo_sizes = Counter(card.get("combo") for card in cards if card.get("combo"))
+    combo_sizes = {combo: size for combo, size in combo_sizes.items() if size > 1}
     for cards_at_position in by_position.values():
         cards_at_position.sort(key=lambda card: _effective_score(card, odds_weight), reverse=True)
-        del cards_at_position[12:]
+        # Las cartas de una combinación no se recortan nunca.
+        cards_at_position[:] = cards_at_position[:12] + [
+            card for card in cards_at_position[12:] if card.get("combo") in combo_sizes
+        ]
     result = []
     for goalkeeper in by_position["GK"]:
         for defenders, midfielders, forwards in ((2, 1, 1), (1, 2, 1), (1, 1, 2)):
@@ -387,7 +398,12 @@ def _valid_lineups(cards: list[dict], max_points: int, odds_weight: float) -> li
                         players = [card.get("player_slug") or card.get("player") for card in lineup]
                         if len(set(players)) < len(players):
                             continue
+                        # Una combinación va entera en la misma alineación o no va.
+                        combos = Counter(card.get("combo") for card in lineup if card.get("combo") in combo_sizes)
+                        if any(count != combo_sizes[combo] for combo, count in combos.items()):
+                            continue
                         score = sum(_effective_score(card, odds_weight) for card in lineup)
+                        score += COMBO_BONUS * len(combos)
                         if any(card.get("position") == "DEF" and card.get("team") == goalkeeper.get("team") for card in lineup):
                             score += 1
                         result.append((round(score, 2), lineup))

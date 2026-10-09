@@ -66,9 +66,32 @@
   var cards = JSON.parse(dataNode.textContent || "[]");
   var positions = ["GK", "DEF", "MID", "FWD", "CLASSIC"];
   var chosen = {};
+  // Combinaciones: grupos de candidatas que deben ir en la misma alineación.
+  var combos = [];
+  var linking = null;
+  var savedCombos = {};
   cards.forEach(function (card) {
     if (card.candidate) chosen[String(card.asset_id)] = card;
+    if (card.candidate && card.combo) {
+      (savedCombos[card.combo] = savedCombos[card.combo] || []).push(String(card.asset_id));
+    }
   });
+  Object.keys(savedCombos).forEach(function (key) {
+    if (savedCombos[key].length > 1) combos.push(savedCombos[key]);
+  });
+  // El campo oculto y la barra de combinaciones se crean aquí.
+  var combosInput = document.createElement("input");
+  combosInput.type = "hidden";
+  combosInput.name = "combos";
+  document.getElementById("candidateAssetIds").after(combosInput);
+  var comboBar = document.createElement("div");
+  comboBar.className = "lh-combos";
+  var comboHelp = document.createElement("span");
+  comboHelp.textContent = "Juntos: pulsa la cadena de una candidata y luego la de otra para que vayan en la misma alineación.";
+  var comboList = document.createElement("div");
+  comboList.id = "comboList";
+  comboBar.append(comboHelp, comboList);
+  document.querySelector(".lh-lanes").before(comboBar);
 
   var selectedInput = document.getElementById("candidateAssetIds");
   var selectedTotal = document.getElementById("selectedTotal");
@@ -141,9 +164,93 @@
     return '<small class="fixture">' + home + ' <i>-</i> ' + away + '</small>';
   }
 
+  function comboIndex(id) {
+    for (var i = 0; i < combos.length; i += 1) {
+      if (combos[i].indexOf(id) !== -1) return i;
+    }
+    return -1;
+  }
+
+  function comboLetter(index) {
+    return String.fromCharCode(65 + (index % 26));
+  }
+
+  function comboTag(index) {
+    var tag = document.createElement("em");
+    tag.className = "combo-tag";
+    tag.textContent = comboLetter(index);
+    return tag;
+  }
+
+  function iconButton(icon, title) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.title = title;
+    var glyph = document.createElement("i");
+    glyph.className = "fas " + icon;
+    button.appendChild(glyph);
+    return button;
+  }
+
+  function drawCombos() {
+    comboList.replaceChildren();
+    combos.forEach(function (group, index) {
+      var chip = document.createElement("span");
+      chip.className = "combo-chip";
+      var remove = iconButton("fa-xmark", "Quitar combinación");
+      remove.onclick = function () {
+        combos.splice(index, 1);
+        syncSelected();
+        positions.forEach(drawSelected);
+      };
+      chip.append(comboTag(index), " " + group.map(function (id) {
+        return chosen[id] ? chosen[id].player : id;
+      }).join(" + ") + " ", remove);
+      comboList.appendChild(chip);
+    });
+  }
+
+  function link(id) {
+    if (linking === null) {
+      linking = id;
+    } else if (linking === id) {
+      linking = null;
+    } else {
+      var first = comboIndex(linking);
+      var second = comboIndex(id);
+      if (first === -1 && second === -1) {
+        combos.push([linking, id]);
+      } else if (second === -1) {
+        combos[first].push(id);
+      } else if (first === -1) {
+        combos[second].push(linking);
+      } else if (first !== second) {
+        combos[first] = combos[first].concat(combos[second]);
+        combos.splice(second, 1);
+      }
+      linking = null;
+    }
+    syncSelected();
+    positions.forEach(drawSelected);
+  }
+
+  function unlink(id) {
+    var index = comboIndex(id);
+    if (index === -1) return;
+    combos[index] = combos[index].filter(function (member) { return member !== id; });
+    if (combos[index].length < 2) combos.splice(index, 1);
+  }
+
   function syncSelected() {
+    // Una carta que deja de ser candidata sale también de su combinación.
+    combos.slice().forEach(function (group) {
+      group.forEach(function (id) { if (!chosen[id]) unlink(id); });
+    });
+    if (linking !== null && !chosen[linking]) linking = null;
     selectedInput.value = Object.keys(chosen).join(",");
+    combosInput.value = combos.map(function (group) { return group.join("+"); }).join(";");
     if (selectedTotal) selectedTotal.textContent = Object.keys(chosen).length;
+    drawCombos();
   }
 
   function selectedAt(position) {
@@ -169,6 +276,15 @@
         drawSelected(position);
         drawResults(position);
       };
+      var id = String(card.asset_id);
+      var combo = comboIndex(id);
+      if (linking === id) row.classList.add("linking");
+      if (combo !== -1) row.querySelector("strong").appendChild(comboTag(combo));
+      var linkButton = iconButton("fa-link", linking === null ? "Juntar con otra candidata" : linking === id ? "Cancelar" : "Juntar con la candidata marcada");
+      linkButton.classList.add("link");
+      if (combo !== -1) linkButton.classList.add("on");
+      linkButton.onclick = function () { link(id); };
+      row.lastElementChild.before(linkButton);
       box.appendChild(row);
     });
   }
