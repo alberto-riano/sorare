@@ -382,6 +382,11 @@ def _valid_lineups(cards: list[dict], max_points: int, odds_weight: float) -> li
                         team_counts = Counter(card.get("team") for card in lineup)
                         if any(count > 2 for count in team_counts.values()):
                             continue
+                        # Dos cartas del mismo jugador (p. ej. dos Jon Martín, o
+                        # Mbappé In-Season y Classic) no pueden ir juntas.
+                        players = [card.get("player_slug") or card.get("player") for card in lineup]
+                        if len(set(players)) < len(players):
+                            continue
                         score = sum(_effective_score(card, odds_weight) for card in lineup)
                         if any(card.get("position") == "DEF" and card.get("team") == goalkeeper.get("team") for card in lineup):
                             score += 1
@@ -389,24 +394,105 @@ def _valid_lineups(cards: list[dict], max_points: int, odds_weight: float) -> li
     return sorted(result, key=lambda item: item[0], reverse=True)
 
 
+def _captain_score(card: dict, odds_weight: float) -> float:
+    """Puntuación esperada: media ajustada por cuota y por % de titularidad."""
+    starter = card.get("starter_percent")
+    probability = 1.0 if starter is None else float(starter) / 100
+    return _effective_score(card, odds_weight) * probability
+
+
+def _best_disjoint_lineups(candidates: list[tuple[float, list[dict]]], count: int, budget: int = 400_000) -> list[tuple[float, list[dict]]]:
+    """Elige ``count`` alineaciones sin repetir carta maximizando la suma.
+
+    Escoger siempre la mejor alineación disponible puede agotar una posición
+    y dejar la cuarta sin completar; esta búsqueda prioriza llegar a
+    ``count`` y, entre las opciones completas, la de mayor puntuación.
+    """
+    positions = list(POSITION_ORDER)
+    pool = {card["asset_id"]: card.get("position") for _, lineup in candidates for card in lineup}
+    prepared = []
+    for lineup_score, lineup in candidates[:6000]:
+        used_positions = Counter(card.get("position") for card in lineup)
+        prepared.append((
+            lineup_score, (lineup_score, lineup),
+            frozenset(card["asset_id"] for card in lineup),
+            tuple(used_positions[position] for position in positions),
+        ))
+    best = {"key": (0, 0.0), "pick": []}
+    nodes = 0
+
+    def feasible(left, need):
+        # Cada alineación necesita un portero, al menos un jugador por línea y
+        # cinco cartas: si ya no quedan suficientes, esta rama no completa.
+        return min(left) >= need and left[1] + left[2] + left[3] >= 4 * need
+
+    def search(start, chosen, used, left, score):
+        nonlocal nodes
+        nodes += 1
+        key = (len(chosen), score)
+        if key > best["key"]:
+            best["key"], best["pick"] = key, list(chosen)
+        need = count - len(chosen)
+        if not need or nodes > budget:
+            return
+        for index in range(start, len(prepared)):
+            # El presupuesto cuenta cada candidata revisada: acota el tiempo
+            # (menos de un segundo) aunque el pool no permita las cuatro.
+            nodes += 1
+            if nodes > budget:
+                return
+            lineup_score, item, ids, taken = prepared[index]
+            # Las candidatas van ordenadas: si ni repitiendo esta puntuación se
+            # supera la mejor solución completa, no merece la pena seguir.
+            if best["key"][0] == count and score + lineup_score * need <= best["key"][1]:
+                return
+            if ids & used:
+                continue
+            next_left = tuple(have - spent for have, spent in zip(left, taken))
+            if not feasible(next_left, need - 1):
+                continue
+            chosen.append(item)
+            search(index + 1, chosen, used | ids, next_left, score + lineup_score)
+            chosen.pop()
+
+    left = Counter(pool.values())
+    left = tuple(left[position] for position in positions)
+    # Si las cartas no dan para ``count`` alineaciones, se busca el máximo posible.
+    while count and not feasible(left, count):
+        count -= 1
+    search(0, [], frozenset(), left, 0.0)
+    return best["pick"]
+
+
 def propose_lineups(cards: list[dict], *, count: int = 4, max_points: int = 260, odds_weight: float = 0.3) -> dict:
     eligible = [
         card for card in cards
         if card.get("candidate") and card.get("position") and card.get("average") is not None
     ]
-    selected, remaining = [], eligible
+    # La búsqueda conjunta casi siempre gana; la estrategia simple (la mejor
+    # alineación primero) se conserva como red de seguridad si fuera mejor.
+    greedy, remaining = [], eligible
     for _ in range(count):
-        candidates = _valid_lineups(remaining, max_points, odds_weight)
-        if not candidates:
+        options = _valid_lineups(remaining, max_points, odds_weight)
+        if not options:
             break
-        _, lineup = candidates[0]
+        greedy.append(options[0])
+        ids = {card["asset_id"] for card in options[0][1]}
+        remaining = [card for card in remaining if card["asset_id"] not in ids]
+    searched = _best_disjoint_lineups(_valid_lineups(eligible, max_points, odds_weight), count)
+    choice = max((searched, greedy), key=lambda pick: (len(pick), sum(score for score, _ in pick)))
+    selected = []
+    for _, lineup in choice:
+        lineup = [dict(card) for card in lineup]
+        captain = max(lineup, key=lambda card: _captain_score(card, odds_weight))
+        captain["captain"] = True
         selected.append({
             "cards": lineup,
+            "captain": captain,
             "total": round(sum(float(card.get("average") or 0) for card in lineup), 1),
             "effective": round(sum(_effective_score(card, odds_weight) for card in lineup), 1),
         })
-        ids = {card["asset_id"] for card in lineup}
-        remaining = [card for card in remaining if card["asset_id"] not in ids]
+    selected.sort(key=lambda item: item["effective"], reverse=True)
     used = {card["asset_id"] for lineup in selected for card in lineup["cards"]}
     missing_average = [
         card for card in cards

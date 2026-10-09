@@ -206,3 +206,43 @@ class LineupAssistantTests(TestCase):
 
         response = self.client.post(reverse("lineup_helper"), {"action": "generate", "candidate_asset_ids": ids, "starter_min": "20"})
         self.assertEqual(len(response.context["proposal"]["lineups"]), 1)
+
+    def test_four_lineups_without_repeating_a_player(self):
+        def row(asset_id, position, average, team, player=None, in_season=True):
+            data = card(asset_id, position, average, team)
+            data["player_slug"] = player or asset_id
+            data["is_in_season"] = in_season
+            return data
+        # Pool de la captura de Alberto: la estrategia "la mejor primero"
+        # sólo completaba tres alineaciones y repetía a Jon Martín.
+        rows = [
+            row("valles", "GK", 61, "BET"), row("radu", "GK", 48, "CEL"),
+            row("odysseas", "GK", 45, "SEV"), row("herrero", "GK", 43, "MAL"),
+            row("alonso", "DEF", 56, "CEL"), row("rudiger", "DEF", 51, "RMA"),
+            row("martin-1", "DEF", 46, "RSO", "jon-martin"), row("martin-2", "DEF", 46, "RSO", "jon-martin"),
+            row("bellingham", "MID", 72, "RMA"), row("isco", "MID", 51, "BET"),
+            row("exposito", "MID", 49, "MAL"), row("cardoso", "MID", 44, "ATM"),
+            row("mbappe", "FWD", 71, "RMA", "mbappe"), row("vinicius", "FWD", 53, "RMA"),
+            row("cucho", "FWD", 48, "BET"), row("zabiri", "FWD", 46, "RAC"), row("jutgla", "FWD", 42, "CEL"),
+            row("mbappe-classic", "FWD", 71, "RMA", "mbappe", False), row("garcia", "DEF", 55, "BAR", in_season=False),
+            row("antony-1", "FWD", 54, "BET", "antony", False), row("antony-2", "FWD", 54, "BET", "antony", False),
+        ]
+
+        result = propose_lineups(rows)
+
+        self.assertEqual(len(result["lineups"]), 4)
+        for lineup in result["lineups"]:
+            players = [player["player_slug"] for player in lineup["cards"]]
+            self.assertEqual(len(players), len(set(players)))
+            self.assertLessEqual(lineup["total"], 260)
+            self.assertEqual(sum(bool(player.get("captain")) for player in lineup["cards"]), 1)
+
+    def test_captain_weighs_starting_probability(self):
+        rows = [card("gk", "GK", 50, "G"), card("def-1", "DEF", 49, "D1"),
+                card("def-2", "DEF", 48, "D2"), card("mid", "MID", 47, "M"), card("fwd", "FWD", 60, "F")]
+        for row, percent in zip(rows, (90, 70, 70, 70, 20)):
+            row["starter_percent"] = percent
+
+        lineup = propose_lineups(rows, count=1)["lineups"][0]
+
+        self.assertEqual(lineup["captain"]["asset_id"], "gk")
