@@ -25,6 +25,9 @@ RARITIES = ("limited", "rare")
 RARITY_API = {"limited": "limited", "rare": "rare"}
 MIN_OPPORTUNITY_PERCENT = 12.0
 FALLBACK_RARE_RATIO = 4.5
+# Una roja o azul solo merece aviso si su precio no se dispara frente al suelo
+# Limited del mismo jugador: roja ≤ 5× amarilla y azul ≤ 25× amarilla.
+LIMITED_FLOOR_MAX_MULTIPLE = {"rare": 5, "super_rare": 25}
 REQUEST_INTERVAL_SECONDS = 1.05
 
 def _parse_date(value):
@@ -97,6 +100,14 @@ def _market_value(floor, sales_reference):
     if sales_reference is None:
         return floor
     return min(float(floor), float(sales_reference))
+
+
+def limited_floor_cap(rarity, limited_floor):
+    """Precio máximo que se avisa para ``rarity`` según el suelo Limited."""
+    multiple = LIMITED_FLOOR_MAX_MULTIPLE.get(rarity)
+    if not multiple or not limited_floor:
+        return None
+    return round(float(limited_floor) * multiple, 2)
 
 
 def estimate_fair_value(

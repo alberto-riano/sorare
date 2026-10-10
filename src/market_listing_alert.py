@@ -24,7 +24,8 @@ from sorare_utils import (  # noqa: E402
 )
 from web_services.config_files import DEFAULT_TELEGRAM_SETTINGS, parse_key_value_file  # noqa: E402
 from web_services.opportunity_market import (  # noqa: E402
-    FALLBACK_RARE_RATIO, estimate_fair_value, robust_sales_reference,
+    FALLBACK_RARE_RATIO, LIMITED_FLOOR_MAX_MULTIPLE, estimate_fair_value, limited_floor_cap,
+    robust_sales_reference,
 )
 
 
@@ -408,6 +409,11 @@ def run(*, dry_run=False, now=None):
                 decision, eligible = "Sin valoración Limited", False
             elif valuation["limited_value"] < min_limited:
                 decision, eligible = f"Limited por debajo de {min_limited:.2f} €", False
+            elif (cap := limited_floor_cap(
+                card.get("rarityTyped") or "rare", valuation.get("limited_floor") or valuation["limited_value"],
+            )) is not None and price > cap:
+                multiple = LIMITED_FLOOR_MAX_MULTIPLE[card.get("rarityTyped") or "rare"]
+                decision, eligible = f"Precio por encima de {multiple}× suelo Limited ({cap:.2f} €)", False
             elif valuation.get("rare_sales_count", 0) < min_comparables:
                 decision, eligible = f"Solo {valuation.get('rare_sales_count', 0)} comparables", False
             elif not fair_value:

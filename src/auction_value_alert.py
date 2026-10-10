@@ -21,7 +21,9 @@ sys.path.insert(0, str(ROOT / "src"))
 from listar_subastas import load_auction_cache  # noqa: E402
 from sorare_utils import build_headers, graphql_request, read_config, to_eur_cents  # noqa: E402
 from web_services.config_files import DEFAULT_TELEGRAM_SETTINGS, parse_key_value_file  # noqa: E402
-from web_services.opportunity_market import FALLBACK_RARE_RATIO, estimate_fair_value, robust_sales_reference  # noqa: E402
+from web_services.opportunity_market import (  # noqa: E402
+    FALLBACK_RARE_RATIO, estimate_fair_value, limited_floor_cap, robust_sales_reference,
+)
 
 
 SETTINGS_PATH = ROOT / "config" / "telegram_alert_settings.txt"
@@ -343,6 +345,14 @@ def run(*, dry_run=False, now=None):
             values_cache[value_key] = cached
         value = cached.get("value")
         if not value:
+            if normal_due:
+                normal_checked[auction_id] = now.isoformat()
+            if bargain_due:
+                bargain_checked[auction_id] = now.isoformat()
+            continue
+        cap = limited_floor_cap(rarity, cached.get("limited_floor"))
+        if cap is not None and next_eur > cap:
+            # Puja demasiado cara frente a las amarillas del jugador: no avisar.
             if normal_due:
                 normal_checked[auction_id] = now.isoformat()
             if bargain_due:

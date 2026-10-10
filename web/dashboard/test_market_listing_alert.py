@@ -183,3 +183,32 @@ class MarketListingAlertTests(SimpleTestCase):
         send.assert_called_once()
         self.assertEqual(valuation.call_count, 1)
         self.assertTrue(any(key.startswith("offer-new:") for key in state["seen"]))
+
+    def test_limited_floor_cap_by_rarity(self):
+        from web_services.opportunity_market import limited_floor_cap
+        self.assertEqual(limited_floor_cap("rare", 1.6), 8)
+        self.assertEqual(limited_floor_cap("super_rare", 1), 25)
+        self.assertIsNone(limited_floor_cap("rare", None))
+
+    @patch("market_listing_alert.time.sleep")
+    @patch("market_listing_alert._send_telegram")
+    @patch("market_listing_alert._player_valuation")
+    @patch("market_listing_alert._fetch_recent_listings")
+    @patch("market_listing_alert.fetch_exchange_rates", return_value=(1, 1, 2000))
+    @patch("market_listing_alert.build_headers", return_value={})
+    @patch("market_listing_alert.read_config", return_value={"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_CHAT_ID": "chat"})
+    @patch("market_listing_alert._opportunity_context", return_value=({"kylian-mbappe": {}}, 4.64, "learned"))
+    @patch("market_listing_alert.parse_key_value_file", return_value={
+        "MARKET_ALERT_ENABLED": "true", "MARKET_ALERT_MIN_SAVING_PERCENT": "25",
+        "MARKET_ALERT_MIN_LIMITED_VALUE_EUR": "1", "MARKET_ALERT_MIN_COMPARABLES": "0",
+    })
+    def test_rare_above_five_times_limited_floor_is_not_alerted(self, _settings, _context, _config, _headers, _rates, fetch, valuation, send, _sleep):
+        fetch.return_value = [offer(price=1000)]
+        valuation.return_value = {
+            "fair_value": 171.62, "limited_value": 1.6, "limited_floor": 1.6, "rare_sales_count": 0,
+            "rare_peer_floor": 500, "parity_reference": 7.42, "ratio": 4.64,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(market_listing_alert, "STATE_PATH", Path(temporary) / "state.json"):
+                self.assertEqual(market_listing_alert.run(now=NOW), 0)
+        send.assert_not_called()
