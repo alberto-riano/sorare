@@ -2097,6 +2097,26 @@ class MovementHistoryTests(TestCase):
         self.assertContains(response, "Esencia recibida")
         self.assertContains(response, "Cartas recibidas")
 
+    def test_rewards_can_be_filtered_by_competition(self):
+        MovementSnapshot.objects.create(user=self.user, source_version=17, movements=[
+            {"id": "laliga", "occurred_at": "2026-10-13T18:00:00Z", "direction": "reward", "category": "reward", "reward_type": "money", "market": "GW21 · LALIGA – Rare · Puesto 14", "gross_eur": 93.86, "net_eur": 93.86, "cards": []},
+            {"id": "allstar", "occurred_at": "2026-10-16T18:00:00Z", "direction": "reward", "category": "reward", "reward_type": "essence", "market": "GW22 · All Star – Rare · Puesto 1151", "essence_quantity": 105, "essence": [{"quantity": 105, "rarity": "rare"}], "cards": []},
+            {"id": "plain", "occurred_at": "2026-10-16T18:00:00Z", "direction": "reward", "category": "reward", "reward_type": "essence", "market": "Recompensa de jornada · GW22 · Rare · Puesto 21", "essence_quantity": 3150, "essence": [{"quantity": 3150, "rarity": "rare"}], "cards": []},
+        ])
+
+        response = self.client.get(reverse("movements"), {"category": "reward"})
+        self.assertEqual(response.context["available_competitions"], ["All Star", "LALIGA", "Rare"])
+        self.assertContains(response, "Competición")
+
+        laliga = self.client.get(reverse("movements"), {"category": "reward", "competition": "LALIGA"})
+        self.assertEqual(laliga.context["total_rows"], 1)
+        self.assertEqual(laliga.context["totals"]["reward_money"], Decimal("93.86"))
+        self.assertEqual(laliga.context["totals"]["essence_rare"], 0)
+
+        all_star = self.client.get(reverse("movements"), {"category": "reward", "competition": "All Star"})
+        self.assertEqual(all_star.context["total_rows"], 1)
+        self.assertEqual(all_star.context["totals"]["essence_rare"], 105)
+
     def test_default_history_starts_on_current_season_date_but_can_be_cleared(self):
         MovementSnapshot.objects.create(user=self.user, source_version=17, movements=[
             {"id": "before", "occurred_at": "2026-08-11T21:59:00Z", "direction": "purchase", "category": "other", "cards": [{"player": "Antes de temporada"}]},
