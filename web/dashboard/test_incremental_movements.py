@@ -39,7 +39,7 @@ class IncrementalMovementSyncTests(TestCase):
             movements=[{"id": "old", "occurred_at": "2026-08-20T10:00:00Z"}],
             history_start_date=date(2026, 8, 12),
             refreshed_at=self.refreshed_at,
-            source_version=19,
+            source_version=20,
         )
         job = MovementSyncJob.objects.create(user=self.user, requested_start_date=date(2026, 8, 12))
 

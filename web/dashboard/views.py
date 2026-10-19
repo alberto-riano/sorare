@@ -26,7 +26,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from web_services.config_files import SorarePaths, load_telegram_alert_payload, save_telegram_alert_payload
 from web_services.process_runner import BidRequest, run_auction_value_alert, run_bid_scheduler, run_market_listing_alert, run_telegram_alert
-from web_services.movement_history import build_crafting_history, build_trade_cycles
+from web_services.movement_history import build_crafting_history, build_trade_cycles, competition_rarities_from_market
 from web_services.sales_inventory import collection_display_name
 from .forms import BatchBidForm, BatchDelistForm, BatchSaleForm, BidScheduleForm, InlineBidForm, TelegramSettingsForm
 from .models import (
@@ -724,13 +724,20 @@ def movements(request):
     rarity = request.GET.get("rarity", "")
     if rarity not in allowed_rarities:
         rarity = ""
+    # En Recompensas la rareza es la de la competición y se pueden marcar varias.
+    reward_rarities: list[str] = []
+    if category == "reward":
+        reward_rarities = list(dict.fromkeys(
+            value for value in request.GET.getlist("rarity") if value in allowed_rarities
+        ))
+        rarity = ""
     reward_type = request.GET.get("reward_type", "")
     if category != "reward" or reward_type not in {"money", "essence", "card"}:
         reward_type = ""
     competition = request.GET.get("competition", "").strip() if category == "reward" else ""
-    mode = request.GET.get("mode", "")
-    if category != "reward" or mode not in REWARD_MODES:
-        mode = ""
+    modes = list(dict.fromkeys(
+        value for value in request.GET.getlist("mode") if value in REWARD_MODES
+    )) if category == "reward" else []
     seasonality = request.GET.get("seasonality", "")
     if category == "reward" or seasonality not in {"inseason", "classic"}:
         seasonality = ""
@@ -761,6 +768,11 @@ def movements(request):
             )
             row["reward_competition"] = _reward_competition(row)
             row["reward_mode"] = _reward_mode(row)
+            if "competition_rarities" not in row:
+                row["competition_rarities"] = (
+                    [] if row.get("reward_mode") == "other"
+                    else competition_rarities_from_market(row.get("market") or "")
+                )
         occurred_at = _movement_datetime(row.get("occurred_at"))
         row["occurred_at_dt"] = occurred_at
         prepared_rows.append(row)
@@ -775,25 +787,29 @@ def movements(request):
     ]
     # Rareza → modo → competición: cada desplegable solo ofrece lo que tiene premios
     # con lo elegido antes; lo que deja de pertenecer se descarta.
-    rarity_rewards = [
-        row for row in prepared_rows
-        if row.get("direction") == "reward" and (
-            not rarity
-            or row.get("reward_rarity") == rarity
-            or any(item.get("rarity") == rarity for item in row.get("essence") or [])
-            or any(card.get("rarity") == rarity for card in _movement_main_cards(row))
-        )
+    def matches_reward_rarity(row):
+        # Sin rareza concreta (p. ej. un tablero Pro de liga) encaja con cualquiera.
+        competition_rarities = row.get("competition_rarities") or []
+        return not reward_rarities or not competition_rarities or bool(set(competition_rarities) & set(reward_rarities))
+
+    def matches_reward_mode(row):
+        return not modes or row.get("reward_mode") in modes
+
+    reward_rows = [row for row in prepared_rows if row.get("direction") == "reward"]
+    available_reward_rarities = [
+        value for value in ("limited", "rare", "super_rare", "unique")
+        if any(value in (row.get("competition_rarities") or []) for row in reward_rows)
     ]
+    rarity_rewards = [row for row in reward_rows if matches_reward_rarity(row)]
     available_modes = [
         (key, label) for key, label in REWARD_MODES.items()
         if any(row.get("reward_mode") == key for row in rarity_rewards)
     ]
-    if mode not in {key for key, _label in available_modes}:
-        mode = ""
+    modes = [value for value in modes if value in {key for key, _label in available_modes}]
     available_competitions = sorted(
         {
             row.get("reward_competition") for row in rarity_rewards
-            if row.get("reward_competition") and (not mode or row.get("reward_mode") == mode)
+            if row.get("reward_competition") and matches_reward_mode(row)
         },
         key=str.casefold,
     )
@@ -830,7 +846,7 @@ def movements(request):
             continue
         if reward_type and row.get("reward_type") != reward_type:
             continue
-        if mode and row.get("reward_mode") != mode:
+        if row.get("direction") == "reward" and not (matches_reward_mode(row) and matches_reward_rarity(row)):
             continue
         if competition and row.get("reward_competition") != competition:
             continue
@@ -939,7 +955,8 @@ def movements(request):
         for row in prepared_rows
         if row.get("direction") == "reward"
         and row.get("reward_type") == "money"
-        and (not mode or row.get("reward_mode") == mode)
+        and matches_reward_mode(row)
+        and matches_reward_rarity(row)
         and (not competition or row.get("reward_competition") == competition)
         and in_selected_window(row)
         and (
@@ -1072,7 +1089,9 @@ def movements(request):
         "selected_reward_type": reward_type,
         "selected_competition": competition,
         "available_competitions": available_competitions,
-        "selected_mode": mode,
+        "selected_modes": modes,
+        "selected_reward_rarities": reward_rarities,
+        "available_reward_rarities": available_reward_rarities,
         "available_modes": available_modes,
         "selected_seasonality": seasonality,
         "selected_manager": selected_manager,

@@ -812,6 +812,25 @@ def _movement_from_group(
     }
 
 
+_COMPETITION_RARITY_WORDS = (
+    ("super rare", "super_rare"), ("sr", "super_rare"), ("limited", "limited"),
+    ("rare", "rare"), ("unique", "unique"),
+)
+
+
+def competition_rarities_from_market(market: str) -> list[str]:
+    """Rareza de la competición a partir de su texto («GW22 · All Star – Rare · Puesto 1»).
+
+    Una lista vacía significa que la competición no tiene una rareza concreta
+    (p. ej. un tablero Pro de liga, que admite cartas de todos los colores).
+    """
+    text = re.sub(r"\bpuesto\s+\d+|\bnivel\s+\d+", "", str(market or ""), flags=re.IGNORECASE).casefold()
+    for word, rarity in _COMPETITION_RARITY_WORDS:
+        if re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", text):
+            return [rarity]
+    return []
+
+
 def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
     """Niveles superados en el modo Pro (tableros de carrera) desde ``cutoff``.
 
@@ -821,7 +840,8 @@ def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
     rewards = []
     for board in boards or []:
         title = str(board.get("title") or "Modo Pro")
-        rarities = [str(rarity).replace("_", " ").title() for rarity in board.get("rarities") or []]
+        board_rarities = [str(rarity).lower() for rarity in board.get("rarities") or []]
+        rarities = [rarity.replace("_", " ").title() for rarity in board_rarities]
         board_label = title
         if title.casefold() == "inferno" and len(rarities) == 1:
             board_label = f"{title} {rarities[0]}"
@@ -842,6 +862,7 @@ def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
                 "id": str(task.get("id") or step.get("id")),
                 "completed_at": completed_at,
                 "label": f"Modo Pro · {board_label} · Nivel {int(step.get('level') or 0) + 1}",
+                "rarities": board_rarities,
                 "monetary": any(config.get("__typename") == "MonetaryRewardConfig" for config in configs),
                 "essence": [{
                     "__typename": "CardShardsReward",
@@ -853,12 +874,19 @@ def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
     return rewards
 
 
-def _pro_mode_notification_rewards(notifications: list[dict], cutoff: datetime) -> list[dict]:
+def _pro_mode_notification_rewards(
+    notifications: list[dict], cutoff: datetime, boards: list[dict] | None = None,
+) -> list[dict]:
     """Niveles Pro sacados de las notificaciones «Te has pasado el nivel N».
 
     Los tableros solo muestran la partida en curso: si se reinician (sin vidas o
     al empezar de nuevo), los niveles de partidas anteriores solo quedan aquí.
     """
+    rarities_by_title: dict[str, set[tuple[str, ...]]] = {}
+    for board in boards or []:
+        rarities_by_title.setdefault(str(board.get("title") or "").casefold(), set()).add(
+            tuple(str(rarity).lower() for rarity in board.get("rarities") or [])
+        )
     rewards = []
     for notification in notifications or []:
         if notification.get("__typename") != "TaskNotification" or notification.get("name") != "task_completed":
@@ -877,12 +905,16 @@ def _pro_mode_notification_rewards(notifications: list[dict], cutoff: datetime) 
                 "rarity": essence_match.group("rarity").lower().replace(" ", "_"),
             })
         board = match.group("board").strip()
+        known_rarities = rarities_by_title.get(board.casefold(), set())
+        rarities = list(next(iter(known_rarities))) if len(known_rarities) == 1 else []
         if board.casefold() == "inferno" and len({item["rarity"] for item in essence}) == 1:
+            rarities = [essence[0]["rarity"]]
             board = f"{board} {essence[0]['rarity'].replace('_', ' ').title()}"
         rewards.append({
             "id": str((notification.get("task") or {}).get("id") or created_at),
             "completed_at": created_at,
             "label": f"Modo Pro · {board} · Nivel {int(match.group('level'))}",
+            "rarities": rarities,
             "monetary": "$" in prize or "€" in prize,
             "essence": essence,
         })
@@ -925,6 +957,7 @@ def _apply_pro_mode_rewards(reward_entries: list[dict], pro_rewards: list[dict])
                 if paid - completed <= PRO_REWARD_PAYMENT_WINDOW:
                     matched.add(id(entry))
                     entry["tokenOperation"]["_market"] = reward["label"]
+                    entry["tokenOperation"]["_competition_rarities"] = list(reward.get("rarities") or [])
                 break
         if reward["essence"]:
             reward_entries.append({
@@ -942,6 +975,7 @@ def _apply_pro_mode_rewards(reward_entries: list[dict], pro_rewards: list[dict])
                     "rewards": reward["essence"],
                     "rewardConfigs": [],
                     "_market": reward["label"],
+                    "_competition_rarities": list(reward.get("rarities") or []),
                 },
             })
 
@@ -963,6 +997,14 @@ def _apply_pro_mode_rewards(reward_entries: list[dict], pro_rewards: list[dict])
         )
     }
     reward_entries[:] = [entry for entry in reward_entries if id(entry) not in duplicated]
+
+
+def _reward_competition_rarities(operation: dict, market: str) -> list[str]:
+    if "_competition_rarities" in operation:
+        return list(operation["_competition_rarities"] or [])
+    if market == "Premio monetario":
+        return []
+    return competition_rarities_from_market(market)
 
 
 def _reward_market(operation: dict) -> str:
@@ -1500,6 +1542,7 @@ def collect_public_reward_history(
         if not reward or reward["id"] in known_ids:
             continue
         reward["market"] = _reward_market(entry.get("tokenOperation") or {})
+        reward["competition_rarities"] = _reward_competition_rarities(entry.get("tokenOperation") or {}, reward["market"])
         movements.append(reward)
         known_ids.add(reward["id"])
     movements.extend(public_crafting_by_asset.values())
@@ -1673,7 +1716,7 @@ def collect_movement_history(
         pass
     pro_rewards = _merge_pro_mode_rewards(
         _pro_mode_rewards(boards, cutoff),
-        _pro_mode_notification_rewards(notifications, cutoff),
+        _pro_mode_notification_rewards(notifications, cutoff, boards),
     )
     _apply_pro_mode_rewards(reward_entries, pro_rewards)
     if progress:
@@ -1728,6 +1771,7 @@ def collect_movement_history(
         if not reward or reward["id"] in known_ids:
             continue
         reward["market"] = _reward_market(entries[0].get("tokenOperation") or {})
+        reward["competition_rarities"] = _reward_competition_rarities(entries[0].get("tokenOperation") or {}, reward["market"])
         movements.append(reward)
         known_ids.add(reward["id"])
     movements.extend(crafting_movements)
