@@ -2258,26 +2258,51 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(all_star.context["total_rows"], 1)
         self.assertEqual(all_star.context["totals"]["essence_rare"], 105)
 
-    def test_pro_mode_and_unmatched_money_rewards_have_their_own_competition(self):
-        MovementSnapshot.objects.create(user=self.user, source_version=18, movements=[
+    def test_rewards_filter_by_mode_then_competition(self):
+        MovementSnapshot.objects.create(user=self.user, source_version=19, movements=[
             {"id": "pro-2", "occurred_at": "2026-10-18T14:00:46Z", "direction": "reward", "category": "reward", "reward_type": "money", "market": "Modo Pro · LALIGA EA SPORTS · Nivel 2", "gross_eur": 7.88, "net_eur": 7.88, "cards": []},
             {"id": "pro-3", "occurred_at": "2026-10-18T18:32:20Z", "direction": "reward", "category": "reward", "reward_type": "money", "market": "Modo Pro · LALIGA EA SPORTS · Nivel 3", "gross_eur": 17.06, "net_eur": 17.06, "cards": []},
             {"id": "inferno", "occurred_at": "2026-10-18T18:30:04Z", "direction": "reward", "category": "reward", "reward_type": "essence", "market": "Modo Pro · Inferno Rare · Nivel 1", "essence_quantity": 500, "essence": [{"quantity": 500, "rarity": "rare"}], "cards": []},
-            {"id": "money", "occurred_at": "2026-10-13T18:08:48Z", "direction": "reward", "category": "reward", "reward_type": "money", "market": "Premio monetario", "gross_eur": 93.73, "net_eur": 93.73, "cards": []},
+            {"id": "laliga", "occurred_at": "2026-10-13T18:00:00Z", "direction": "reward", "category": "reward", "reward_type": "money", "market": "GW21 · LALIGA – Rare · Puesto 14", "gross_eur": 93.86, "net_eur": 93.86, "cards": []},
+            {"id": "allstar", "occurred_at": "2026-10-16T18:00:00Z", "direction": "reward", "category": "reward", "reward_type": "essence", "market": "GW22 · All Star – Rare · Puesto 1151", "essence_quantity": 105, "essence": [{"quantity": 105, "rarity": "rare"}], "cards": []},
+            {"id": "champions", "occurred_at": "2026-09-08T21:03:21Z", "direction": "reward", "category": "reward", "reward_type": "essence", "market": "Modo Pro · European Champions · Nivel 1", "essence_quantity": 500, "essence": [{"quantity": 500, "rarity": "limited"}], "cards": []},
+            {"id": "sr", "occurred_at": "2026-10-13T18:00:00Z", "direction": "reward", "category": "reward", "reward_type": "essence", "market": "GW21 · Champ. – SR · Puesto 80", "essence_quantity": 100, "essence": [{"quantity": 100, "rarity": "super_rare"}], "cards": []},
+            {"id": "money", "occurred_at": "2026-10-13T18:08:48Z", "direction": "reward", "category": "reward", "reward_type": "money", "market": "Premio monetario", "gross_eur": 5.0, "net_eur": 5.0, "cards": []},
         ])
 
         response = self.client.get(reverse("movements"), {"category": "reward"})
-        self.assertEqual(
-            response.context["available_competitions"],
-            ["Modo Pro · Inferno Rare", "Modo Pro · LALIGA EA SPORTS", "Otros premios"],
-        )
+        self.assertEqual(response.context["available_modes"], [("pro", "Pro"), ("arena", "Arena"), ("other", "Otros")])
+        self.assertEqual(response.context["available_competitions"], ["All Star", "Champ.", "European Champions", "Inferno Rare", "LALIGA", "LALIGA EA SPORTS"])
+        self.assertContains(response, "Modo")
 
-        laliga = self.client.get(reverse("movements"), {"category": "reward", "competition": "Modo Pro · LALIGA EA SPORTS"})
-        self.assertEqual(laliga.context["total_rows"], 2)
-        self.assertEqual(laliga.context["totals"]["reward_money"], Decimal("24.94"))
+        pro = self.client.get(reverse("movements"), {"category": "reward", "mode": "pro"})
+        self.assertEqual(pro.context["total_rows"], 4)
+        self.assertEqual(pro.context["available_competitions"], ["European Champions", "Inferno Rare", "LALIGA EA SPORTS"])
+        self.assertEqual(pro.context["totals"]["reward_money"], Decimal("24.94"))
 
-        other = self.client.get(reverse("movements"), {"category": "reward", "competition": "Otros premios"})
+        pro_laliga = self.client.get(reverse("movements"), {"category": "reward", "mode": "pro", "competition": "LALIGA EA SPORTS"})
+        self.assertEqual(pro_laliga.context["total_rows"], 2)
+
+        pro_rare = self.client.get(reverse("movements"), {"category": "reward", "mode": "pro", "rarity": "rare"})
+        self.assertEqual(pro_rare.context["total_rows"], 1)
+
+        arena = self.client.get(reverse("movements"), {"category": "reward", "mode": "arena", "competition": "LALIGA EA SPORTS"})
+        self.assertEqual(arena.context["selected_competition"], "")
+        self.assertEqual(arena.context["available_competitions"], ["All Star", "Champ.", "LALIGA"])
+        self.assertEqual(arena.context["total_rows"], 3)
+
+        limited = self.client.get(reverse("movements"), {"category": "reward", "rarity": "limited", "mode": "pro", "competition": "Inferno Rare"})
+        self.assertEqual(limited.context["available_modes"], [("pro", "Pro")])
+        self.assertEqual(limited.context["available_competitions"], ["European Champions"])
+        self.assertEqual(limited.context["selected_competition"], "")
+        self.assertEqual(limited.context["total_rows"], 1)
+
+        rare_without_pro = self.client.get(reverse("movements"), {"category": "reward", "rarity": "super_rare", "mode": "pro"})
+        self.assertEqual(rare_without_pro.context["selected_mode"], "")
+
+        other = self.client.get(reverse("movements"), {"category": "reward", "mode": "other"})
         self.assertEqual(other.context["total_rows"], 1)
+        self.assertEqual(other.context["available_competitions"], [])
 
     def test_default_history_starts_on_current_season_date_but_can_be_cleared(self):
         MovementSnapshot.objects.create(user=self.user, source_version=17, movements=[

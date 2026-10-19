@@ -626,13 +626,26 @@ _REWARD_MARKET_NOISE = re.compile(
 )
 
 
+REWARD_MODES = {"pro": "Pro", "arena": "Arena", "other": "Otros"}
+
+
+def _reward_mode(row):
+    """Modo de juego del premio: Pro (tableros de niveles), Arena (jornada) u otros."""
+    market = str(row.get("market") or "").strip()
+    if market.startswith("Modo Pro ·"):
+        return "pro"
+    if not market or market == "Premio monetario":
+        return "other"
+    return "arena"
+
+
 def _reward_competition(row):
     """Competición del premio a partir de «GW22 · All Star – Rare · Puesto 1151»."""
     market = str(row.get("market") or "").strip()
     if market.startswith("Modo Pro ·"):
-        return re.sub(r"\s*·\s*Nivel\s+\d+\s*$", "", market)
+        return re.sub(r"\s*·\s*Nivel\s+\d+\s*$", "", market.removeprefix("Modo Pro ·")).strip()
     if market == "Premio monetario":
-        return "Otros premios"
+        return ""
     parts = [
         part.strip() for part in str(row.get("market") or "").split("·")
         if part.strip() and not _REWARD_MARKET_NOISE.match(part.strip())
@@ -715,6 +728,9 @@ def movements(request):
     if category != "reward" or reward_type not in {"money", "essence", "card"}:
         reward_type = ""
     competition = request.GET.get("competition", "").strip() if category == "reward" else ""
+    mode = request.GET.get("mode", "")
+    if category != "reward" or mode not in REWARD_MODES:
+        mode = ""
     seasonality = request.GET.get("seasonality", "")
     if category == "reward" or seasonality not in {"inseason", "classic"}:
         seasonality = ""
@@ -744,6 +760,7 @@ def movements(request):
                 or str((cards[0] if cards else {}).get("rarity") or "")
             )
             row["reward_competition"] = _reward_competition(row)
+            row["reward_mode"] = _reward_mode(row)
         occurred_at = _movement_datetime(row.get("occurred_at"))
         row["occurred_at_dt"] = occurred_at
         prepared_rows.append(row)
@@ -756,6 +773,32 @@ def movements(request):
         crafting_by_id.get(str(row.get("id") or ""), row)
         for row in prepared_rows
     ]
+    # Rareza → modo → competición: cada desplegable solo ofrece lo que tiene premios
+    # con lo elegido antes; lo que deja de pertenecer se descarta.
+    rarity_rewards = [
+        row for row in prepared_rows
+        if row.get("direction") == "reward" and (
+            not rarity
+            or row.get("reward_rarity") == rarity
+            or any(item.get("rarity") == rarity for item in row.get("essence") or [])
+            or any(card.get("rarity") == rarity for card in _movement_main_cards(row))
+        )
+    ]
+    available_modes = [
+        (key, label) for key, label in REWARD_MODES.items()
+        if any(row.get("reward_mode") == key for row in rarity_rewards)
+    ]
+    if mode not in {key for key, _label in available_modes}:
+        mode = ""
+    available_competitions = sorted(
+        {
+            row.get("reward_competition") for row in rarity_rewards
+            if row.get("reward_competition") and (not mode or row.get("reward_mode") == mode)
+        },
+        key=str.casefold,
+    )
+    if competition not in available_competitions:
+        competition = ""
 
     def in_selected_window(row):
         occurred_at = row.get("occurred_at_dt")
@@ -786,6 +829,8 @@ def movements(request):
         if direction and row.get("direction") != direction and row.get("cash_direction") != direction:
             continue
         if reward_type and row.get("reward_type") != reward_type:
+            continue
+        if mode and row.get("reward_mode") != mode:
             continue
         if competition and row.get("reward_competition") != competition:
             continue
@@ -894,6 +939,7 @@ def movements(request):
         for row in prepared_rows
         if row.get("direction") == "reward"
         and row.get("reward_type") == "money"
+        and (not mode or row.get("reward_mode") == mode)
         and (not competition or row.get("reward_competition") == competition)
         and in_selected_window(row)
         and (
@@ -1000,9 +1046,11 @@ def movements(request):
             tab_query.pop("direction", None)
             tab_query.pop("reward_type", None)
             tab_query.pop("competition", None)
+            tab_query.pop("mode", None)
         else:
             tab_query.pop("reward_type", None)
             tab_query.pop("competition", None)
+            tab_query.pop("mode", None)
         tab_queries[target_category] = tab_query.urlencode()
 
     return render(request, "dashboard/movements.html", {
@@ -1023,10 +1071,9 @@ def movements(request):
         "selected_rarity": rarity,
         "selected_reward_type": reward_type,
         "selected_competition": competition,
-        "available_competitions": sorted(
-            {row.get("reward_competition") for row in prepared_rows if row.get("reward_competition")},
-            key=str.casefold,
-        ),
+        "available_competitions": available_competitions,
+        "selected_mode": mode,
+        "available_modes": available_modes,
         "selected_seasonality": seasonality,
         "selected_manager": selected_manager,
         "manager_nickname": manager_nickname,
