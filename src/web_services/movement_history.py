@@ -258,6 +258,7 @@ query ProModeBoards {
 """
 
 PRO_REWARD_PAYMENT_WINDOW = timedelta(minutes=15)
+PRO_DUPLICATE_PAYOUT_WINDOW = timedelta(days=2)
 
 PUBLIC_MANAGER_REWARDS_QUERY = """
 query PublicManagerRewards($managerSlug: String!, $last: Int!, $before: String) {
@@ -867,6 +868,25 @@ def _apply_pro_mode_rewards(reward_entries: list[dict], pro_rewards: list[dict])
                     "_market": reward["label"],
                 },
             })
+
+    # Un premio de jornada en dinero también llega como PAYMENT con TokenMonetaryReward:
+    # si no es de un nivel Pro y coincide con un So5Reward ya recogido, sobra.
+    gameweek_payouts = [
+        (_movement_timestamp({"occurred_at": entry["date"]}), str((entry.get("amounts") or {}).get("wei") or ""))
+        for entry in reward_entries
+        if (entry.get("tokenOperation") or {}).get("__typename") == "So5Reward"
+        and entry.get("date") and (entry.get("amounts") or {}).get("wei")
+    ]
+    duplicated = {
+        id(entry) for entry in monetary_entries
+        if id(entry) not in matched and entry.get("entryType") == "PAYMENT"
+        and any(
+            wei == str((entry.get("amounts") or {}).get("wei") or "")
+            and abs(_movement_timestamp({"occurred_at": entry["date"]}) - delivered) <= PRO_DUPLICATE_PAYOUT_WINDOW
+            for delivered, wei in gameweek_payouts
+        )
+    }
+    reward_entries[:] = [entry for entry in reward_entries if id(entry) not in duplicated]
 
 
 def _reward_market(operation: dict) -> str:

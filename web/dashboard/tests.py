@@ -1702,6 +1702,30 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(essence["reward_rarity"], "limited")
         self.assertEqual(essence["market"], "Modo Pro · LALIGA EA SPORTS · Nivel 1")
 
+    def test_gameweek_money_paid_as_payment_is_not_counted_twice(self):
+        from web_services.movement_history import _apply_pro_mode_rewards
+
+        gameweek = {
+            "id": "gameweek:So5Reward:1", "date": "2026-10-13T18:00:00Z", "entryType": "REWARD",
+            "amounts": {"eurCents": 9386, "wei": "42000000000000000", "referenceCurrency": "WEI"},
+            "tokenOperation": {"__typename": "So5Reward", "id": "So5Reward:1"},
+        }
+        duplicated_payment = {
+            "id": "payment-1", "date": "2026-10-13T18:08:48Z", "entryType": "PAYMENT",
+            "amounts": {"eurCents": 9373, "wei": "42000000000000000", "referenceCurrency": "WEI"},
+            "tokenOperation": {"__typename": "TokenMonetaryReward", "id": "MonetaryReward:1"},
+        }
+        other_payment = {
+            "id": "payment-2", "date": "2026-10-14T10:00:00Z", "entryType": "PAYMENT",
+            "amounts": {"eurCents": 500, "wei": "2000000000000000", "referenceCurrency": "WEI"},
+            "tokenOperation": {"__typename": "TokenMonetaryReward", "id": "MonetaryReward:2"},
+        }
+        entries = [gameweek, duplicated_payment, other_payment]
+
+        _apply_pro_mode_rewards(entries, [])
+
+        self.assertEqual([entry["id"] for entry in entries], ["gameweek:So5Reward:1", "payment-2"])
+
     @patch("web_services.movement_history.graphql_request")
     def test_public_reward_collector_reads_another_managers_actual_rewards(self, request):
         card = self._api_card(player="Carta pública")
