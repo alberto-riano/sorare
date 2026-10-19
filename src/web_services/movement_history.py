@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Callable
 from zoneinfo import ZoneInfo
@@ -154,7 +154,7 @@ query MovementPaymentAccounts(
 REWARD_ENTRIES_QUERY = """
 query RewardEntries($first: Int!, $after: String, $startDate: ISO8601DateTime) {
   currentUser {
-    accountEntries(first: $first, after: $after, entryType: [REWARD], startDate: $startDate, sortType: DESC) {
+    accountEntries(first: $first, after: $after, entryType: [REWARD, PAYMENT], startDate: $startDate, sortType: DESC) {
       nodes {
         id date entryType provisional aasmState
         amounts { eurCents wei referenceCurrency }
@@ -229,6 +229,35 @@ query GameweekRewards($last: Int!, $before: String) {
   }
 }
 """
+
+PRO_MODE_BOARDS_QUERY = """
+query ProModeBoards {
+  currentUser {
+    boards(mode: CAREER, sport: FOOTBALL, engaged: true) {
+      __typename id title
+      ... on CareerBoard {
+        configSlug rarities
+        steps {
+          __typename id level state
+          rewardConfigs {
+            __typename
+            ... on CardShardRewardConfig { quantity rarity }
+            ... on MonetaryRewardConfig { amount { usdCents eurCents wei referenceCurrency } }
+          }
+          ... on CareerProStep {
+            myTask {
+              __typename id aasmState completedAt
+              ... on ThresholdPickerTask { taskLineups { aasmState rewardMultiplier } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+PRO_REWARD_PAYMENT_WINDOW = timedelta(minutes=15)
 
 PUBLIC_MANAGER_REWARDS_QUERY = """
 query PublicManagerRewards($managerSlug: String!, $last: Int!, $before: String) {
@@ -757,7 +786,92 @@ def _movement_from_group(
     }
 
 
+def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
+    """Niveles superados en el modo Pro (tableros de carrera) desde ``cutoff``.
+
+    Sorare no expone el premio entregado, solo su configuración: el premio real
+    es la configuración por el multiplicador de la alineación que superó el nivel.
+    """
+    rewards = []
+    for board in boards or []:
+        title = str(board.get("title") or "Modo Pro")
+        rarities = [str(rarity).replace("_", " ").title() for rarity in board.get("rarities") or []]
+        board_label = title
+        if title.casefold() == "inferno" and len(rarities) == 1:
+            board_label = f"{title} {rarities[0]}"
+        for step in board.get("steps") or []:
+            task = step.get("myTask") or {}
+            completed_at = task.get("completedAt")
+            if not completed_at or str(task.get("aasmState") or "") not in {"COMPLETED", "CLAIMED"}:
+                continue
+            if _movement_timestamp({"occurred_at": completed_at}) < cutoff:
+                continue
+            multiplier = next((
+                float(lineup.get("rewardMultiplier") or 1)
+                for lineup in task.get("taskLineups") or []
+                if lineup.get("aasmState") == "SUCCESSFUL"
+            ), 1.0)
+            configs = step.get("rewardConfigs") or []
+            rewards.append({
+                "id": str(task.get("id") or step.get("id")),
+                "completed_at": completed_at,
+                "label": f"Modo Pro · {board_label} · Nivel {int(step.get('level') or 0) + 1}",
+                "monetary": any(config.get("__typename") == "MonetaryRewardConfig" for config in configs),
+                "essence": [{
+                    "__typename": "CardShardsReward",
+                    "quantity": int(round(int(config.get("quantity") or 0) * multiplier)),
+                    "rarity": str(config.get("rarity") or "").lower(),
+                } for config in configs if config.get("__typename") == "CardShardRewardConfig"],
+            })
+    rewards.sort(key=lambda reward: reward["completed_at"])
+    return rewards
+
+
+def _apply_pro_mode_rewards(reward_entries: list[dict], pro_rewards: list[dict]) -> None:
+    """Etiqueta los abonos de dinero del modo Pro y añade la esencia ganada."""
+    monetary_entries = sorted(
+        (
+            entry for entry in reward_entries
+            if (entry.get("tokenOperation") or {}).get("__typename") == "TokenMonetaryReward"
+            and entry.get("date")
+        ),
+        key=lambda entry: entry["date"],
+    )
+    matched: set[int] = set()
+    for reward in pro_rewards:
+        if reward["monetary"]:
+            completed = _movement_timestamp({"occurred_at": reward["completed_at"]})
+            for entry in monetary_entries:
+                paid = _movement_timestamp({"occurred_at": entry["date"]})
+                if id(entry) in matched or paid < completed:
+                    continue
+                if paid - completed <= PRO_REWARD_PAYMENT_WINDOW:
+                    matched.add(id(entry))
+                    entry["tokenOperation"]["_market"] = reward["label"]
+                break
+        if reward["essence"]:
+            reward_entries.append({
+                "id": f"pro:{reward['id']}",
+                "date": reward["completed_at"],
+                "entryType": "REWARD",
+                "provisional": False,
+                "aasmState": "CONFIRMED",
+                "amounts": {},
+                "tokenOperation": {
+                    "__typename": "So5Reward",
+                    "id": f"pro:{reward['id']}",
+                    "amount": None,
+                    "rewardCards": [],
+                    "rewards": reward["essence"],
+                    "rewardConfigs": [],
+                    "_market": reward["label"],
+                },
+            })
+
+
 def _reward_market(operation: dict) -> str:
+    if operation.get("_market"):
+        return str(operation["_market"])
     if operation.get("__typename") != "So5Reward":
         return "Premio monetario"
     fixture = operation.get("so5Fixture") or {}
@@ -1440,6 +1554,16 @@ def collect_movement_history(
         if not page_info.get("hasNextPage"):
             break
         cursor = page_info.get("endCursor")
+
+    try:
+        boards_data = graphql_request(PRO_MODE_BOARDS_QUERY, {}, headers=headers)
+        boards = ((boards_data.get("currentUser") or {}).get("boards") or [])
+    except Exception:  # El modo Pro es un extra: si falla, no se pierde el resto.
+        boards = []
+    pro_rewards = _pro_mode_rewards(boards, cutoff)
+    _apply_pro_mode_rewards(reward_entries, pro_rewards)
+    if progress:
+        progress(len(trades), f"{len(pro_rewards)} niveles del modo Pro superados")
 
     crafted_data = graphql_request(CRAFTED_CARDS_QUERY, {}, headers=headers)
     crafted_user = crafted_data.get("currentUser") or {}

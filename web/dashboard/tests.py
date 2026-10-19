@@ -1586,7 +1586,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
         snapshot = MovementSnapshot.objects.get(user=self.user)
         self.assertEqual(snapshot.movements[0]["id"], "movement-1")
-        self.assertEqual(snapshot.source_version, 17)
+        self.assertEqual(snapshot.source_version, 18)
 
     @patch("web_services.movement_history.graphql_request")
     def test_collector_adds_confirmed_gameweek_rewards(self, request):
@@ -1630,6 +1630,77 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(movements[0]["category"], "reward")
         self.assertEqual(movements[0]["market"], "GW 12 · Rare · Puesto 25")
         self.assertEqual(movements[0]["gross_eur"], 5.0)
+
+    @patch("web_services.movement_history.graphql_request")
+    def test_collector_adds_pro_mode_levels_and_their_payments(self, request):
+        payment = {
+            "id": "pro-payment", "date": "2026-10-18T14:00:46Z", "entryType": "PAYMENT",
+            "provisional": False, "aasmState": "CONFIRMED",
+            "amounts": {"eurCents": 788, "wei": "3700000000000000", "referenceCurrency": "WEI"},
+            "tokenOperation": {"__typename": "TokenMonetaryReward", "id": "MonetaryReward:1", "rewardId": "r1"},
+        }
+        trade_payment = {
+            "id": "trade-payment", "date": "2026-10-18T15:00:00Z", "entryType": "PAYMENT",
+            "provisional": False, "aasmState": "CONFIRMED", "amounts": {"eurCents": 500},
+            "tokenOperation": {"__typename": "TokenBid", "id": "bid-1"},
+        }
+        boards = [{
+            "__typename": "CareerBoard", "id": "board-laliga", "title": "LALIGA EA SPORTS",
+            "configSlug": "football-pro-27-spain", "rarities": ["limited", "rare"],
+            "steps": [
+                {"__typename": "CareerProStep", "id": "step-0", "level": 0, "state": "CLAIMED",
+                 "rewardConfigs": [{"__typename": "CardShardRewardConfig", "quantity": 500, "rarity": "limited"}],
+                 "myTask": {"__typename": "ThresholdPickerTask", "id": "task-0", "aasmState": "CLAIMED",
+                            "completedAt": "2026-10-17T16:16:58Z", "taskLineups": [
+                                {"aasmState": "CANCELLED", "rewardMultiplier": 1.7},
+                                {"aasmState": "SUCCESSFUL", "rewardMultiplier": 1.9},
+                            ]}},
+                {"__typename": "CareerProStep", "id": "step-1", "level": 1, "state": "CLAIMED",
+                 "rewardConfigs": [{"__typename": "MonetaryRewardConfig", "amount": {"usdCents": 500}}],
+                 "myTask": {"__typename": "ThresholdPickerTask", "id": "task-1", "aasmState": "CLAIMED",
+                            "completedAt": "2026-10-18T13:59:01Z", "taskLineups": [
+                                {"aasmState": "SUCCESSFUL", "rewardMultiplier": 1.75},
+                            ]}},
+                {"__typename": "CareerProStep", "id": "step-2", "level": 2, "state": "PLAYABLE",
+                 "rewardConfigs": [{"__typename": "MonetaryRewardConfig", "amount": {"usdCents": 5000}}],
+                 "myTask": {"__typename": "ThresholdPickerTask", "id": "task-2", "aasmState": "READY",
+                            "completedAt": None, "taskLineups": []}},
+            ],
+        }]
+
+        def response(query, variables, headers=None):
+            if "CompletedTrades" in query:
+                return {"currentUser": {"slug": "burguis", "trades": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "MovementConversionCredits" in query:
+                return {"currentUser": {"sportConversionCredits": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "MovementPaymentAccounts" in query:
+                return {"currentUser": {"accountEntries": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "GameweekRewards" in query:
+                return {"so5": {"allSo5Fixtures": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "RewardEntries" in query:
+                self.assertIn("PAYMENT", query)
+                return {"currentUser": {"accountEntries": {
+                    "nodes": [payment, trade_payment], "pageInfo": {"hasNextPage": False},
+                }}}
+            if "ProModeBoards" in query:
+                return {"currentUser": {"boards": boards}}
+            if "CraftedCards" in query:
+                return {"currentUser": {"slug": "burguis", "cardShardsChests": []}}
+            raise AssertionError("Consulta inesperada")
+
+        request.side_effect = response
+        movements = collect_movement_history(start_date=date(2026, 10, 1), headers={"Authorization": "test"})
+
+        self.assertEqual(len(movements), 2)
+        money, essence = movements
+        self.assertEqual(money["direction"], "reward")
+        self.assertEqual(money["reward_type"], "money")
+        self.assertEqual(money["gross_eur"], 7.88)
+        self.assertEqual(money["market"], "Modo Pro · LALIGA EA SPORTS · Nivel 2")
+        self.assertEqual(essence["reward_type"], "essence")
+        self.assertEqual(essence["essence_quantity"], 950)
+        self.assertEqual(essence["reward_rarity"], "limited")
+        self.assertEqual(essence["market"], "Modo Pro · LALIGA EA SPORTS · Nivel 1")
 
     @patch("web_services.movement_history.graphql_request")
     def test_public_reward_collector_reads_another_managers_actual_rewards(self, request):
