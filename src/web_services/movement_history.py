@@ -922,16 +922,24 @@ def _pro_mode_notification_rewards(
 
 
 def _merge_pro_mode_rewards(board_rewards: list[dict], notification_rewards: list[dict]) -> list[dict]:
-    """Une tableros y notificaciones sin repetir el mismo nivel."""
-    seen_ids = {reward["id"] for reward in board_rewards}
-    seen_levels = {(reward["label"], reward["completed_at"]) for reward in board_rewards}
-    merged = list(board_rewards)
+    """Une tableros y notificaciones sin repetir el mismo nivel.
+
+    La esencia de la notificación es la desbloqueada de verdad: el tablero a veces
+    da la configuración base y otras la ya multiplicada, así que si hay notificación
+    del mismo nivel manda su cantidad.
+    """
+    merged = [dict(reward) for reward in board_rewards]
+    by_id = {reward["id"]: reward for reward in merged}
+    by_level = {(reward["label"], reward["completed_at"]): reward for reward in merged}
     for reward in notification_rewards:
-        if reward["id"] in seen_ids or (reward["label"], reward["completed_at"]) in seen_levels:
+        existing = by_id.get(reward["id"]) or by_level.get((reward["label"], reward["completed_at"]))
+        if existing:
+            if reward["essence"]:
+                existing["essence"] = reward["essence"]
             continue
-        seen_ids.add(reward["id"])
-        seen_levels.add((reward["label"], reward["completed_at"]))
         merged.append(reward)
+        by_id[reward["id"]] = reward
+        by_level[(reward["label"], reward["completed_at"])] = reward
     merged.sort(key=lambda reward: reward["completed_at"])
     return merged
 
@@ -1712,8 +1720,9 @@ def collect_movement_history(
             if not page_info.get("hasNextPage") or (dates and _movement_timestamp({"occurred_at": min(dates)}) < cutoff):
                 break
             cursor = page_info.get("endCursor")
-    except Exception:  # Igual que los tableros: un extra que no debe tumbar el historial.
-        pass
+    except Exception as exc:  # Igual que los tableros: un extra que no debe tumbar el historial.
+        if progress:
+            progress(len(trades), f"No se pudieron leer las notificaciones de niveles Pro: {exc}")
     pro_rewards = _merge_pro_mode_rewards(
         _pro_mode_rewards(boards, cutoff),
         _pro_mode_notification_rewards(notifications, cutoff, boards),

@@ -1586,7 +1586,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
         snapshot = MovementSnapshot.objects.get(user=self.user)
         self.assertEqual(snapshot.movements[0]["id"], "movement-1")
-        self.assertEqual(snapshot.source_version, 20)
+        self.assertEqual(snapshot.source_version, 21)
 
     @patch("web_services.movement_history.graphql_request")
     def test_collector_adds_confirmed_gameweek_rewards(self, request):
@@ -1750,6 +1750,30 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(len(entries), 2)
         self.assertEqual(payment["tokenOperation"]["_market"], "Modo Pro · LALIGA EA SPORTS · Nivel 2")
         self.assertNotIn("_market", late_payment["tokenOperation"])
+
+    def test_pro_level_essence_comes_from_notification_when_board_is_already_multiplied(self):
+        from web_services.movement_history import _merge_pro_mode_rewards, _pro_mode_notification_rewards, _pro_mode_rewards
+
+        cutoff = datetime.fromisoformat("2026-10-01T00:00:00+00:00")
+        boards = [{
+            "title": "LALIGA EA SPORTS", "rarities": ["limited", "rare"],
+            "steps": [{"level": 0, "rewardConfigs": [{"__typename": "CardShardRewardConfig", "quantity": 950, "rarity": "limited"}],
+                       "myTask": {"id": "task-0", "aasmState": "CLAIMED", "completedAt": "2026-10-17T16:16:58Z",
+                                  "taskLineups": [{"aasmState": "SUCCESSFUL", "rewardMultiplier": 1.9}]}}],
+        }]
+        notifications = [{
+            "__typename": "TaskNotification", "createdAt": "2026-10-17T16:16:58Z", "name": "task_completed",
+            "body": "LALIGA EA SPORTS: Te has pasado el nivel 1. ¡Avanza al siguiente desafío!\n🎁 950 Limited essences desbloqueado",
+            "task": {"id": "task-0"},
+        }]
+
+        merged = _merge_pro_mode_rewards(
+            _pro_mode_rewards(boards, cutoff), _pro_mode_notification_rewards(notifications, cutoff, boards),
+        )
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["essence"], [{"__typename": "CardShardsReward", "quantity": 950, "rarity": "limited"}])
+        self.assertEqual(merged[0]["rarities"], ["limited", "rare"])
 
     def test_gameweek_money_paid_as_payment_is_not_counted_twice(self):
         from web_services.movement_history import _apply_pro_mode_rewards
@@ -2278,7 +2302,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(response.context["available_modes"], [("pro", "Pro"), ("arena", "Arena"), ("other", "Otros")])
         self.assertEqual(response.context["available_reward_rarities"], ["limited", "rare", "super_rare"])
         self.assertEqual(response.context["total_rows"], 8)
-        self.assertContains(response, 'class="filter-chip filter-chip-limited"')
+        self.assertContains(response, 'class="filter-chip filter-chip-card filter-chip-limited" title="Limited"')
 
         def ids(response):
             return sorted(row["id"] for row in response.context["page_obj"].object_list)
