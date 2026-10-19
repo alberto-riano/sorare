@@ -370,7 +370,7 @@ def process_next_movement_sync():
         job.status = MovementSyncJob.Status.RUNNING
         job.started_at = timezone.now()
         stored_snapshot = MovementSnapshot.objects.filter(user=job.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 18 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 19 else None
         collection_start, incremental = _movement_incremental_start(snapshot, job.requested_start_date)
         job.progress_label = (
             f"Buscando novedades desde {collection_start:%d/%m/%Y}"
@@ -416,7 +416,7 @@ def process_next_movement_sync():
                 "movements": movements,
                 "history_start_date": snapshot.history_start_date if incremental else job.requested_start_date,
                 "refreshed_at": timezone.now(),
-                "source_version": 18,
+                "source_version": 19,
             },
         )
         job.movement_count = len(movements)

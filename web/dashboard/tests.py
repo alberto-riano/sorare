@@ -1586,7 +1586,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
         snapshot = MovementSnapshot.objects.get(user=self.user)
         self.assertEqual(snapshot.movements[0]["id"], "movement-1")
-        self.assertEqual(snapshot.source_version, 18)
+        self.assertEqual(snapshot.source_version, 19)
 
     @patch("web_services.movement_history.graphql_request")
     def test_collector_adds_confirmed_gameweek_rewards(self, request):
@@ -1684,6 +1684,18 @@ class MovementHistoryTests(TestCase):
                 }}}
             if "ProModeBoards" in query:
                 return {"currentUser": {"boards": boards}}
+            if "ProLevelNotifications" in query:
+                return {"currentUser": {"anyNotifications": {"nodes": [
+                    {"__typename": "TaskNotification", "createdAt": "2026-10-17T16:16:58Z", "name": "task_completed",
+                     "body": "LALIGA EA SPORTS: Te has pasado el nivel 1. ¡Avanza al siguiente desafío!\n🎁 950 Limited essences desbloqueado",
+                     "task": {"id": "task-0"}},
+                    {"__typename": "TaskNotification", "createdAt": "2026-10-05T20:44:50Z", "name": "task_completed",
+                     "body": "European Champions: Te has pasado el nivel 1. ¡Avanza al siguiente desafío!\n🎁 500 Rare essences desbloqueado",
+                     "task": {"id": "old-run-task"}},
+                    {"__typename": "TaskNotification", "createdAt": "2026-10-05T19:00:00Z", "name": "task_canceled",
+                     "body": "Inferno: No te quedan vidas.", "task": {"id": "other"}},
+                    {"__typename": "OfferNotification", "createdAt": "2026-09-20T10:00:00Z"},
+                ], "pageInfo": {"hasNextPage": True, "endCursor": "next"}}}}
             if "CraftedCards" in query:
                 return {"currentUser": {"slug": "burguis", "cardShardsChests": []}}
             raise AssertionError("Consulta inesperada")
@@ -1691,8 +1703,8 @@ class MovementHistoryTests(TestCase):
         request.side_effect = response
         movements = collect_movement_history(start_date=date(2026, 10, 1), headers={"Authorization": "test"})
 
-        self.assertEqual(len(movements), 2)
-        money, essence = movements
+        self.assertEqual(len(movements), 3)
+        money, essence, old_run = movements
         self.assertEqual(money["direction"], "reward")
         self.assertEqual(money["reward_type"], "money")
         self.assertEqual(money["gross_eur"], 7.88)
@@ -1701,6 +1713,40 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(essence["essence_quantity"], 950)
         self.assertEqual(essence["reward_rarity"], "limited")
         self.assertEqual(essence["market"], "Modo Pro · LALIGA EA SPORTS · Nivel 1")
+        self.assertEqual(old_run["market"], "Modo Pro · European Champions · Nivel 1")
+        self.assertEqual(old_run["essence_quantity"], 500)
+        self.assertEqual(old_run["reward_rarity"], "rare")
+
+    def test_money_level_from_notification_only_labels_its_payment(self):
+        from web_services.movement_history import _apply_pro_mode_rewards, _pro_mode_notification_rewards
+
+        notifications = [{
+            "__typename": "TaskNotification", "createdAt": "2026-10-11T16:17:54Z", "name": "task_completed",
+            "body": "LALIGA EA SPORTS: Te has pasado el nivel 2. ¡Avanza al siguiente desafío!\n🎁 $8.75 desbloqueado",
+            "task": {"id": "old-run-level-2"},
+        }]
+        levels = _pro_mode_notification_rewards(notifications, datetime.fromisoformat("2026-10-01T00:00:00+00:00"))
+        self.assertEqual(levels[0]["essence"], [])
+
+        without_payment: list[dict] = []
+        _apply_pro_mode_rewards(without_payment, levels)
+        self.assertEqual(without_payment, [])
+
+        payment = {
+            "id": "payment-1", "date": "2026-10-11T16:19:30Z", "entryType": "PAYMENT",
+            "amounts": {"eurCents": 750, "wei": "3500000000000000", "referenceCurrency": "WEI"},
+            "tokenOperation": {"__typename": "TokenMonetaryReward", "id": "MonetaryReward:9"},
+        }
+        late_payment = {
+            "id": "payment-2", "date": "2026-10-11T17:00:00Z", "entryType": "PAYMENT",
+            "amounts": {"eurCents": 100, "wei": "500000000000000", "referenceCurrency": "WEI"},
+            "tokenOperation": {"__typename": "TokenMonetaryReward", "id": "MonetaryReward:10"},
+        }
+        entries = [payment, late_payment]
+        _apply_pro_mode_rewards(entries, levels)
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(payment["tokenOperation"]["_market"], "Modo Pro · LALIGA EA SPORTS · Nivel 2")
+        self.assertNotIn("_market", late_payment["tokenOperation"])
 
     def test_gameweek_money_paid_as_payment_is_not_counted_twice(self):
         from web_services.movement_history import _apply_pro_mode_rewards

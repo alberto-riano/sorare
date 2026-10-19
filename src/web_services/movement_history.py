@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Callable
@@ -259,6 +260,30 @@ query ProModeBoards {
 
 PRO_REWARD_PAYMENT_WINDOW = timedelta(minutes=15)
 PRO_DUPLICATE_PAYOUT_WINDOW = timedelta(days=2)
+
+PRO_LEVEL_NOTIFICATIONS_QUERY = """
+query ProLevelNotifications($first: Int!, $after: String) {
+  currentUser {
+    anyNotifications(first: $first, after: $after, sports: [FOOTBALL]) {
+      nodes {
+        __typename
+        ... on TaskNotification { createdAt name body task { id } }
+        ... on NotificationInterface { createdAt }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+
+# «LALIGA EA SPORTS: Te has pasado el nivel 3. ¡Avanza…!\n🎁 $19.00 desbloqueado»
+_PRO_LEVEL_NOTIFICATION = re.compile(
+    r"^(?P<board>[^:\n]+):[^\n]*?\b(?:nivel|level)\s+(?P<level>\d+)[\s\S]*?🎁\s*(?P<prize>[^\n]+)",
+    re.IGNORECASE,
+)
+_PRO_ESSENCE_PRIZE = re.compile(
+    r"(?P<quantity>[\d.,]+)\s+(?P<rarity>limited|rare|super rare|unique)\s+essences?", re.IGNORECASE,
+)
 
 PUBLIC_MANAGER_REWARDS_QUERY = """
 query PublicManagerRewards($managerSlug: String!, $last: Int!, $before: String) {
@@ -826,6 +851,57 @@ def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
             })
     rewards.sort(key=lambda reward: reward["completed_at"])
     return rewards
+
+
+def _pro_mode_notification_rewards(notifications: list[dict], cutoff: datetime) -> list[dict]:
+    """Niveles Pro sacados de las notificaciones «Te has pasado el nivel N».
+
+    Los tableros solo muestran la partida en curso: si se reinician (sin vidas o
+    al empezar de nuevo), los niveles de partidas anteriores solo quedan aquí.
+    """
+    rewards = []
+    for notification in notifications or []:
+        if notification.get("__typename") != "TaskNotification" or notification.get("name") != "task_completed":
+            continue
+        created_at = notification.get("createdAt")
+        match = _PRO_LEVEL_NOTIFICATION.match(str(notification.get("body") or ""))
+        if not created_at or not match or _movement_timestamp({"occurred_at": created_at}) < cutoff:
+            continue
+        prize = match.group("prize")
+        essence = []
+        for essence_match in _PRO_ESSENCE_PRIZE.finditer(prize):
+            quantity = re.sub(r"[.,]", "", essence_match.group("quantity"))
+            essence.append({
+                "__typename": "CardShardsReward",
+                "quantity": int(quantity or 0),
+                "rarity": essence_match.group("rarity").lower().replace(" ", "_"),
+            })
+        board = match.group("board").strip()
+        if board.casefold() == "inferno" and len({item["rarity"] for item in essence}) == 1:
+            board = f"{board} {essence[0]['rarity'].replace('_', ' ').title()}"
+        rewards.append({
+            "id": str((notification.get("task") or {}).get("id") or created_at),
+            "completed_at": created_at,
+            "label": f"Modo Pro · {board} · Nivel {int(match.group('level'))}",
+            "monetary": "$" in prize or "€" in prize,
+            "essence": essence,
+        })
+    return rewards
+
+
+def _merge_pro_mode_rewards(board_rewards: list[dict], notification_rewards: list[dict]) -> list[dict]:
+    """Une tableros y notificaciones sin repetir el mismo nivel."""
+    seen_ids = {reward["id"] for reward in board_rewards}
+    seen_levels = {(reward["label"], reward["completed_at"]) for reward in board_rewards}
+    merged = list(board_rewards)
+    for reward in notification_rewards:
+        if reward["id"] in seen_ids or (reward["label"], reward["completed_at"]) in seen_levels:
+            continue
+        seen_ids.add(reward["id"])
+        seen_levels.add((reward["label"], reward["completed_at"]))
+        merged.append(reward)
+    merged.sort(key=lambda reward: reward["completed_at"])
+    return merged
 
 
 def _apply_pro_mode_rewards(reward_entries: list[dict], pro_rewards: list[dict]) -> None:
@@ -1580,7 +1656,25 @@ def collect_movement_history(
         boards = ((boards_data.get("currentUser") or {}).get("boards") or [])
     except Exception:  # El modo Pro es un extra: si falla, no se pierde el resto.
         boards = []
-    pro_rewards = _pro_mode_rewards(boards, cutoff)
+    notifications: list[dict] = []
+    cursor = None
+    try:
+        while True:
+            data = graphql_request(PRO_LEVEL_NOTIFICATIONS_QUERY, {"first": 100, "after": cursor}, headers=headers)
+            connection = ((data.get("currentUser") or {}).get("anyNotifications") or {})
+            nodes = connection.get("nodes") or []
+            notifications.extend(nodes)
+            dates = [node["createdAt"] for node in nodes if node.get("createdAt")]
+            page_info = connection.get("pageInfo") or {}
+            if not page_info.get("hasNextPage") or (dates and _movement_timestamp({"occurred_at": min(dates)}) < cutoff):
+                break
+            cursor = page_info.get("endCursor")
+    except Exception:  # Igual que los tableros: un extra que no debe tumbar el historial.
+        pass
+    pro_rewards = _merge_pro_mode_rewards(
+        _pro_mode_rewards(boards, cutoff),
+        _pro_mode_notification_rewards(notifications, cutoff),
+    )
     _apply_pro_mode_rewards(reward_entries, pro_rewards)
     if progress:
         progress(len(trades), f"{len(pro_rewards)} niveles del modo Pro superados")
