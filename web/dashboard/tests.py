@@ -2188,6 +2188,27 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(all_star.context["total_rows"], 1)
         self.assertEqual(all_star.context["totals"]["essence_rare"], 105)
 
+    def test_pro_mode_and_unmatched_money_rewards_have_their_own_competition(self):
+        MovementSnapshot.objects.create(user=self.user, source_version=18, movements=[
+            {"id": "pro-2", "occurred_at": "2026-10-18T14:00:46Z", "direction": "reward", "category": "reward", "reward_type": "money", "market": "Modo Pro · LALIGA EA SPORTS · Nivel 2", "gross_eur": 7.88, "net_eur": 7.88, "cards": []},
+            {"id": "pro-3", "occurred_at": "2026-10-18T18:32:20Z", "direction": "reward", "category": "reward", "reward_type": "money", "market": "Modo Pro · LALIGA EA SPORTS · Nivel 3", "gross_eur": 17.06, "net_eur": 17.06, "cards": []},
+            {"id": "inferno", "occurred_at": "2026-10-18T18:30:04Z", "direction": "reward", "category": "reward", "reward_type": "essence", "market": "Modo Pro · Inferno Rare · Nivel 1", "essence_quantity": 500, "essence": [{"quantity": 500, "rarity": "rare"}], "cards": []},
+            {"id": "money", "occurred_at": "2026-10-13T18:08:48Z", "direction": "reward", "category": "reward", "reward_type": "money", "market": "Premio monetario", "gross_eur": 93.73, "net_eur": 93.73, "cards": []},
+        ])
+
+        response = self.client.get(reverse("movements"), {"category": "reward"})
+        self.assertEqual(
+            response.context["available_competitions"],
+            ["Modo Pro · Inferno Rare", "Modo Pro · LALIGA EA SPORTS", "Otros premios"],
+        )
+
+        laliga = self.client.get(reverse("movements"), {"category": "reward", "competition": "Modo Pro · LALIGA EA SPORTS"})
+        self.assertEqual(laliga.context["total_rows"], 2)
+        self.assertEqual(laliga.context["totals"]["reward_money"], Decimal("24.94"))
+
+        other = self.client.get(reverse("movements"), {"category": "reward", "competition": "Otros premios"})
+        self.assertEqual(other.context["total_rows"], 1)
+
     def test_default_history_starts_on_current_season_date_but_can_be_cleared(self):
         MovementSnapshot.objects.create(user=self.user, source_version=17, movements=[
             {"id": "before", "occurred_at": "2026-08-11T21:59:00Z", "direction": "purchase", "category": "other", "cards": [{"player": "Antes de temporada"}]},

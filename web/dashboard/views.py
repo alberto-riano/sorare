@@ -628,6 +628,11 @@ _REWARD_MARKET_NOISE = re.compile(
 
 def _reward_competition(row):
     """Competición del premio a partir de «GW22 · All Star – Rare · Puesto 1151»."""
+    market = str(row.get("market") or "").strip()
+    if market.startswith("Modo Pro ·"):
+        return re.sub(r"\s*·\s*Nivel\s+\d+\s*$", "", market)
+    if market == "Premio monetario":
+        return "Otros premios"
     parts = [
         part.strip() for part in str(row.get("market") or "").split("·")
         if part.strip() and not _REWARD_MARKET_NOISE.match(part.strip())
