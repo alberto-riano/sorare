@@ -1805,6 +1805,66 @@ class MovementHistoryTests(TestCase):
 
         self.assertEqual(notification_pages, [None])
 
+    def test_in_game_currency_rewards_are_shown_as_xp_and_clues(self):
+        from web_services.movement_history import _movement_from_group
+
+        movement = _movement_from_group([{
+            "id": "gw19", "date": "2026-10-06T18:00:00Z", "entryType": "REWARD",
+            "tokenOperation": {
+                "__typename": "So5Reward", "id": "So5Reward:1", "amount": None, "rewardCards": [],
+                "rewards": [
+                    {"__typename": "InGameCurrencyReward", "coinAmount": 0, "config": {"amount": 1, "currency": "RARE_COUNTRY_CRAFT_CLUE"}},
+                    {"__typename": "InGameCurrencyReward", "coinAmount": 0, "config": {"amount": 1000, "currency": "RARE_XP"}},
+                ],
+                "rewardConfigs": [],
+            },
+        }], "burguis", {})
+
+        self.assertEqual(movement["reward_type"], "item")
+        self.assertEqual(movement["reward_rarity"], "rare")
+        self.assertEqual(movement["reward_item_label"], "1 pista de crafteo (país) · 1000 XP")
+
+    @patch("web_services.movement_history.fetch_exchange_rates", return_value=(0.9, 1.1, 2000.0))
+    @patch("web_services.movement_history.graphql_request")
+    def test_public_rewards_include_pro_levels_from_public_boards(self, request, _rates):
+        boards = [{
+            "__typename": "CareerBoard", "title": "LALIGA EA SPORTS", "rarities": ["limited", "rare"],
+            "steps": [
+                {"level": 0, "rewardConfigs": [{"__typename": "CardShardRewardConfig", "quantity": 875, "rarity": "limited"}],
+                 "myTask": {"id": "task-0", "aasmState": "CLAIMED", "completedAt": "2026-10-18T21:08:14Z",
+                            "taskLineups": [{"aasmState": "SUCCESSFUL", "rewardMultiplier": 1.75}]}},
+                {"level": 1, "rewardConfigs": [{"__typename": "MonetaryRewardConfig", "amount": {"usdCents": 1000}}],
+                 "myTask": {"id": "task-1", "aasmState": "CLAIMED", "completedAt": "2026-10-19T20:00:00Z",
+                            "taskLineups": [{"aasmState": "SUCCESSFUL", "rewardMultiplier": 1.5}]}},
+                {"level": 2, "rewardConfigs": [{"__typename": "MonetaryRewardConfig", "amount": {"usdCents": 5000}}],
+                 "myTask": {"id": "task-2", "aasmState": "READY", "completedAt": None, "taskLineups": []}},
+            ],
+        }]
+
+        def response(query, variables, headers=None):
+            if "PublicCompletedTrades" in query:
+                return {"user": {"slug": "blasco93", "nickname": "Blasco93", "trades": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "PublicCraftingCards" in query or "cards(" in query:
+                return {"user": {"slug": "blasco93", "cards": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "PublicManagerRewards" in query:
+                return {"user": {"slug": "blasco93", "nickname": "Blasco93"}, "so5": {"allSo5Fixtures": {"nodes": [], "pageInfo": {"hasPreviousPage": False}}}}
+            if "PublicProModeBoards" in query:
+                self.assertEqual(variables, {"managerSlug": "blasco93"})
+                return {"user": {"boards": boards}}
+            raise AssertionError(f"Consulta inesperada: {query[:60]}")
+
+        request.side_effect = response
+        result = collect_public_reward_history("blasco93", start_date=date(2026, 10, 1), headers={"Authorization": "test"})
+        rewards = {movement["market"]: movement for movement in result["movements"] if movement["direction"] == "reward"}
+
+        self.assertEqual(set(rewards), {"Modo Pro · LALIGA EA SPORTS · Nivel 1", "Modo Pro · LALIGA EA SPORTS · Nivel 2"})
+        essence = rewards["Modo Pro · LALIGA EA SPORTS · Nivel 1"]
+        self.assertEqual(essence["essence_quantity"], 875)
+        self.assertEqual(essence["competition_rarities"], ["limited", "rare"])
+        money = rewards["Modo Pro · LALIGA EA SPORTS · Nivel 2"]
+        self.assertEqual(money["reward_type"], "money")
+        self.assertEqual(money["gross_eur"], 9.0)
+
     def test_gameweek_money_paid_as_payment_is_not_counted_twice(self):
         from web_services.movement_history import _apply_pro_mode_rewards
 
@@ -2001,7 +2061,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, PublicRewardSyncJob.Status.SUCCEEDED)
         snapshot = PublicRewardSnapshot.objects.get(manager_slug="blasco93")
         self.assertEqual(snapshot.movements[0]["id"], "reward-1")
-        self.assertEqual(snapshot.source_version, 4)
+        self.assertEqual(snapshot.source_version, 5)
 
     @patch("dashboard.management.commands.process_sales_queue.collect_public_reward_history")
     def test_public_sync_respects_and_persists_requested_history_start(self, collect):
@@ -2022,7 +2082,7 @@ class MovementHistoryTests(TestCase):
 
     def test_public_history_offers_recalculation_when_filter_precedes_coverage(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
             history_start_date=date(2026, 8, 12), movements=[],
         )
 
@@ -2037,7 +2097,7 @@ class MovementHistoryTests(TestCase):
 
     def test_recalculation_job_can_expand_public_history_coverage(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
             history_start_date=date(2026, 8, 12), movements=[],
         )
 
@@ -2052,7 +2112,7 @@ class MovementHistoryTests(TestCase):
 
     def test_public_recalculation_status_tracks_exact_job_and_coverage(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
             history_start_date=date(2026, 8, 12), movements=[],
         )
         old_job = PublicRewardSyncJob.objects.create(
@@ -2091,7 +2151,7 @@ class MovementHistoryTests(TestCase):
 
     def test_reward_manager_selector_uses_cached_public_rewards(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
             movements=[{
                 "id": "blasco-reward", "occurred_at": "2026-08-18T20:00:00Z",
                 "direction": "reward", "cash_direction": "reward", "category": "reward",
@@ -2136,7 +2196,7 @@ class MovementHistoryTests(TestCase):
 
     def test_manager_selector_applies_to_all_movements_and_shows_public_balance(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
             movements=[{
                 "id": "public-purchase", "occurred_at": "2026-08-27T10:30:00Z",
                 "direction": "purchase", "cash_direction": "purchase", "category": "laliga_inseason",
@@ -2159,7 +2219,7 @@ class MovementHistoryTests(TestCase):
 
     def test_trading_excludes_sales_whose_acquisition_is_outside_the_period(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
             movements=[{
                 "id": "public-opening-sale", "occurred_at": "2026-08-28T18:20:00Z",
                 "direction": "sale", "cash_direction": "sale", "category": "other",
@@ -2193,7 +2253,7 @@ class MovementHistoryTests(TestCase):
 
     def test_public_manager_crafting_is_available_and_uses_third_person_copy(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=4,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
             movements=[{
                 "id": "public-craft:one", "occurred_at": "2026-08-25T21:19:10Z",
                 "direction": "craft", "cash_direction": "other", "category": "crafting",

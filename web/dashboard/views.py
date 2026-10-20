@@ -688,7 +688,7 @@ def movements(request):
 
     if public_rewards:
         stored_snapshot = PublicRewardSnapshot.objects.filter(manager_slug=selected_manager).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 4 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 5 else None
         active_sync = PublicRewardSyncJob.objects.filter(
             manager_slug=selected_manager,
             status__in=(PublicRewardSyncJob.Status.QUEUED, PublicRewardSyncJob.Status.RUNNING),
@@ -732,7 +732,7 @@ def movements(request):
         ))
         rarity = ""
     reward_type = request.GET.get("reward_type", "")
-    if category != "reward" or reward_type not in {"money", "essence", "card"}:
+    if category != "reward" or reward_type not in {"money", "essence", "card", "item"}:
         reward_type = ""
     competition = request.GET.get("competition", "").strip() if category == "reward" else ""
     modes = list(dict.fromkeys(

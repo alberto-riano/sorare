@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from sorare_utils import build_headers, graphql_request
+from sorare_utils import build_headers, fetch_exchange_rates, graphql_request
 
 
 CARD_FIELDS = """
@@ -169,6 +169,7 @@ query RewardEntries($first: Int!, $after: String, $startDate: ISO8601DateTime) {
               ... on CardShardsReward {
                 quantity rarity
               }
+              ... on InGameCurrencyReward { coinAmount config { ... on InGameCurrencyRewardConfig { amount currency } } }
             }
             rewardConfigs {
               __typename
@@ -212,6 +213,7 @@ query GameweekRewards($last: Int!, $before: String) {
               ... on CardShardsReward {
                 quantity rarity
               }
+              ... on InGameCurrencyReward { coinAmount config { ... on InGameCurrencyRewardConfig { amount currency } } }
             }
             rewardConfigs {
               __typename
@@ -257,6 +259,10 @@ query ProModeBoards {
   }
 }
 """
+
+PUBLIC_PRO_MODE_BOARDS_QUERY = PRO_MODE_BOARDS_QUERY.replace(
+    "query ProModeBoards {\n  currentUser {", "query PublicProModeBoards($managerSlug: String!) {\n  user(slug: $managerSlug) {",
+)
 
 PRO_REWARD_PAYMENT_WINDOW = timedelta(minutes=15)
 PRO_DUPLICATE_PAYOUT_WINDOW = timedelta(days=2)
@@ -309,6 +315,7 @@ query PublicManagerRewards($managerSlug: String!, $last: Int!, $before: String) 
                 rewards {
                   __typename
                   ... on CardShardsReward { quantity rarity }
+                  ... on InGameCurrencyReward { coinAmount config { ... on InGameCurrencyRewardConfig { amount currency } } }
                 }
                 rewardConfigs {
                   __typename
@@ -430,6 +437,51 @@ def _essence_from_operation(operation: dict) -> list[dict]:
         "quantity": int(config.get("quantity") or 0),
         "rarity": str(config.get("rarity") or "").lower(),
     } for config in operation.get("rewardConfigs") or [] if config.get("__typename") == "CardShardRewardConfig"]
+
+
+_IN_GAME_RARITY_PREFIXES = (
+    ("SUPER_RARE_", "super_rare"), ("LIMITED_", "limited"), ("RARE_", "rare"),
+    ("UNIQUE_", "unique"), ("COMMON_", ""),
+)
+_IN_GAME_CLUE_LABELS = {
+    "BEST_STAR_RANK": "mejor estrella", "COMPETITION": "competición", "COUNTRY": "país",
+    "DIVISION": "división", "FIFTY_FIFTY": "50/50", "POSITION": "posición",
+    "SPECIAL_EVENT": "evento especial",
+}
+
+
+def _in_game_item(currency: str, amount: int) -> dict:
+    """XP, pistas de crafteo, energía o tickets: premios que no son dinero, esencia ni cartas."""
+    currency = str(currency or "").upper()
+    rarity, kind = "", currency
+    for prefix, value in _IN_GAME_RARITY_PREFIXES:
+        if currency.startswith(prefix):
+            rarity, kind = value, currency[len(prefix):]
+            break
+    if kind == "XP":
+        label = f"{amount} XP"
+    elif kind.endswith("_CRAFT_CLUE"):
+        clue = _IN_GAME_CLUE_LABELS.get(kind.removesuffix("_CRAFT_CLUE"), kind.removesuffix("_CRAFT_CLUE").lower())
+        label = f"{amount} pista{'s' if amount != 1 else ''} de crafteo ({clue})"
+    elif kind == "ENERGY":
+        label = f"{amount} de energía"
+    elif kind.endswith("WHEEL_TICKET"):
+        label = f"{amount} ticket{'s' if amount != 1 else ''} de ruleta{' dorada' if 'GOLDEN' in kind else ''}"
+    else:
+        label = f"{amount} {kind.replace('_', ' ').lower()}"
+    return {"currency": currency, "amount": amount, "rarity": rarity, "label": label}
+
+
+def _in_game_items_from_operation(operation: dict) -> list[dict]:
+    items = []
+    for reward in operation.get("rewards") or []:
+        if reward.get("__typename") != "InGameCurrencyReward":
+            continue
+        config = reward.get("config") or {}
+        amount = int(config.get("amount") or reward.get("coinAmount") or 0)
+        if amount:
+            items.append(_in_game_item(str(config.get("currency") or ""), amount))
+    return items
 
 
 def _card(card: dict) -> dict:
@@ -752,6 +804,7 @@ def _movement_from_group(
             gross["currency"] = ""
     else:
         return None
+    reward_items = _in_game_items_from_operation(operation) if direction == "reward" else []
 
     gross_eur = gross["eur"]
     fee_eur = fee["eur"] if cash_direction == "sale" else 0.0
@@ -786,6 +839,9 @@ def _movement_from_group(
         elif cards:
             reward_type = "card"
             reward_rarity = str((cards[0] if cards else {}).get("rarity") or "")
+        elif reward_items:
+            reward_type = "item"
+            reward_rarity = reward_items[0]["rarity"]
     return {
         "id": str(operation_id),
         "auction_id": auction_id,
@@ -808,6 +864,8 @@ def _movement_from_group(
         "essence_description": " / ".join(essence_labels),
         "reward_type": reward_type,
         "reward_rarity": reward_rarity,
+        "reward_items": reward_items,
+        "reward_item_label": " · ".join(item["label"] for item in reward_items),
         "entry_types": sorted({entry.get("entryType") for entry in entries if entry.get("entryType")}),
     }
 
@@ -852,7 +910,9 @@ def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
                 continue
             if _movement_timestamp({"occurred_at": completed_at}) < cutoff:
                 continue
-            multiplier = next((
+            # Sorare devuelve el premio de un nivel ya reclamado con el multiplicador
+            # aplicado; solo se multiplica lo que aún no se ha reclamado.
+            multiplier = 1.0 if task.get("aasmState") == "CLAIMED" else next((
                 float(lineup.get("rewardMultiplier") or 1)
                 for lineup in task.get("taskLineups") or []
                 if lineup.get("aasmState") == "SUCCESSFUL"
@@ -864,6 +924,10 @@ def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
                 "label": f"Modo Pro · {board_label} · Nivel {int(step.get('level') or 0) + 1}",
                 "rarities": board_rarities,
                 "monetary": any(config.get("__typename") == "MonetaryRewardConfig" for config in configs),
+                "usd_cents": int(round(sum(
+                    int(((config.get("amount") or {}).get("usdCents")) or 0)
+                    for config in configs if config.get("__typename") == "MonetaryRewardConfig"
+                ) * multiplier)),
                 "essence": [{
                     "__typename": "CardShardsReward",
                     "quantity": int(round(int(config.get("quantity") or 0) * multiplier)),
@@ -942,6 +1006,45 @@ def _merge_pro_mode_rewards(board_rewards: list[dict], notification_rewards: lis
         by_level[(reward["label"], reward["completed_at"])] = reward
     merged.sort(key=lambda reward: reward["completed_at"])
     return merged
+
+
+def _public_pro_mode_entries(pro_rewards: list[dict]) -> list[dict]:
+    """Premios de niveles Pro de otro mánager a partir de sus tableros públicos.
+
+    De otro usuario no se ven sus abonos ni sus notificaciones: el dinero se pasa
+    de dólares a euros con el cambio actual y solo salen los niveles de la partida
+    en curso de cada tablero.
+    """
+    entries = []
+    usd_to_eur = None
+    for reward in pro_rewards:
+        amount = None
+        if reward.get("usd_cents"):
+            if usd_to_eur is None:
+                usd_to_eur = fetch_exchange_rates()[0]
+            amount = {"eurCents": int(round(reward["usd_cents"] * usd_to_eur)), "referenceCurrency": "EUR"}
+        if not amount and not reward["essence"]:
+            continue
+        entry_id = f"public-pro:{reward['id']}"
+        entries.append({
+            "id": entry_id,
+            "date": reward["completed_at"],
+            "entryType": "REWARD",
+            "provisional": False,
+            "aasmState": "CLAIMED",
+            "amounts": amount or {},
+            "tokenOperation": {
+                "__typename": "So5Reward",
+                "id": entry_id,
+                "amount": amount,
+                "rewardCards": [],
+                "rewards": reward["essence"],
+                "rewardConfigs": [],
+                "_market": reward["label"],
+                "_competition_rarities": list(reward.get("rarities") or []),
+            },
+        })
+    return entries
 
 
 def _apply_pro_mode_rewards(reward_entries: list[dict], pro_rewards: list[dict]) -> None:
@@ -1514,6 +1617,16 @@ def collect_public_reward_history(
         if reached_start or not page_info.get("hasPreviousPage"):
             break
         cursor = page_info.get("startCursor")
+
+    try:
+        boards_data = graphql_request(PUBLIC_PRO_MODE_BOARDS_QUERY, {"managerSlug": manager_slug}, headers=headers)
+        public_boards = ((boards_data.get("user") or {}).get("boards") or [])
+    except Exception:  # El modo Pro es un extra: si falla, no se pierde el resto.
+        public_boards = []
+    public_pro_rewards = _pro_mode_rewards(public_boards, cutoff)
+    reward_entries.extend(_public_pro_mode_entries(public_pro_rewards))
+    if progress:
+        progress(len(reward_entries), f"{len(public_pro_rewards)} niveles públicos del modo Pro")
 
     reward_operations = [entry.get("tokenOperation") or {} for entry in reward_entries]
     asset_ids = sorted({

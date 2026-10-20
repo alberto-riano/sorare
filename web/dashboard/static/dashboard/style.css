@@ -1825,6 +1825,7 @@ body.modal-open { overflow: hidden; }
 .reward-object small { display: block; margin-top: .12rem; color: var(--muted); }
 .reward-money .reward-object-icon, .reward-kind.reward-money { color: #166534; background: #dcfce7; }
 .reward-card .reward-object-icon, .reward-kind.reward-card, .reward-card-value { color: #5b21b6; background: #ede9fe; }
+.reward-item .reward-object-icon, .reward-kind.reward-item, .reward-item-value { color: #0f766e; background: #ccfbf1; }
 .reward-object.rarity-limited .reward-object-icon, .reward-kind.rarity-limited, .reward-value.rarity-limited { color: #854d0e; background: #fef3c7; }
 .reward-object.rarity-rare .reward-object-icon, .reward-kind.rarity-rare, .reward-value.rarity-rare { color: #991b1b; background: #fee2e2; }
 .reward-object.rarity-super_rare .reward-object-icon, .reward-kind.rarity-super_rare, .reward-value.rarity-super_rare { color: #1e40af; background: #dbeafe; }

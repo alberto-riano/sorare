@@ -79,7 +79,7 @@ class IncrementalMovementSyncTests(TestCase):
         PublicRewardSnapshot.objects.create(
             manager_slug="blasco93", manager_nickname="Blasco93",
             movements=[{"id": "public-old", "occurred_at": "2026-08-20T10:00:00Z"}],
-            history_start_date=date(2026, 8, 12), refreshed_at=self.refreshed_at, source_version=4,
+            history_start_date=date(2026, 8, 12), refreshed_at=self.refreshed_at, source_version=5,
         )
         PublicRewardSyncJob.objects.create(
             user=self.user, manager_slug="blasco93", requested_start_date=date(2026, 8, 12),
