@@ -1775,6 +1775,36 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(merged[0]["essence"], [{"__typename": "CardShardsReward", "quantity": 950, "rarity": "limited"}])
         self.assertEqual(merged[0]["rarities"], ["limited", "rare"])
 
+    @patch("web_services.movement_history.graphql_request")
+    def test_pro_level_notifications_stop_paginating_at_the_cutoff(self, request):
+        notification_pages = []
+
+        def response(query, variables, headers=None):
+            if "ProLevelNotifications" in query:
+                notification_pages.append(variables.get("after"))
+                return {"currentUser": {"anyNotifications": {"nodes": [
+                    {"__typename": "OfferNotification", "createdAt": "2026-10-19T10:00:00Z"},
+                    {"__typename": "OfferNotification", "createdAt": "2026-10-16T10:00:00Z"},
+                ], "pageInfo": {"hasNextPage": True, "endCursor": "older"}}}}
+            if "CompletedTrades" in query:
+                return {"currentUser": {"slug": "burguis", "trades": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "MovementConversionCredits" in query:
+                return {"currentUser": {"sportConversionCredits": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "MovementPaymentAccounts" in query or "RewardEntries" in query:
+                return {"currentUser": {"accountEntries": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "GameweekRewards" in query:
+                return {"so5": {"allSo5Fixtures": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "ProModeBoards" in query:
+                return {"currentUser": {"boards": []}}
+            if "CraftedCards" in query:
+                return {"currentUser": {"slug": "burguis", "cardShardsChests": []}}
+            raise AssertionError("Consulta inesperada")
+
+        request.side_effect = response
+        collect_movement_history(start_date=date(2026, 10, 18), headers={"Authorization": "test"})
+
+        self.assertEqual(notification_pages, [None])
+
     def test_gameweek_money_paid_as_payment_is_not_counted_twice(self):
         from web_services.movement_history import _apply_pro_mode_rewards
 

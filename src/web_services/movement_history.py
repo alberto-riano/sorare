@@ -1714,7 +1714,11 @@ def collect_movement_history(
             data = graphql_request(PRO_LEVEL_NOTIFICATIONS_QUERY, {"first": 100, "after": cursor}, headers=headers)
             connection = ((data.get("currentUser") or {}).get("anyNotifications") or {})
             nodes = connection.get("nodes") or []
-            notifications.extend(nodes)
+            # Solo interesan los niveles superados; el resto (ofertas, pujas…) solo marca la fecha.
+            notifications.extend(
+                node for node in nodes
+                if node.get("__typename") == "TaskNotification" and node.get("name") == "task_completed"
+            )
             dates = [node["createdAt"] for node in nodes if node.get("createdAt")]
             page_info = connection.get("pageInfo") or {}
             if not page_info.get("hasNextPage") or (dates and _movement_timestamp({"occurred_at": min(dates)}) < cutoff):
