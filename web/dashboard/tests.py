@@ -1586,7 +1586,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, MovementSyncJob.Status.SUCCEEDED)
         snapshot = MovementSnapshot.objects.get(user=self.user)
         self.assertEqual(snapshot.movements[0]["id"], "movement-1")
-        self.assertEqual(snapshot.source_version, 21)
+        self.assertEqual(snapshot.source_version, 22)
 
     @patch("web_services.movement_history.graphql_request")
     def test_collector_adds_confirmed_gameweek_rewards(self, request):
@@ -1865,6 +1865,81 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(money["reward_type"], "money")
         self.assertEqual(money["gross_eur"], 9.0)
 
+    @patch("web_services.movement_history.graphql_request")
+    def test_collector_adds_hot_streak_steps_and_labels_their_payment(self, request):
+        hot_streak = {
+            "__typename": "CareerBoard", "id": "board-hot", "title": "Hot Streaks",
+            "configSlug": "football-glitch-chapter-1", "rarities": ["common"],
+            "steps": [
+                {"__typename": "CareerStep", "level": 3, "state": "CLAIMED", "title": "Chapter 1 - Step 4",
+                 "rewardConfigs": [{"__typename": "InGameCurrencyRewardConfig", "amount": 30, "currency": "COMMON_GEM"}],
+                 "myTask": {"id": "hot-4", "aasmState": "CLAIMED", "completedAt": "2026-10-21T21:01:57Z", "taskLineups": []}},
+                {"__typename": "CareerStep", "level": 4, "state": "CLAIMED", "title": "Chapter 1 - Step 5",
+                 "rewardConfigs": [
+                     {"__typename": "MonetaryRewardConfig", "amount": {"usdCents": 10000}},
+                     {"__typename": "CardShardRewardConfig", "quantity": 1000, "rarity": "limited"},
+                 ],
+                 "myTask": {"id": "hot-5", "aasmState": "CLAIMED", "completedAt": "2026-10-25T22:07:05Z", "taskLineups": []}},
+            ],
+        }
+        payment = {
+            "id": "hot-payment", "date": "2026-10-25T22:14:48Z", "entryType": "PAYMENT",
+            "provisional": False, "aasmState": "CONFIRMED",
+            "amounts": {"eurCents": 10012, "wei": "48200000000000000", "referenceCurrency": "WEI"},
+            "tokenOperation": {"__typename": "TokenMonetaryReward", "id": "MonetaryReward:hot", "rewardId": "r"},
+        }
+        chapters = []
+
+        def response(query, variables, headers=None):
+            if "HotStreakBoard" in query:
+                chapters.append(variables["configSlug"])
+                if variables["configSlug"] == "football-glitch-chapter-1":
+                    return {"currentUser": {"board": hot_streak}}
+                raise RuntimeError("GraphQL errors: (=) not found")
+            if "CompletedTrades" in query:
+                return {"currentUser": {"slug": "burguis", "trades": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "MovementConversionCredits" in query:
+                return {"currentUser": {"sportConversionCredits": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "MovementPaymentAccounts" in query:
+                return {"currentUser": {"accountEntries": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "RewardEntries" in query:
+                return {"currentUser": {"accountEntries": {"nodes": [payment], "pageInfo": {"hasNextPage": False}}}}
+            if "GameweekRewards" in query:
+                return {"so5": {"allSo5Fixtures": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "ProModeBoards" in query:
+                return {"currentUser": {"boards": []}}
+            if "ProLevelNotifications" in query:
+                return {"currentUser": {"anyNotifications": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+            if "CraftedCards" in query:
+                return {"currentUser": {"slug": "burguis", "cardShardsChests": []}}
+            raise AssertionError("Consulta inesperada")
+
+        request.side_effect = response
+        movements = collect_movement_history(start_date=date(2026, 10, 20), headers={"Authorization": "test"})
+        by_market = {}
+        for movement in movements:
+            by_market.setdefault(movement["market"], []).append(movement)
+
+        self.assertEqual(chapters, ["football-glitch-chapter-1", "football-glitch-chapter-2"])
+        step5 = by_market["Hot Streaks · Paso 5"]
+        self.assertEqual(sorted(movement["reward_type"] for movement in step5), ["essence", "money"])
+        money = next(movement for movement in step5 if movement["reward_type"] == "money")
+        essence = next(movement for movement in step5 if movement["reward_type"] == "essence")
+        self.assertEqual(money["gross_eur"], 100.12)
+        self.assertEqual(essence["essence_quantity"], 1000)
+        self.assertEqual(essence["competition_rarities"], ["common"])
+        gems = by_market["Hot Streaks · Paso 4"][0]
+        self.assertEqual(gems["reward_type"], "item")
+        self.assertEqual(gems["reward_item_label"], "30 gemas")
+
+        MovementSnapshot.objects.create(user=self.user, source_version=21, movements=movements)
+        response = self.client.get(reverse("movements"), {"category": "reward", "mode": "common"})
+        self.assertIn(("common", "Common"), response.context["available_modes"])
+        self.assertEqual(response.context["available_competitions"], ["Hot Streaks"])
+        self.assertEqual(response.context["total_rows"], 3)
+        common = self.client.get(reverse("movements"), {"category": "reward", "rarity": "common"})
+        self.assertEqual(common.context["total_rows"], 3)
+
     def test_gameweek_money_paid_as_payment_is_not_counted_twice(self):
         from web_services.movement_history import _apply_pro_mode_rewards
 
@@ -2061,7 +2136,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(job.status, PublicRewardSyncJob.Status.SUCCEEDED)
         snapshot = PublicRewardSnapshot.objects.get(manager_slug="blasco93")
         self.assertEqual(snapshot.movements[0]["id"], "reward-1")
-        self.assertEqual(snapshot.source_version, 5)
+        self.assertEqual(snapshot.source_version, 6)
 
     @patch("dashboard.management.commands.process_sales_queue.collect_public_reward_history")
     def test_public_sync_respects_and_persists_requested_history_start(self, collect):
@@ -2082,7 +2157,7 @@ class MovementHistoryTests(TestCase):
 
     def test_public_history_offers_recalculation_when_filter_precedes_coverage(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=6,
             history_start_date=date(2026, 8, 12), movements=[],
         )
 
@@ -2097,7 +2172,7 @@ class MovementHistoryTests(TestCase):
 
     def test_recalculation_job_can_expand_public_history_coverage(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=6,
             history_start_date=date(2026, 8, 12), movements=[],
         )
 
@@ -2112,7 +2187,7 @@ class MovementHistoryTests(TestCase):
 
     def test_public_recalculation_status_tracks_exact_job_and_coverage(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=6,
             history_start_date=date(2026, 8, 12), movements=[],
         )
         old_job = PublicRewardSyncJob.objects.create(
@@ -2151,7 +2226,7 @@ class MovementHistoryTests(TestCase):
 
     def test_reward_manager_selector_uses_cached_public_rewards(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=6,
             movements=[{
                 "id": "blasco-reward", "occurred_at": "2026-08-18T20:00:00Z",
                 "direction": "reward", "cash_direction": "reward", "category": "reward",
@@ -2196,7 +2271,7 @@ class MovementHistoryTests(TestCase):
 
     def test_manager_selector_applies_to_all_movements_and_shows_public_balance(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=6,
             movements=[{
                 "id": "public-purchase", "occurred_at": "2026-08-27T10:30:00Z",
                 "direction": "purchase", "cash_direction": "purchase", "category": "laliga_inseason",
@@ -2219,7 +2294,7 @@ class MovementHistoryTests(TestCase):
 
     def test_trading_excludes_sales_whose_acquisition_is_outside_the_period(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=6,
             movements=[{
                 "id": "public-opening-sale", "occurred_at": "2026-08-28T18:20:00Z",
                 "direction": "sale", "cash_direction": "sale", "category": "other",
@@ -2253,7 +2328,7 @@ class MovementHistoryTests(TestCase):
 
     def test_public_manager_crafting_is_available_and_uses_third_person_copy(self):
         PublicRewardSnapshot.objects.create(
-            manager_slug="blasco93", manager_nickname="Blasco93", source_version=5,
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=6,
             movements=[{
                 "id": "public-craft:one", "occurred_at": "2026-08-25T21:19:10Z",
                 "direction": "craft", "cash_direction": "other", "category": "crafting",

@@ -370,7 +370,7 @@ def process_next_movement_sync():
         job.status = MovementSyncJob.Status.RUNNING
         job.started_at = timezone.now()
         stored_snapshot = MovementSnapshot.objects.filter(user=job.user).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 21 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 22 else None
         collection_start, incremental = _movement_incremental_start(snapshot, job.requested_start_date)
         job.progress_label = (
             f"Buscando novedades desde {collection_start:%d/%m/%Y}"
@@ -416,7 +416,7 @@ def process_next_movement_sync():
                 "movements": movements,
                 "history_start_date": snapshot.history_start_date if incremental else job.requested_start_date,
                 "refreshed_at": timezone.now(),
-                "source_version": 21,
+                "source_version": 22,
             },
         )
         job.movement_count = len(movements)
@@ -443,7 +443,7 @@ def process_next_public_reward_sync():
         job.status = PublicRewardSyncJob.Status.RUNNING
         job.started_at = timezone.now()
         stored_snapshot = PublicRewardSnapshot.objects.filter(manager_slug=job.manager_slug).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 5 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 6 else None
         collection_start, incremental = _movement_incremental_start(snapshot, job.requested_start_date)
         job.progress_label = (
             f"Buscando novedades de {job.manager_slug} desde {collection_start:%d/%m/%Y}"
@@ -473,7 +473,7 @@ def process_next_public_reward_sync():
                 "movements": movements,
                 "history_start_date": snapshot.history_start_date if incremental else job.requested_start_date,
                 "refreshed_at": timezone.now(),
-                "source_version": 5,
+                "source_version": 6,
             },
         )
         job.movement_count = len(movements)

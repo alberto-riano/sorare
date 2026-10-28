@@ -233,10 +233,7 @@ query GameweekRewards($last: Int!, $before: String) {
 }
 """
 
-PRO_MODE_BOARDS_QUERY = """
-query ProModeBoards {
-  currentUser {
-    boards(mode: CAREER, sport: FOOTBALL, engaged: true) {
+CAREER_BOARD_FIELDS = """
       __typename id title
       ... on CareerBoard {
         configSlug rarities
@@ -246,6 +243,7 @@ query ProModeBoards {
             __typename
             ... on CardShardRewardConfig { quantity rarity }
             ... on MonetaryRewardConfig { amount { usdCents eurCents wei referenceCurrency } }
+            ... on InGameCurrencyRewardConfig { amount currency }
           }
           ... on CareerProStep {
             myTask {
@@ -253,15 +251,44 @@ query ProModeBoards {
               ... on ThresholdPickerTask { taskLineups { aasmState rewardMultiplier } }
             }
           }
+          ... on CareerStep {
+            title
+            myTask {
+              __typename id aasmState completedAt
+              ... on ThresholdPickerTask { taskLineups { aasmState rewardMultiplier } }
+            }
+          }
         }
       }
-    }
+"""
+
+PRO_MODE_BOARDS_QUERY = """
+query ProModeBoards {
+  currentUser {
+    boards(mode: CAREER, sport: FOOTBALL, engaged: true) {""" + CAREER_BOARD_FIELDS + """    }
+  }
+}
+"""
+
+# Hot Streaks (cartas common) no sale en ``boards``: solo el capítulo en curso por
+# ``setBoard`` y los ya cerrados por su configSlug.
+HOT_STREAK_CONFIG_SLUG = "football-glitch-chapter-{chapter}"
+HOT_STREAK_MAX_CHAPTERS = 12
+
+HOT_STREAK_BOARD_QUERY = """
+query HotStreakBoard($configSlug: String!) {
+  currentUser {
+    board(configSlug: $configSlug) {""" + CAREER_BOARD_FIELDS + """    }
   }
 }
 """
 
 PUBLIC_PRO_MODE_BOARDS_QUERY = PRO_MODE_BOARDS_QUERY.replace(
     "query ProModeBoards {\n  currentUser {", "query PublicProModeBoards($managerSlug: String!) {\n  user(slug: $managerSlug) {",
+)
+PUBLIC_HOT_STREAK_BOARD_QUERY = HOT_STREAK_BOARD_QUERY.replace(
+    "query HotStreakBoard($configSlug: String!) {\n  currentUser {",
+    "query PublicHotStreakBoard($managerSlug: String!, $configSlug: String!) {\n  user(slug: $managerSlug) {",
 )
 
 PRO_REWARD_PAYMENT_WINDOW = timedelta(minutes=15)
@@ -463,6 +490,8 @@ def _in_game_item(currency: str, amount: int) -> dict:
     elif kind.endswith("_CRAFT_CLUE"):
         clue = _IN_GAME_CLUE_LABELS.get(kind.removesuffix("_CRAFT_CLUE"), kind.removesuffix("_CRAFT_CLUE").lower())
         label = f"{amount} pista{'s' if amount != 1 else ''} de crafteo ({clue})"
+    elif kind == "GEM":
+        label = f"{amount} gema{'s' if amount != 1 else ''}"
     elif kind == "ENERGY":
         label = f"{amount} de energía"
     elif kind.endswith("WHEEL_TICKET"):
@@ -889,6 +918,27 @@ def competition_rarities_from_market(market: str) -> list[str]:
     return []
 
 
+def _is_hot_streak_board(board: dict) -> bool:
+    return "glitch" in str(board.get("configSlug") or "") or str(board.get("title") or "").casefold() == "hot streaks"
+
+
+def _hot_streak_boards(query: str, variables: dict, owner: str, headers: dict | None) -> list[dict]:
+    """Capítulos de Hot Streaks del usuario, del 1 en adelante hasta el primero que no exista."""
+    boards = []
+    for chapter in range(1, HOT_STREAK_MAX_CHAPTERS + 1):
+        try:
+            data = graphql_request(query, {
+                **variables, "configSlug": HOT_STREAK_CONFIG_SLUG.format(chapter=chapter),
+            }, headers=headers)
+        except Exception:  # Un capítulo que aún no existe responde «not found».
+            break
+        board = ((data.get(owner) or {}).get("board"))
+        if not board:
+            break
+        boards.append(board)
+    return boards
+
+
 def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
     """Niveles superados en el modo Pro (tableros de carrera) desde ``cutoff``.
 
@@ -918,10 +968,20 @@ def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
                 if lineup.get("aasmState") == "SUCCESSFUL"
             ), 1.0)
             configs = step.get("rewardConfigs") or []
+            level = int(step.get("level") or 0) + 1
+            label = (
+                f"Hot Streaks · Paso {level}" if _is_hot_streak_board(board)
+                else f"Modo Pro · {board_label} · Nivel {level}"
+            )
             rewards.append({
                 "id": str(task.get("id") or step.get("id")),
                 "completed_at": completed_at,
-                "label": f"Modo Pro · {board_label} · Nivel {int(step.get('level') or 0) + 1}",
+                "label": label,
+                "items": [{
+                    "__typename": "InGameCurrencyReward",
+                    "coinAmount": 0,
+                    "config": {"amount": int(config.get("amount") or 0), "currency": str(config.get("currency") or "")},
+                } for config in configs if config.get("__typename") == "InGameCurrencyRewardConfig"],
                 "rarities": board_rarities,
                 "monetary": any(config.get("__typename") == "MonetaryRewardConfig" for config in configs),
                 "usd_cents": int(round(sum(
@@ -1023,7 +1083,7 @@ def _public_pro_mode_entries(pro_rewards: list[dict]) -> list[dict]:
             if usd_to_eur is None:
                 usd_to_eur = fetch_exchange_rates()[0]
             amount = {"eurCents": int(round(reward["usd_cents"] * usd_to_eur)), "referenceCurrency": "EUR"}
-        if not amount and not reward["essence"]:
+        if not amount and not reward["essence"] and not reward.get("items"):
             continue
         entry_id = f"public-pro:{reward['id']}"
         entries.append({
@@ -1038,7 +1098,7 @@ def _public_pro_mode_entries(pro_rewards: list[dict]) -> list[dict]:
                 "id": entry_id,
                 "amount": amount,
                 "rewardCards": [],
-                "rewards": reward["essence"],
+                "rewards": reward["essence"] + list(reward.get("items") or []),
                 "rewardConfigs": [],
                 "_market": reward["label"],
                 "_competition_rarities": list(reward.get("rarities") or []),
@@ -1070,7 +1130,7 @@ def _apply_pro_mode_rewards(reward_entries: list[dict], pro_rewards: list[dict])
                     entry["tokenOperation"]["_market"] = reward["label"]
                     entry["tokenOperation"]["_competition_rarities"] = list(reward.get("rarities") or [])
                 break
-        if reward["essence"]:
+        if reward["essence"] or reward.get("items"):
             reward_entries.append({
                 "id": f"pro:{reward['id']}",
                 "date": reward["completed_at"],
@@ -1083,7 +1143,7 @@ def _apply_pro_mode_rewards(reward_entries: list[dict], pro_rewards: list[dict])
                     "id": f"pro:{reward['id']}",
                     "amount": None,
                     "rewardCards": [],
-                    "rewards": reward["essence"],
+                    "rewards": reward["essence"] + list(reward.get("items") or []),
                     "rewardConfigs": [],
                     "_market": reward["label"],
                     "_competition_rarities": list(reward.get("rarities") or []),
@@ -1623,6 +1683,12 @@ def collect_public_reward_history(
         public_boards = ((boards_data.get("user") or {}).get("boards") or [])
     except Exception:  # El modo Pro es un extra: si falla, no se pierde el resto.
         public_boards = []
+    public_boards = list({
+        str(board.get("id") or index): board
+        for index, board in enumerate(public_boards + _hot_streak_boards(
+            PUBLIC_HOT_STREAK_BOARD_QUERY, {"managerSlug": manager_slug}, "user", headers,
+        ))
+    }.values())
     public_pro_rewards = _pro_mode_rewards(public_boards, cutoff)
     reward_entries.extend(_public_pro_mode_entries(public_pro_rewards))
     if progress:
@@ -1820,6 +1886,10 @@ def collect_movement_history(
         boards = ((boards_data.get("currentUser") or {}).get("boards") or [])
     except Exception:  # El modo Pro es un extra: si falla, no se pierde el resto.
         boards = []
+    boards = list({
+        str(board.get("id") or index): board
+        for index, board in enumerate(boards + _hot_streak_boards(HOT_STREAK_BOARD_QUERY, {}, "currentUser", headers))
+    }.values())
     notifications: list[dict] = []
     cursor = None
     try:

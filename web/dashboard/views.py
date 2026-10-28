@@ -626,7 +626,7 @@ _REWARD_MARKET_NOISE = re.compile(
 )
 
 
-REWARD_MODES = {"pro": "Pro", "arena": "Arena", "other": "Otros"}
+REWARD_MODES = {"pro": "Pro", "arena": "Arena", "common": "Common", "other": "Otros"}
 
 
 def _reward_mode(row):
@@ -634,6 +634,8 @@ def _reward_mode(row):
     market = str(row.get("market") or "").strip()
     if market.startswith("Modo Pro ·"):
         return "pro"
+    if market.startswith("Hot Streaks"):
+        return "common"
     if not market or market == "Premio monetario":
         return "other"
     return "arena"
@@ -646,6 +648,8 @@ def _reward_competition(row):
         return re.sub(r"\s*·\s*Nivel\s+\d+\s*$", "", market.removeprefix("Modo Pro ·")).strip()
     if market == "Premio monetario":
         return ""
+    if market.startswith("Hot Streaks"):
+        return "Hot Streaks"
     parts = [
         part.strip() for part in str(row.get("market") or "").split("·")
         if part.strip() and not _REWARD_MARKET_NOISE.match(part.strip())
@@ -688,7 +692,7 @@ def movements(request):
 
     if public_rewards:
         stored_snapshot = PublicRewardSnapshot.objects.filter(manager_slug=selected_manager).first()
-        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 5 else None
+        snapshot = stored_snapshot if stored_snapshot and stored_snapshot.source_version >= 6 else None
         active_sync = PublicRewardSyncJob.objects.filter(
             manager_slug=selected_manager,
             status__in=(PublicRewardSyncJob.Status.QUEUED, PublicRewardSyncJob.Status.RUNNING),
@@ -728,7 +732,7 @@ def movements(request):
     reward_rarities: list[str] = []
     if category == "reward":
         reward_rarities = list(dict.fromkeys(
-            value for value in request.GET.getlist("rarity") if value in allowed_rarities
+            value for value in request.GET.getlist("rarity") if value in allowed_rarities | {"common"}
         ))
         rarity = ""
     reward_type = request.GET.get("reward_type", "")
@@ -797,7 +801,7 @@ def movements(request):
 
     reward_rows = [row for row in prepared_rows if row.get("direction") == "reward"]
     available_reward_rarities = [
-        value for value in ("limited", "rare", "super_rare", "unique")
+        value for value in ("common", "limited", "rare", "super_rare", "unique")
         if any(value in (row.get("competition_rarities") or []) for row in reward_rows)
     ]
     rarity_rewards = [row for row in reward_rows if matches_reward_rarity(row)]
