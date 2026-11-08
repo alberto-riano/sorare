@@ -1329,53 +1329,63 @@ def movement_analytics(request):
     })
 
 
-@require_POST
-def enqueue_movements_sync(request):
-    selected_manager = request.GET.get("manager", "me")
-    requested_value = request.POST.get("start_date") or request.GET.get("start_date")
-    if selected_manager == PUBLIC_REWARD_MANAGER_SLUG:
-        snapshot = PublicRewardSnapshot.objects.filter(manager_slug=selected_manager).first()
-        fallback = snapshot.history_start_date if snapshot else DEFAULT_MOVEMENT_START_DATE
-        requested_start_date = _requested_history_start(requested_value, fallback=fallback)
-        requested_start_date = min(requested_start_date, fallback)
-        active = PublicRewardSyncJob.objects.filter(
-            manager_slug=selected_manager,
-            status__in=(PublicRewardSyncJob.Status.QUEUED, PublicRewardSyncJob.Status.RUNNING),
-        ).order_by("created_at").first()
-        if active and active.requested_start_date <= requested_start_date:
-            job = active
-        elif active and active.status == PublicRewardSyncJob.Status.QUEUED:
-            active.requested_start_date = requested_start_date
-            active.save(update_fields=("requested_start_date",))
-            job = active
-        else:
-            job = PublicRewardSyncJob.objects.create(
-                user=request.user,
-                manager_slug=selected_manager,
-                requested_start_date=requested_start_date,
-                progress_label="En cola para actualizar movimientos",
-            )
-        return JsonResponse({"job_id": job.id, "status": job.status}, status=202)
-    snapshot = MovementSnapshot.objects.filter(user=request.user).first()
+def _enqueue_public_reward_sync(user, manager_slug, requested_value=None):
+    snapshot = PublicRewardSnapshot.objects.filter(manager_slug=manager_slug).first()
+    fallback = snapshot.history_start_date if snapshot else DEFAULT_MOVEMENT_START_DATE
+    requested_start_date = _requested_history_start(requested_value, fallback=fallback)
+    requested_start_date = min(requested_start_date, fallback)
+    active = PublicRewardSyncJob.objects.filter(
+        manager_slug=manager_slug,
+        status__in=(PublicRewardSyncJob.Status.QUEUED, PublicRewardSyncJob.Status.RUNNING),
+    ).order_by("created_at").first()
+    if active and active.requested_start_date <= requested_start_date:
+        return active
+    if active and active.status == PublicRewardSyncJob.Status.QUEUED:
+        active.requested_start_date = requested_start_date
+        active.save(update_fields=("requested_start_date",))
+        return active
+    return PublicRewardSyncJob.objects.create(
+        user=user,
+        manager_slug=manager_slug,
+        requested_start_date=requested_start_date,
+        progress_label="En cola para actualizar movimientos",
+    )
+
+
+def _enqueue_private_movement_sync(user, requested_value=None):
+    snapshot = MovementSnapshot.objects.filter(user=user).first()
     fallback = snapshot.history_start_date if snapshot else DEFAULT_MOVEMENT_START_DATE
     requested_start_date = _requested_history_start(requested_value, fallback=fallback)
     requested_start_date = min(requested_start_date, fallback)
     active = MovementSyncJob.objects.filter(
-        user=request.user,
+        user=user,
         status__in=(MovementSyncJob.Status.QUEUED, MovementSyncJob.Status.RUNNING),
     ).order_by("created_at").first()
     if active and active.requested_start_date <= requested_start_date:
-        job = active
-    elif active and active.status == MovementSyncJob.Status.QUEUED:
+        return active
+    if active and active.status == MovementSyncJob.Status.QUEUED:
         active.requested_start_date = requested_start_date
         active.save(update_fields=("requested_start_date",))
-        job = active
-    else:
-        job = MovementSyncJob.objects.create(
-            user=request.user,
-            requested_start_date=requested_start_date,
-            progress_label="En cola para actualizar movimientos",
-        )
+        return active
+    return MovementSyncJob.objects.create(
+        user=user,
+        requested_start_date=requested_start_date,
+        progress_label="En cola para actualizar movimientos",
+    )
+
+
+@require_POST
+def enqueue_movements_sync(request):
+    """Actualiza a la vez tus movimientos y los de blasco93; la fecha pedida solo
+    se aplica al historial que se está viendo."""
+    selected_manager = request.GET.get("manager", "me")
+    requested_value = request.POST.get("start_date") or request.GET.get("start_date")
+    viewing_public = selected_manager == PUBLIC_REWARD_MANAGER_SLUG
+    public_job = _enqueue_public_reward_sync(
+        request.user, PUBLIC_REWARD_MANAGER_SLUG, requested_value if viewing_public else None,
+    )
+    private_job = _enqueue_private_movement_sync(request.user, None if viewing_public else requested_value)
+    job = public_job if viewing_public else private_job
     return JsonResponse({"job_id": job.id, "status": job.status}, status=202)
 
 

@@ -1112,11 +1112,11 @@ MANUAL_PUBLIC_REWARDS: dict[str, list[dict]] = {
 }
 
 
-def _manual_public_reward_entries(manager_slug: str, cutoff: datetime) -> list[dict]:
+def _manual_public_reward_entries(manager_slug: str) -> list[dict]:
     entries = []
+    # Sin filtro de fecha: una actualización incremental (últimos días) también debe
+    # traerlos, porque Sorare nunca los devolverá; la vista ya filtra por fechas.
     for reward in MANUAL_PUBLIC_REWARDS.get(str(manager_slug or "").casefold(), []):
-        if _movement_timestamp({"occurred_at": reward["date"]}) < cutoff:
-            continue
         entries.append({
             "id": reward["id"],
             "date": reward["date"],
@@ -1791,7 +1791,7 @@ def collect_public_reward_history(
     }.values())
     public_pro_rewards = _pro_mode_rewards(public_boards, cutoff)
     reward_entries.extend(_public_pro_mode_entries(public_pro_rewards))
-    reward_entries.extend(_manual_public_reward_entries(manager_slug, cutoff))
+    reward_entries.extend(_manual_public_reward_entries(manager_slug))
     if progress:
         progress(len(reward_entries), f"{len(public_pro_rewards)} niveles públicos del modo Pro")
 

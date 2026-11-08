@@ -1882,8 +1882,9 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(manual_money["competition_rarities"], ["common"])
         manual_essence = next(movement for movement in manual if movement["reward_type"] == "essence")
         self.assertEqual((manual_essence["essence_quantity"], manual_essence["reward_rarity"]), (1000, "limited"))
+        # Una actualización incremental (solo los últimos días) también los trae.
         later = collect_public_reward_history("blasco93", start_date=date(2026, 11, 1), headers={"Authorization": "test"})
-        self.assertFalse(any(movement.get("manual") for movement in later["movements"]))
+        self.assertEqual(len([movement for movement in later["movements"] if movement.get("manual")]), 2)
         essence = rewards["Modo Pro · LALIGA EA SPORTS · Nivel 1"]
         self.assertEqual(essence["essence_quantity"], 875)
         self.assertEqual(essence["competition_rarities"], ["limited", "rare"])
@@ -2005,6 +2006,20 @@ class MovementHistoryTests(TestCase):
         }], datetime.fromisoformat("2026-11-01T00:00:00+00:00"))
 
         self.assertEqual(levels[0]["usd_cents"], 1900)
+
+    def test_update_button_refreshes_both_my_history_and_blasco93(self):
+        from dashboard.models import PublicRewardSyncJob
+
+        response = self.client.post(reverse("enqueue_movements_sync") + "?manager=me")
+        self.assertEqual(response.status_code, 202)
+        private_job = MovementSyncJob.objects.get(user=self.user)
+        public_job = PublicRewardSyncJob.objects.get(manager_slug="blasco93")
+        self.assertEqual(response.json()["job_id"], private_job.id)
+
+        again = self.client.post(reverse("enqueue_movements_sync") + "?manager=blasco93")
+        self.assertEqual(again.json()["job_id"], public_job.id)
+        self.assertEqual(MovementSyncJob.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(PublicRewardSyncJob.objects.filter(manager_slug="blasco93").count(), 1)
 
     def test_gameweek_money_paid_as_payment_is_not_counted_twice(self):
         from web_services.movement_history import _apply_pro_mode_rewards
