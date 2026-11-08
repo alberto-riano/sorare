@@ -1777,6 +1777,7 @@ body.modal-open { overflow: hidden; }
 .movement-filters label { min-width: 0; }
 .movement-filters input, .movement-filters select { width: 100%; min-height: 44px; padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); font: inherit; }
 .movement-clear { min-height: 44px; justify-content: center; }
+.manual-mark { display: inline-block; margin-left: .3rem; padding: .05rem .4rem; border: 1px dashed var(--muted); border-radius: 999px; color: var(--muted); font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; vertical-align: middle; }
 .filter-chip-group { grid-column: span 2; min-width: 0; display: grid; gap: .3rem; }
 .filter-chip-title { color: var(--muted); font-size: .86rem; }
 .filter-chip-row { display: flex; flex-wrap: wrap; gap: .45rem; min-height: 44px; align-items: center; }

@@ -1068,6 +1068,57 @@ def _merge_pro_mode_rewards(board_rewards: list[dict], notification_rewards: lis
     return merged
 
 
+# Premios de otros mánagers que Sorare ya no expone (p. ej. un tablero reiniciado antes
+# de capturarlo) y que se apuntan a mano. Se añaden siempre a su historial público.
+MANUAL_PUBLIC_REWARDS: dict[str, list[dict]] = {
+    "blasco93": [
+        {
+            # Mismo día y premio que el paso 5 de Hot Streaks de burguis (25/10/2026).
+            "id": "manual:blasco93:hot-streaks-chapter-1-step-5:money",
+            "date": "2026-10-25T22:07:05Z",
+            "market": "Hot Streaks · Paso 5",
+            "competition_rarities": ["common"],
+            "amount": {"eurCents": 10012, "referenceCurrency": "EUR"},
+            "essence": [],
+        },
+        {
+            "id": "manual:blasco93:hot-streaks-chapter-1-step-5:essence",
+            "date": "2026-10-25T22:07:05Z",
+            "market": "Hot Streaks · Paso 5",
+            "competition_rarities": ["common"],
+            "amount": None,
+            "essence": [{"__typename": "CardShardsReward", "quantity": 1000, "rarity": "limited"}],
+        },
+    ],
+}
+
+
+def _manual_public_reward_entries(manager_slug: str, cutoff: datetime) -> list[dict]:
+    entries = []
+    for reward in MANUAL_PUBLIC_REWARDS.get(str(manager_slug or "").casefold(), []):
+        if _movement_timestamp({"occurred_at": reward["date"]}) < cutoff:
+            continue
+        entries.append({
+            "id": reward["id"],
+            "date": reward["date"],
+            "entryType": "REWARD",
+            "provisional": False,
+            "aasmState": "CLAIMED",
+            "amounts": reward["amount"] or {},
+            "tokenOperation": {
+                "__typename": "So5Reward",
+                "id": reward["id"],
+                "amount": reward["amount"],
+                "rewardCards": [],
+                "rewards": list(reward["essence"]),
+                "rewardConfigs": [],
+                "_market": reward["market"],
+                "_competition_rarities": list(reward["competition_rarities"]),
+            },
+        })
+    return entries
+
+
 def _public_pro_mode_entries(pro_rewards: list[dict]) -> list[dict]:
     """Premios de niveles Pro de otro mánager a partir de sus tableros públicos.
 
@@ -1691,6 +1742,7 @@ def collect_public_reward_history(
     }.values())
     public_pro_rewards = _pro_mode_rewards(public_boards, cutoff)
     reward_entries.extend(_public_pro_mode_entries(public_pro_rewards))
+    reward_entries.extend(_manual_public_reward_entries(manager_slug, cutoff))
     if progress:
         progress(len(reward_entries), f"{len(public_pro_rewards)} niveles públicos del modo Pro")
 
@@ -1730,6 +1782,8 @@ def collect_public_reward_history(
             continue
         reward["market"] = _reward_market(entry.get("tokenOperation") or {})
         reward["competition_rarities"] = _reward_competition_rarities(entry.get("tokenOperation") or {}, reward["market"])
+        if str(reward["id"]).startswith("manual:"):
+            reward["manual"] = True
         movements.append(reward)
         known_ids.add(reward["id"])
     movements.extend(public_crafting_by_asset.values())

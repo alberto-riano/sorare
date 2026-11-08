@@ -912,10 +912,19 @@ class SalesWorkbenchTests(TestCase):
         }
 
 
+from web_services.movement_history import MANUAL_PUBLIC_REWARDS  # noqa: E402
+
+BLASCO93_MANUAL_REWARDS = list(MANUAL_PUBLIC_REWARDS["blasco93"])
+
+
 class MovementHistoryTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(username="burguis", password="test")
         self.client.force_login(self.user)
+        # Los premios apuntados a mano solo entran en el test que los comprueba.
+        manual_rewards = patch.dict("web_services.movement_history.MANUAL_PUBLIC_REWARDS", clear=True)
+        manual_rewards.start()
+        self.addCleanup(manual_rewards.stop)
 
     @staticmethod
     def _api_card(*, player="Carles Aleñá", rarity="rare", in_season=True, league="laliga-ea-sports"):
@@ -1824,6 +1833,7 @@ class MovementHistoryTests(TestCase):
         self.assertEqual(movement["reward_rarity"], "rare")
         self.assertEqual(movement["reward_item_label"], "1 pista de crafteo (país) · 1000 XP")
 
+    @patch.dict("web_services.movement_history.MANUAL_PUBLIC_REWARDS", {"blasco93": BLASCO93_MANUAL_REWARDS})
     @patch("web_services.movement_history.fetch_exchange_rates", return_value=(0.9, 1.1, 2000.0))
     @patch("web_services.movement_history.graphql_request")
     def test_public_rewards_include_pro_levels_from_public_boards(self, request, _rates):
@@ -1857,7 +1867,19 @@ class MovementHistoryTests(TestCase):
         result = collect_public_reward_history("blasco93", start_date=date(2026, 10, 1), headers={"Authorization": "test"})
         rewards = {movement["market"]: movement for movement in result["movements"] if movement["direction"] == "reward"}
 
-        self.assertEqual(set(rewards), {"Modo Pro · LALIGA EA SPORTS · Nivel 1", "Modo Pro · LALIGA EA SPORTS · Nivel 2"})
+        self.assertEqual(set(rewards), {
+            "Modo Pro · LALIGA EA SPORTS · Nivel 1", "Modo Pro · LALIGA EA SPORTS · Nivel 2", "Hot Streaks · Paso 5",
+        })
+        manual = [movement for movement in result["movements"] if movement.get("manual")]
+        self.assertEqual(sorted(movement["reward_type"] for movement in manual), ["essence", "money"])
+        manual_money = next(movement for movement in manual if movement["reward_type"] == "money")
+        self.assertEqual(manual_money["gross_eur"], 100.12)
+        self.assertEqual(manual_money["occurred_at"][:10], "2026-10-25")
+        self.assertEqual(manual_money["competition_rarities"], ["common"])
+        manual_essence = next(movement for movement in manual if movement["reward_type"] == "essence")
+        self.assertEqual((manual_essence["essence_quantity"], manual_essence["reward_rarity"]), (1000, "limited"))
+        later = collect_public_reward_history("blasco93", start_date=date(2026, 11, 1), headers={"Authorization": "test"})
+        self.assertFalse(any(movement.get("manual") for movement in later["movements"]))
         essence = rewards["Modo Pro · LALIGA EA SPORTS · Nivel 1"]
         self.assertEqual(essence["essence_quantity"], 875)
         self.assertEqual(essence["competition_rarities"], ["limited", "rare"])
