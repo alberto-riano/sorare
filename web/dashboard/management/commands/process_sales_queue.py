@@ -42,11 +42,38 @@ def _movement_identity(movement):
     )
 
 
+# Niveles de tableros (Pro y Hot Streaks): Sorare los borra al reiniciarse el tablero,
+# así que lo ya capturado se conserva aunque deje de aparecer en la API.
+CAPTURED_REWARD_MARKETS = ("Modo Pro ·", "Hot Streaks")
+
+
+def _is_captured_level(movement):
+    return movement.get("direction") == "reward" and str(movement.get("market") or "").startswith(CAPTURED_REWARD_MARKETS)
+
+
 def _merge_movement_history(existing, fresh):
     merged = {_movement_identity(movement): movement for movement in existing or []}
     for movement in fresh or []:
-        merged[_movement_identity(movement)] = movement
+        key = _movement_identity(movement)
+        previous = merged.get(key)
+        if previous and _is_captured_level(previous) and not _is_captured_level(movement) and movement.get("direction") == "reward":
+            # Un abono cuyo nivel ya no está en la API conserva la etiqueta que se le puso al capturarlo.
+            movement = {
+                **movement,
+                "market": previous.get("market"),
+                "competition_rarities": previous.get("competition_rarities", movement.get("competition_rarities")),
+            }
+        merged[key] = movement
     return sorted(merged.values(), key=lambda movement: str(movement.get("occurred_at") or ""), reverse=True)
+
+
+def _keep_captured_levels(previous, fresh, start_date):
+    """En una reconstrucción completa conserva los niveles ya capturados que Sorare ya no devuelve."""
+    captured = [
+        movement for movement in previous or []
+        if _is_captured_level(movement) and str(movement.get("occurred_at") or "")[:10] >= start_date.isoformat()
+    ]
+    return _merge_movement_history(captured, fresh) if captured else fresh
 
 
 def process_next_opportunity_refresh():
@@ -391,6 +418,10 @@ def process_next_movement_sync():
         )
         if incremental:
             movements = _merge_movement_history(snapshot.movements, movements)
+        else:
+            movements = _keep_captured_levels(
+                stored_snapshot.movements if stored_snapshot else None, movements, collection_start,
+            )
         auction_ids = {
             str(movement.get("auction_id") or "")
             for movement in movements
@@ -466,6 +497,10 @@ def process_next_public_reward_sync():
         movements = result["movements"]
         if incremental:
             movements = _merge_movement_history(snapshot.movements, movements)
+        else:
+            movements = _keep_captured_levels(
+                stored_snapshot.movements if stored_snapshot else None, movements, collection_start,
+            )
         PublicRewardSnapshot.objects.update_or_create(
             manager_slug=job.manager_slug,
             defaults={

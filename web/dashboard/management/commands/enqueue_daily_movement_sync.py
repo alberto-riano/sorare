@@ -16,7 +16,7 @@ PUBLIC_MANAGER_SLUG = "blasco93"
 
 
 class Command(BaseCommand):
-    help = "Encola la actualización incremental diaria de burguis y blasco93"
+    help = "Encola la actualización incremental (cada 4 horas) de burguis y blasco93"
 
     def handle(self, *args, **options):
         private_snapshot = MovementSnapshot.objects.select_related("user").order_by("pk").first()

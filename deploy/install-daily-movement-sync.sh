@@ -8,7 +8,7 @@ SERVICE_USER="${SERVICE_USER:-$(id -un)}"
 
 sudo tee /etc/systemd/system/sorare-daily-movement-sync.service >/dev/null <<EOF
 [Unit]
-Description=Sorare - encolar actualización incremental diaria de movimientos
+Description=Sorare - encolar actualización incremental de movimientos
 After=network-online.target sorare-sales-worker.service
 Wants=network-online.target
 
@@ -23,10 +23,10 @@ EOF
 
 sudo tee /etc/systemd/system/sorare-daily-movement-sync.timer >/dev/null <<EOF
 [Unit]
-Description=Actualizar movimientos de burguis y blasco93 cada día a las 08:00 de Madrid
+Description=Actualizar movimientos de burguis y blasco93 cada 4 horas (Madrid)
 
 [Timer]
-OnCalendar=*-*-* 08:00:00 Europe/Madrid
+OnCalendar=*-*-* 00/4:00:00 Europe/Madrid
 AccuracySec=1min
 Persistent=true
 Unit=sorare-daily-movement-sync.service

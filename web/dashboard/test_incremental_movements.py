@@ -31,6 +31,52 @@ class IncrementalMovementSyncTests(TestCase):
         self.assertEqual({row["id"] for row in merged}, {"old", "same", "new"})
         self.assertEqual(next(row for row in merged if row["id"] == "same")["value"], 2)
 
+    def test_merge_keeps_captured_board_levels_and_their_payment_label(self):
+        yesterday_level = {
+            "id": "public-pro:task-1", "occurred_at": "2026-11-07T19:00:00Z", "direction": "reward",
+            "market": "Hot Streaks · Paso 5", "competition_rarities": ["common"], "gross_eur": 86.0,
+        }
+        labelled_payment = {
+            "id": "payment-1", "occurred_at": "2026-11-07T19:05:00Z", "direction": "reward",
+            "market": "Modo Pro · LALIGA EA SPORTS · Nivel 2", "competition_rarities": ["limited", "rare"], "gross_eur": 7.3,
+        }
+        # Hoy el tablero se ha reiniciado: el nivel ya no viene y el abono llega sin etiqueta.
+        merged = _merge_movement_history(
+            [yesterday_level, labelled_payment],
+            [{"id": "payment-1", "occurred_at": "2026-11-07T19:05:00Z", "direction": "reward",
+              "market": "Premio monetario", "competition_rarities": [], "gross_eur": 7.31}],
+        )
+        rows = {row["id"]: row for row in merged}
+
+        self.assertEqual(rows["public-pro:task-1"]["market"], "Hot Streaks · Paso 5")
+        self.assertEqual(rows["payment-1"]["market"], "Modo Pro · LALIGA EA SPORTS · Nivel 2")
+        self.assertEqual(rows["payment-1"]["competition_rarities"], ["limited", "rare"])
+        self.assertEqual(rows["payment-1"]["gross_eur"], 7.31)
+
+    @patch("dashboard.management.commands.process_sales_queue.collect_public_reward_history")
+    def test_full_public_rebuild_keeps_levels_that_vanished_from_the_api(self, collect):
+        collect.return_value = {"manager_slug": "blasco93", "manager_nickname": "Blasco93", "movements": [
+            {"id": "gw", "occurred_at": "2026-11-03T18:00:00Z", "direction": "reward", "market": "GW26 · LALIGA – Rare · Puesto 3"},
+        ]}
+        PublicRewardSnapshot.objects.create(
+            manager_slug="blasco93", manager_nickname="Blasco93", source_version=1,
+            history_start_date=date(2026, 8, 12), refreshed_at=self.refreshed_at,
+            movements=[
+                {"id": "public-pro:old", "occurred_at": "2026-10-25T22:07:05Z", "direction": "reward",
+                 "market": "Hot Streaks · Paso 5", "gross_eur": 86.0},
+                {"id": "gw-old", "occurred_at": "2026-10-20T18:00:00Z", "direction": "reward",
+                 "market": "GW23 · LALIGA – Rare · Puesto 9"},
+                {"id": "public-pro:before", "occurred_at": "2026-08-01T10:00:00Z", "direction": "reward",
+                 "market": "Modo Pro · LALIGA EA SPORTS · Nivel 1"},
+            ],
+        )
+        PublicRewardSyncJob.objects.create(user=self.user, manager_slug="blasco93", requested_start_date=date(2026, 8, 12))
+
+        process_next_public_reward_sync()
+
+        ids = {row["id"] for row in PublicRewardSnapshot.objects.get(manager_slug="blasco93").movements}
+        self.assertEqual(ids, {"gw", "public-pro:old"})
+
     @patch("dashboard.management.commands.process_sales_queue.collect_movement_history")
     def test_private_normal_refresh_only_fetches_overlap_and_merges(self, collect):
         collect.return_value = [{"id": "new", "occurred_at": "2026-09-09T10:00:00Z"}]

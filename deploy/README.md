@@ -88,10 +88,12 @@ El detector de nuevas ventas consulta cada 30 minutos únicamente los anuncios
 creados o modificados desde la comprobación anterior. Su estado para evitar
 avisos duplicados se conserva en `output/market_listing_alert_state.json`.
 
-Los movimientos de `burguis` y `blasco93` se actualizan automáticamente todos
-los días a las 08:00 (`Europe/Madrid`). La actualización normal relee solamente
-los dos últimos días y fusiona por id; un barrido completo queda reservado para
-cuando se amplía manualmente la fecha inicial del historial.
+Los movimientos de `burguis` y `blasco93` se actualizan automáticamente cada
+4 horas (00, 04, 08, 12, 16 y 20 h, `Europe/Madrid`). La actualización normal
+relee solamente los dos últimos días y fusiona por id; un barrido completo queda
+reservado para cuando se amplía manualmente la fecha inicial del historial. Los
+niveles del modo Pro y de Hot Streaks ya capturados se conservan siempre, también
+en un barrido completo, porque Sorare los borra de sus tableros al reiniciarse.
 
 El inventario usado por **Vender** y **Retirar ventas** se reconstruye para las
 tres rarezas cada madrugada a las 04:00 (`Europe/Madrid`). La pantalla de
