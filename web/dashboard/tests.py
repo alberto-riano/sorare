@@ -925,6 +925,10 @@ class MovementHistoryTests(TestCase):
         manual_rewards = patch.dict("web_services.movement_history.MANUAL_PUBLIC_REWARDS", clear=True)
         manual_rewards.start()
         self.addCleanup(manual_rewards.stop)
+        # Sin red en los tests: tipos de cambio fijos.
+        rates = patch("web_services.movement_history.fetch_exchange_rates", return_value=(0.87, 1.15, 3000.0))
+        rates.start()
+        self.addCleanup(rates.stop)
 
     @staticmethod
     def _api_card(*, player="Carles Aleñá", rarity="rare", in_season=True, league="laliga-ea-sports"):
@@ -1962,6 +1966,46 @@ class MovementHistoryTests(TestCase):
         common = self.client.get(reverse("movements"), {"category": "reward", "rarity": "common"})
         self.assertEqual(common.context["total_rows"], 3)
 
+    @patch("web_services.movement_history.fetch_exchange_rates", return_value=(0.87, 1.15, 3000.0))
+    def test_pro_level_payment_is_matched_by_amount_when_claimed_hours_later(self, _rates):
+        from web_services.movement_history import _apply_pro_mode_rewards
+
+        def payment(entry_id, date_value, eur_cents, usd_cents=None):
+            amounts = {"eurCents": eur_cents, "wei": "1", "referenceCurrency": "WEI"}
+            if usd_cents:
+                amounts["usdCents"] = usd_cents
+            return {"id": entry_id, "date": date_value, "entryType": "PAYMENT", "amounts": amounts,
+                    "tokenOperation": {"__typename": "TokenMonetaryReward", "id": f"MonetaryReward:{entry_id}", "amounts": amounts}}
+
+        level2_payment = payment("n2", "2026-11-08T17:20:00Z", 779)
+        other_payment = payment("other", "2026-11-08T19:00:00Z", 9386)
+        level3_payment = payment("n3", "2026-11-08T20:25:00Z", 1661)
+        entries = [level2_payment, other_payment, level3_payment]
+        levels = [
+            {"id": "n2", "completed_at": "2026-11-08T17:18:00Z", "label": "Modo Pro · LALIGA EA SPORTS · Nivel 2",
+             "rarities": ["limited", "rare"], "monetary": True, "usd_cents": 875, "essence": [], "items": []},
+            # Superado a las 18:30 y reclamado (cobrado) casi dos horas después.
+            {"id": "n3", "completed_at": "2026-11-08T18:30:00Z", "label": "Modo Pro · LALIGA EA SPORTS · Nivel 3",
+             "rarities": ["limited", "rare"], "monetary": True, "usd_cents": 1900, "essence": [], "items": []},
+        ]
+
+        _apply_pro_mode_rewards(entries, levels)
+
+        self.assertEqual(level2_payment["tokenOperation"]["_market"], "Modo Pro · LALIGA EA SPORTS · Nivel 2")
+        self.assertEqual(level3_payment["tokenOperation"]["_market"], "Modo Pro · LALIGA EA SPORTS · Nivel 3")
+        self.assertNotIn("_market", other_payment["tokenOperation"])
+
+    def test_dollar_prize_is_read_from_the_level_notification(self):
+        from web_services.movement_history import _pro_mode_notification_rewards
+
+        levels = _pro_mode_notification_rewards([{
+            "__typename": "TaskNotification", "createdAt": "2026-11-08T18:30:00Z", "name": "task_completed",
+            "body": "LALIGA EA SPORTS: Te has pasado el nivel 3. ¡Avanza al siguiente desafío!\n🎁 $19.00 desbloqueado",
+            "task": {"id": "n3"},
+        }], datetime.fromisoformat("2026-11-01T00:00:00+00:00"))
+
+        self.assertEqual(levels[0]["usd_cents"], 1900)
+
     def test_gameweek_money_paid_as_payment_is_not_counted_twice(self):
         from web_services.movement_history import _apply_pro_mode_rewards
 
@@ -2556,11 +2600,11 @@ class MovementHistoryTests(TestCase):
         self.assertContains(response, "Moncayola")
         self.assertNotContains(response, "Vítor Carvalho")
         self.assertNotContains(response, "Premio recibido")
-        self.assertNotContains(response, "Premio monetario")
+        self.assertNotContains(response, "Origen sin identificar")
 
         reward_response = self.client.get(reverse("movements"), {"category": "reward"})
         self.assertContains(reward_response, "Premio recibido")
-        self.assertContains(reward_response, "Premio monetario")
+        self.assertContains(reward_response, "Origen sin identificar")
 
     def test_page_filters_category_rarity_and_calculates_totals(self):
         MovementSnapshot.objects.create(user=self.user, refreshed_at=datetime.now(tz=ZoneInfo("Europe/Madrid")), movements=[

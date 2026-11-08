@@ -182,7 +182,7 @@ query RewardEntries($first: Int!, $after: String, $startDate: ISO8601DateTime) {
             so5Ranking { ranking }
           }
           ... on TokenMonetaryReward {
-            id rewardId sport amounts { eurCents wei referenceCurrency }
+            id rewardId sport amounts { eurCents usdCents wei referenceCurrency }
           }
         }
       }
@@ -292,6 +292,10 @@ PUBLIC_HOT_STREAK_BOARD_QUERY = HOT_STREAK_BOARD_QUERY.replace(
 )
 
 PRO_REWARD_PAYMENT_WINDOW = timedelta(minutes=15)
+# El abono llega al reclamar el premio, que puede ser horas o días después de superar
+# el nivel: si se conoce el importe, se busca por importe en este margen.
+PRO_REWARD_CLAIM_WINDOW = timedelta(days=14)
+PRO_REWARD_AMOUNT_TOLERANCE = 0.12
 PRO_DUPLICATE_PAYOUT_WINDOW = timedelta(days=2)
 
 PRO_LEVEL_NOTIFICATIONS_QUERY = """
@@ -988,6 +992,10 @@ def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
                     int(((config.get("amount") or {}).get("usdCents")) or 0)
                     for config in configs if config.get("__typename") == "MonetaryRewardConfig"
                 ) * multiplier)),
+                "eur_cents": int(round(sum(
+                    int(((config.get("amount") or {}).get("eurCents")) or 0)
+                    for config in configs if config.get("__typename") == "MonetaryRewardConfig"
+                ) * multiplier)),
                 "essence": [{
                     "__typename": "CardShardsReward",
                     "quantity": int(round(int(config.get("quantity") or 0) * multiplier)),
@@ -996,6 +1004,16 @@ def _pro_mode_rewards(boards: list[dict], cutoff: datetime) -> list[dict]:
             })
     rewards.sort(key=lambda reward: reward["completed_at"])
     return rewards
+
+
+def _usd_cents_from_prize(prize: str) -> int:
+    match = re.search(r"\$\s*([\d.,]+)", str(prize or ""))
+    if not match:
+        return 0
+    try:
+        return int(round(float(match.group(1).replace(",", "")) * 100))
+    except ValueError:
+        return 0
 
 
 def _pro_mode_notification_rewards(
@@ -1040,6 +1058,7 @@ def _pro_mode_notification_rewards(
             "label": f"Modo Pro · {board} · Nivel {int(match.group('level'))}",
             "rarities": rarities,
             "monetary": "$" in prize or "€" in prize,
+            "usd_cents": _usd_cents_from_prize(prize),
             "essence": essence,
         })
     return rewards
@@ -1130,7 +1149,9 @@ def _public_pro_mode_entries(pro_rewards: list[dict]) -> list[dict]:
     usd_to_eur = None
     for reward in pro_rewards:
         amount = None
-        if reward.get("usd_cents"):
+        if reward.get("eur_cents"):
+            amount = {"eurCents": int(reward["eur_cents"]), "referenceCurrency": "EUR"}
+        elif reward.get("usd_cents"):
             if usd_to_eur is None:
                 usd_to_eur = fetch_exchange_rates()[0]
             amount = {"eurCents": int(round(reward["usd_cents"] * usd_to_eur)), "referenceCurrency": "EUR"}
@@ -1169,18 +1190,46 @@ def _apply_pro_mode_rewards(reward_entries: list[dict], pro_rewards: list[dict])
         key=lambda entry: entry["date"],
     )
     matched: set[int] = set()
-    for reward in pro_rewards:
+    usd_to_eur = None
+    for reward in sorted(pro_rewards, key=lambda item: item["completed_at"]):
         if reward["monetary"]:
             completed = _movement_timestamp({"occurred_at": reward["completed_at"]})
-            for entry in monetary_entries:
-                paid = _movement_timestamp({"occurred_at": entry["date"]})
-                if id(entry) in matched or paid < completed:
-                    continue
-                if paid - completed <= PRO_REWARD_PAYMENT_WINDOW:
-                    matched.add(id(entry))
-                    entry["tokenOperation"]["_market"] = reward["label"]
-                    entry["tokenOperation"]["_competition_rarities"] = list(reward.get("rarities") or [])
-                break
+            candidates = [
+                entry for entry in monetary_entries
+                if id(entry) not in matched
+                and completed <= _movement_timestamp({"occurred_at": entry["date"]}) <= completed + PRO_REWARD_CLAIM_WINDOW
+            ]
+            expected_usd = int(reward.get("usd_cents") or 0)
+            best = None
+            if expected_usd:
+                scored = []
+                for entry in candidates:
+                    amounts = entry.get("amounts") or {}
+                    operation_amounts = (entry.get("tokenOperation") or {}).get("amounts") or {}
+                    usd = operation_amounts.get("usdCents") or amounts.get("usdCents")
+                    if usd:
+                        difference = abs(int(usd) - expected_usd) / expected_usd
+                    else:
+                        eur = operation_amounts.get("eurCents") or amounts.get("eurCents")
+                        if not eur:
+                            continue
+                        if usd_to_eur is None:
+                            usd_to_eur = fetch_exchange_rates()[0]
+                        difference = abs(abs(int(eur)) - expected_usd * usd_to_eur) / (expected_usd * usd_to_eur)
+                    if difference <= PRO_REWARD_AMOUNT_TOLERANCE:
+                        scored.append((difference, entry["date"], entry))
+                if scored:
+                    best = min(scored, key=lambda item: (item[0], item[1]))[2]
+            if best is None:
+                # Sin importe compatible (o sin importe conocido): el abono inmediato de siempre.
+                best = next((
+                    entry for entry in candidates
+                    if _movement_timestamp({"occurred_at": entry["date"]}) - completed <= PRO_REWARD_PAYMENT_WINDOW
+                ), None)
+            if best is not None:
+                matched.add(id(best))
+                best["tokenOperation"]["_market"] = reward["label"]
+                best["tokenOperation"]["_competition_rarities"] = list(reward.get("rarities") or [])
         if reward["essence"] or reward.get("items"):
             reward_entries.append({
                 "id": f"pro:{reward['id']}",
